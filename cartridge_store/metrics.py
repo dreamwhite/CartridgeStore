@@ -83,6 +83,24 @@ def _row_dict(row: Any | None) -> dict[str, Any] | None:
     return dict(row) if row else None
 
 
+def _json_payload() -> dict[str, Any] | None:
+    try:
+        payload = request.get_json(silent=True)
+    except (RecursionError, ValueError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def _sample_has_nested_value(sample: Any) -> bool:
+    return not isinstance(sample, dict) or any(
+        isinstance(value, (dict, list)) for value in sample.values()
+    )
+
+
+def _metrics_error(message: str, code: str, status: int):
+    return jsonify({"ok": False, "error": message, "code": code}), status
+
+
 def _samples_for_run(run_id: str) -> list[dict[str, Any]]:
     rows = get_db().execute(
         """
@@ -123,7 +141,7 @@ def register_metrics_routes(app: Flask) -> None:
 
     @app.post("/api/runs")
     def create_run():
-        data = request.get_json(silent=True) or {}
+        data = _json_payload() or {}
         run_id = _clean_text(data, "run_id", 96)
         board_id = _clean_text(data, "board_id", 40)
         target = _clean_text(data, "target", 24)
@@ -165,8 +183,7 @@ def register_metrics_routes(app: Flask) -> None:
                 game_name = excluded.game_name,
                 sample_period_frames = excluded.sample_period_frames,
                 started_at = excluded.started_at,
-                submitted_by = excluded.submitted_by,
-                user_id = excluded.user_id
+                submitted_by = excluded.submitted_by
             """,
             record,
         )
@@ -175,16 +192,36 @@ def register_metrics_routes(app: Flask) -> None:
 
     @app.post("/api/metrics/batch")
     def create_batch():
-        data = request.get_json(silent=True) or {}
+        data = _json_payload()
+        if data is None:
+            return _metrics_error("invalid metrics JSON", "invalid_metrics_json", 400)
         run_id = _clean_text(data, "run_id", 96)
         samples = data.get("samples")
         if not run_id or not isinstance(samples, list):
-            return jsonify({"ok": False, "error": "expected run_id and samples"}), 400
+            return _metrics_error("expected run_id and samples", "invalid_metrics_payload", 400)
+
+        max_samples = int(current_app.config["METRICS_MAX_SAMPLES_PER_REQUEST"])
+        if len(samples) > max_samples:
+            return _metrics_error(
+                "too many samples in one request", "metrics_sample_limit", 413
+            )
+        dropped = _int_value(data, "dropped_samples", 0, 0)
+        max_work = int(current_app.config["METRICS_MAX_DB_WORK"])
+        if len(samples) + (1 if dropped else 0) > max_work:
+            return _metrics_error(
+                "metrics request requires too much database work",
+                "metrics_work_limit",
+                413,
+            )
+        if any(_sample_has_nested_value(sample) for sample in samples):
+            return _metrics_error(
+                "samples must be objects with scalar values", "invalid_sample_structure", 400
+            )
 
         db = get_db()
         run = db.execute("SELECT run_id FROM runs WHERE run_id = ?", (run_id,)).fetchone()
         if not run:
-            return jsonify({"ok": False, "error": "run_id not found"}), 404
+            return _metrics_error("run_id not found", "run_not_found", 404)
 
         inserted = 0
         for raw_sample in samples:
@@ -223,7 +260,6 @@ def register_metrics_routes(app: Flask) -> None:
             if cursor.rowcount > 0:
                 inserted += 1
 
-        dropped = _int_value(data, "dropped_samples", 0, 0)
         if dropped:
             db.execute(
                 "UPDATE runs SET dropped_samples = dropped_samples + ? WHERE run_id = ?",
@@ -234,7 +270,7 @@ def register_metrics_routes(app: Flask) -> None:
 
     @app.post("/api/runs/<run_id>/finish")
     def finish_run(run_id: str):
-        data = request.get_json(silent=True) or {}
+        data = _json_payload() or {}
         finished_at = _int_value(data, "finished_ms", int(time.time() * 1000), 0)
         dropped = _int_value(data, "dropped_samples", 0, 0)
         db = get_db()
@@ -248,12 +284,19 @@ def register_metrics_routes(app: Flask) -> None:
         )
         db.commit()
         if cursor.rowcount == 0:
-            return jsonify({"ok": False, "error": "run_id not found"}), 404
+            return _metrics_error("run_id not found", "run_not_found", 404)
         return jsonify({"ok": True, "run_id": run_id})
 
     @app.get("/api/runs")
     def runs():
-        return jsonify(list_runs(current_app.config["DATABASE"]))
+        principal = current_principal()
+        if not principal.authenticated:
+            return jsonify([])
+        if principal.role == "admin":
+            return jsonify(list_runs(current_app.config["DATABASE"]))
+        return jsonify(
+            list_runs(current_app.config["DATABASE"], user_id=principal.id)
+        )
 
     @app.get("/api/runs/<run_id>")
     def run_detail(run_id: str):
@@ -263,7 +306,7 @@ def register_metrics_routes(app: Flask) -> None:
             get_db().execute("SELECT * FROM runs WHERE run_id = ?", (run_id,)).fetchone()
         )
         if not run:
-            return jsonify({"ok": False, "error": "run_id not found"}), 404
+            return _metrics_error("run_id not found", "run_not_found", 404)
         if not can_view_run(run):
             return jsonify({"ok": False, "error": "forbidden"}), 403
         samples = _samples_for_run(run_id)
@@ -271,8 +314,13 @@ def register_metrics_routes(app: Flask) -> None:
 
     @app.get("/api/runs/<run_id>/samples.csv")
     def samples_csv(run_id: str):
-        if not get_db().execute("SELECT 1 FROM runs WHERE run_id = ?", (run_id,)).fetchone():
-            return jsonify({"ok": False, "error": "run_id not found"}), 404
+        run = _row_dict(
+            get_db().execute("SELECT * FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+        )
+        if not run:
+            return _metrics_error("run_id not found", "run_not_found", 404)
+        if not can_view_run(run):
+            return jsonify({"ok": False, "error": "forbidden"}), 403
         samples = _samples_for_run(run_id)
         output = io.StringIO()
         fields = [
@@ -296,6 +344,12 @@ def register_metrics_routes(app: Flask) -> None:
 
     @app.get("/api/runs/<run_id>/report.md")
     def report_md(run_id: str):
+        run = _row_dict(
+            get_db().execute("SELECT * FROM runs WHERE run_id = ?", (run_id,)).fetchone()
+        )
+        if not run:
+            return jsonify({"ok": False, "error": "run_id not found"}), 404
+        if not can_view_run(run):
+            return jsonify({"ok": False, "error": "forbidden"}), 403
         text = generate_markdown_report(current_app.config["DATABASE"], run_id)
-        status = 200 if "was not found" not in text else 404
-        return Response(text, status=status, mimetype="text/markdown")
+        return Response(text, mimetype="text/markdown")

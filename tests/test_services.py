@@ -11,7 +11,7 @@ from unittest.mock import patch
 from cartridge_store import create_app
 from cartridge_store.export_run import export_run
 from cartridge_store.multiplayer import MultiplayerHub
-from tests.test_api import bundle_bytes, login_default_admin, upload_bundle, verify_submission
+from tests.test_api import csrf_token, bundle_bytes, login_default_admin, upload_bundle, verify_submission
 from tests.test_prg32_format import PNG_1X1, colophon, fake_cart, metadata
 
 
@@ -23,15 +23,21 @@ def make_client(tmp_path):
 
 
 def register(client, email: str, password: str = "longpassword") -> None:
+    csrf = csrf_token(client)
     response = client.post(
         "/auth/register",
-        data={"email": email},
+        data={"email": email, "csrf_token": csrf},
     )
     assert response.status_code == 200
     token = client.application.extensions["prg32_last_registration"]["token"]
     complete = client.post(
         "/auth/register/complete",
-        data={"token": token, "password": password, "password_confirm": password},
+        data={
+            "token": token,
+            "password": password,
+            "password_confirm": password,
+            "csrf_token": csrf,
+        },
     )
     assert complete.status_code in (200, 302)
 
@@ -102,6 +108,7 @@ def publish_payload(architecture: str = "esp32c6") -> dict:
 def post_metrics_run(client, run_id: str = "test-run"):
     return client.post(
         "/api/runs",
+        headers={"X-CSRFToken": csrf_token(client)},
         json={
             "run_id": run_id,
             "board_id": "board-1",
@@ -138,6 +145,7 @@ def test_score_api_round_trip(tmp_path) -> None:
 
     posted = client.post(
         "/api/scores",
+        headers={"X-CSRFToken": csrf_token(client)},
         json={"game": "pong", "player": "Ada", "score": 42},
     )
     assert posted.status_code == 200
@@ -166,6 +174,7 @@ def test_metrics_api_round_trip_and_export(tmp_path) -> None:
 
     batch = client.post(
         "/api/metrics/batch",
+        headers={"X-CSRFToken": csrf_token(client)},
         json={"run_id": "test-run", "dropped_samples": 1, "samples": [sample_payload()]},
     )
     assert batch.status_code == 200, batch.get_json()
@@ -173,6 +182,7 @@ def test_metrics_api_round_trip_and_export(tmp_path) -> None:
 
     duplicate = client.post(
         "/api/metrics/batch",
+        headers={"X-CSRFToken": csrf_token(client)},
         json={"run_id": "test-run", "samples": [{"frame": 1}]},
     )
     assert duplicate.status_code == 200, duplicate.get_json()
@@ -189,6 +199,7 @@ def test_metrics_api_round_trip_and_export(tmp_path) -> None:
 
     finish = client.post(
         "/api/runs/test-run/finish",
+        headers={"X-CSRFToken": csrf_token(client)},
         json={"finished_ms": 2000, "dropped_samples": 2},
     )
     assert finish.status_code == 200, finish.get_json()
@@ -214,6 +225,7 @@ def test_metrics_missing_run_is_rejected(tmp_path) -> None:
 
     response = client.post(
         "/api/metrics/batch",
+        headers={"X-CSRFToken": csrf_token(client)},
         json={"run_id": "missing", "samples": []},
     )
     assert response.status_code == 404
@@ -365,6 +377,7 @@ def test_local_auth_roles_and_admin_gate(tmp_path) -> None:
     app = create_app({"TESTING": True, "DATA_DIR": str(tmp_path / "data")})
     client = app.test_client()
 
+    login_default_admin(client)
     register(client, "student@example.com")
 
     with sqlite3.connect(app.config["DATABASE"]) as db:
@@ -393,7 +406,11 @@ def test_local_auth_roles_and_admin_gate(tmp_path) -> None:
 
     wrong = client.post(
         "/auth/login",
-        data={"username": "admin", "password": "wrongpassword"},
+        data={
+            "username": "admin",
+            "password": "wrongpassword",
+            "csrf_token": client.get("/auth/csrf").get_json()["csrf_token"],
+        },
     )
     assert wrong.status_code == 401
 
@@ -402,7 +419,11 @@ def test_local_auth_roles_and_admin_gate(tmp_path) -> None:
 
     logged_in = client.post(
         "/auth/login",
-        data={"username": "admin", "password": "password"},
+        data={
+            "username": "admin",
+            "password": "longpassword",
+            "csrf_token": client.get("/auth/csrf").get_json()["csrf_token"],
+        },
     )
     assert logged_in.status_code in (200, 302)
     assert client.get("/admin/users").status_code == 200
@@ -413,7 +434,11 @@ def test_api_token_can_publish(tmp_path) -> None:
     owner = app.test_client()
     login_default_admin(owner)
 
-    token = owner.post("/auth/tokens", json={"label": "publisher"}).get_json()["token"]
+    token = owner.post(
+        "/auth/tokens",
+        json={"label": "publisher"},
+        headers={"X-CSRFToken": csrf_token(owner)},
+    ).get_json()["token"]
     api_client = app.test_client()
     response = api_client.post(
         "/api/publish",
@@ -439,7 +464,11 @@ def test_logged_in_developer_can_manage_publication_tokens(tmp_path) -> None:
     assert page.status_code == 200
     assert b"Publication tokens" in page.data
 
-    created = developer.post("/auth/tokens", json={"label": "Build machine"})
+    created = developer.post(
+        "/auth/tokens",
+        json={"label": "Build machine"},
+        headers={"X-CSRFToken": csrf_token(developer)},
+    )
     assert created.status_code == 200
     token_id = created.get_json()["id"]
     token_value = created.get_json()["token"]
@@ -459,11 +488,15 @@ def test_logged_in_developer_can_manage_publication_tokens(tmp_path) -> None:
     renamed = developer.patch(
         f"/auth/tokens/{token_id}",
         json={"label": "Release laptop"},
+        headers={"X-CSRFToken": csrf_token(developer)},
     )
     assert renamed.status_code == 200
     assert renamed.get_json()["label"] == "Release laptop"
 
-    revoked = developer.delete(f"/auth/tokens/{token_id}")
+    revoked = developer.delete(
+        f"/auth/tokens/{token_id}",
+        headers={"X-CSRFToken": csrf_token(developer)},
+    )
     assert revoked.status_code == 200
     assert revoked.get_json() == {"ok": True}
     assert developer.get(
@@ -475,12 +508,23 @@ def test_developer_cannot_manage_another_users_token(tmp_path) -> None:
     app = create_app({"TESTING": True, "DATA_DIR": str(tmp_path / "data")})
     owner = app.test_client()
     login_default_admin(owner)
-    token_id = owner.post("/auth/tokens", json={"label": "Owner"}).get_json()["id"]
+    token_id = owner.post(
+        "/auth/tokens",
+        json={"label": "Owner"},
+        headers={"X-CSRFToken": csrf_token(owner)},
+    ).get_json()["id"]
 
     other = app.test_client()
     register(other, "developer@example.test")
-    renamed = other.patch(f"/auth/tokens/{token_id}", json={"label": "Stolen"})
-    revoked = other.delete(f"/auth/tokens/{token_id}")
+    renamed = other.patch(
+        f"/auth/tokens/{token_id}",
+        json={"label": "Stolen"},
+        headers={"X-CSRFToken": csrf_token(other)},
+    )
+    revoked = other.delete(
+        f"/auth/tokens/{token_id}",
+        headers={"X-CSRFToken": csrf_token(other)},
+    )
 
     assert renamed.status_code == 404
     assert revoked.get_json() == {"ok": False}
@@ -496,6 +540,7 @@ def test_setup_theme_and_logo(tmp_path) -> None:
     saved = client.post(
         "/setup",
         data={
+            "csrf_token": csrf_token(client),
             "store_name": "Class Store",
             "store_tagline": "Spring lab",
             "theme_primary_color": "#123456",
@@ -518,7 +563,7 @@ def test_setup_theme_and_logo(tmp_path) -> None:
 
     logo = client.post(
         "/setup/logo",
-        data={"logo": (io.BytesIO(PNG_1X1), "logo.png")},
+        data={"logo": (io.BytesIO(PNG_1X1), "logo.png"), "csrf_token": csrf_token(client)},
         content_type="multipart/form-data",
     )
     assert logo.status_code == 302
@@ -530,7 +575,10 @@ def test_setup_theme_and_logo(tmp_path) -> None:
 
     oversized = client.post(
         "/setup/logo",
-        data={"logo": (io.BytesIO(b"x" * (2 * 1024 * 1024 + 1)), "logo.png")},
+        data={
+            "logo": (io.BytesIO(b"x" * (2 * 1024 * 1024 + 1)), "logo.png"),
+            "csrf_token": csrf_token(client),
+        },
         content_type="multipart/form-data",
     )
     assert oversized.status_code == 413
@@ -542,6 +590,7 @@ def test_setup_mdns_smtp_and_federated_auth_options(tmp_path) -> None:
     saved = client.post(
         "/setup",
         data={
+            "csrf_token": csrf_token(client),
             "store_name": "Class Store",
             "theme_primary_color": "#123456",
             "theme_secondary_color": "#654321",
@@ -601,7 +650,10 @@ def test_setup_mdns_smtp_and_federated_auth_options(tmp_path) -> None:
 def test_admin_user_group_and_role_pages(tmp_path) -> None:
     client = make_client(tmp_path)
 
-    assert client.post("/admin/groups", data={"name": "testers"}).status_code == 302
+    assert client.post(
+        "/admin/groups",
+        data={"name": "testers", "csrf_token": client.get("/auth/csrf").get_json()["csrf_token"]},
+    ).status_code == 302
     created = client.post(
         "/admin/users",
         data={
@@ -610,6 +662,7 @@ def test_admin_user_group_and_role_pages(tmp_path) -> None:
             "password": "longpassword",
             "role": "publisher",
             "groups": ["editors", "testers"],
+            "csrf_token": client.get("/auth/csrf").get_json()["csrf_token"],
         },
     )
     assert created.status_code == 302
@@ -644,7 +697,12 @@ def test_admin_cartridge_crud_and_backup_restore(tmp_path) -> None:
 
     updated = client.post(
         "/admin/cartridges/org.example.test/1.0.0",
-        data={"title": "Edited Game", "summary": "Changed", "tags": "lab, edit"},
+        data={
+            "title": "Edited Game",
+            "summary": "Changed",
+            "tags": "lab, edit",
+            "csrf_token": client.get("/auth/csrf").get_json()["csrf_token"],
+        },
     )
     assert updated.status_code == 302
     assert client.get("/api/games/org.example.test").get_json()["game"]["title"] == "Edited Game"
@@ -652,13 +710,19 @@ def test_admin_cartridge_crud_and_backup_restore(tmp_path) -> None:
     backup = client.get("/admin/backup/download")
     assert backup.status_code == 200
 
-    deleted = client.post("/admin/cartridges/org.example.test/1.0.0/delete")
+    deleted = client.post(
+        "/admin/cartridges/org.example.test/1.0.0/delete",
+        data={"csrf_token": client.get("/auth/csrf").get_json()["csrf_token"]},
+    )
     assert deleted.status_code == 302
     assert client.get("/api/games/org.example.test").status_code == 400
 
     restored = client.post(
         "/admin/backup/restore",
-        data={"backup": (io.BytesIO(backup.data), "backup.zip")},
+        data={
+            "backup": (io.BytesIO(backup.data), "backup.zip"),
+            "csrf_token": client.get("/auth/csrf").get_json()["csrf_token"],
+        },
         content_type="multipart/form-data",
     )
     assert restored.status_code == 302
@@ -700,6 +764,7 @@ def test_user_runs_access_and_json_download(tmp_path) -> None:
     assert run.status_code == 200
     batch = owner.post(
         "/api/metrics/batch",
+        headers={"X-CSRFToken": csrf_token(owner)},
         json={"run_id": "alice-run", "samples": [sample_payload()]},
     )
     assert batch.status_code == 200
@@ -720,7 +785,11 @@ def test_cartridge_page_score_chart_and_download_count(tmp_path) -> None:
     client = make_client(tmp_path)
     submission = upload_bundle(client)
     verify_submission(client, submission.get_json()["submission_id"])
-    client.post("/api/scores", json={"game": "org.example.test", "player": "Ada", "score": 42})
+    client.post(
+        "/api/scores",
+        json={"game": "org.example.test", "player": "Ada", "score": 42},
+        headers={"X-CSRFToken": csrf_token(client)},
+    )
     client.get("/api/games/org.example.test/download?architecture=esp32c6")
 
     page = client.get("/games/org.example.test")

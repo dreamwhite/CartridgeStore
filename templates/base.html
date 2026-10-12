@@ -4,6 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="{{ theme_primary_color }}">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
   <link rel="manifest" href="/manifest.webmanifest">
   {% if theme_favicon_url %}<link rel="icon" href="{{ theme_favicon_url }}">{% endif %}
   <link rel="stylesheet" href="/static/style.css">
@@ -51,7 +52,10 @@
       {% if current_user.authenticated %}
       <a href="/auth/tokens">Tokens</a>
       <span class="nav-user">{{ current_user.username }}</span>
-      <form method="post" action="/auth/logout" class="nav-form"><button type="submit">Logout</button></form>
+      <form method="post" action="/auth/logout" class="nav-form">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit">Logout</button>
+      </form>
       {% else %}
       <a href="/auth/login">Login</a>
       {% endif %}

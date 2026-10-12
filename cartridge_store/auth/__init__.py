@@ -12,6 +12,7 @@ import json
 import os
 import secrets
 import smtplib
+import sqlite3
 from typing import Any, Callable, Iterable
 
 from flask import (
@@ -246,20 +247,56 @@ def init_auth_db() -> None:
 
 
 def ensure_default_admin() -> None:
-    db = get_db()
-    row = db.execute("SELECT id FROM users WHERE username = 'admin'").fetchone()
-    if row is None:
-        cursor = db.execute(
-            """
-            INSERT INTO users(username, email, password_hash, role)
-            VALUES (?, ?, ?, 'admin')
-            """,
-            ("admin", "admin@localhost", generate_password_hash("password")),
-        )
-        db.commit()
-        add_user_to_group(int(cursor.lastrowid), "editors")
-        return
-    add_user_to_group(int(row["id"]), "editors")
+    # Fresh installations must be bootstrapped explicitly. In particular,
+    # never create an administrator with a documented or deterministic
+    # password. Existing installations keep their account, role, and group
+    # memberships intact; the one-time bootstrap assigns the editors group
+    # only to the new administrator it creates.
+    return
+
+
+def csrf_token() -> str:
+    """Return the request's session-bound CSRF token, creating it lazily."""
+
+    token = session.get("_csrf_token")
+    if not isinstance(token, str) or len(token) < 32:
+        token = secrets.token_urlsafe(32)
+        session["_csrf_token"] = token
+    return token
+
+
+def _csrf_request_token() -> str:
+    return (
+        request.headers.get("X-CSRFToken", "").strip()
+        or request.headers.get("X-CSRF-Token", "").strip()
+        or request.form.get("csrf_token", "").strip()
+    )
+
+
+def _valid_csrf_token() -> bool:
+    expected = session.get("_csrf_token")
+    provided = _csrf_request_token()
+    return (
+        isinstance(expected, str)
+        and bool(provided)
+        and hmac.compare_digest(expected, provided)
+    )
+
+
+def _valid_bearer_only_request() -> bool:
+    """Return true only for an authenticated token request without a session."""
+
+    if session.get("user_id") is not None:
+        return False
+    raw_token = extract_token_from_headers(request.headers, request.args.get("token", ""))
+    return bool(raw_token and authenticate_token(raw_token).authenticated)
+
+
+def _csrf_failure() -> Response | tuple[Response, int]:
+    message = "csrf token missing or invalid"
+    if _wants_json():
+        return jsonify({"ok": False, "error": message, "code": "csrf_failed"}), 403
+    return render_template("error.html", error="CSRF validation failed."), 403
 
 
 def principal_from_row(row: Any | None, *, token: str = "") -> Principal:
@@ -677,9 +714,117 @@ def register_auth_routes(app: Flask) -> None:
     def before_auth_request() -> None:
         init_auth_db()
 
+    @app.before_request
+    def enforce_csrf() -> Response | tuple[Response, int] | None:
+        if request.method in {"GET", "HEAD", "OPTIONS"}:
+            return None
+        # Firmware and command-line clients authenticate with a bearer/API
+        # token. They do not have a browser session and must remain compatible
+        # with the existing API contracts.
+        if _valid_bearer_only_request():
+            return None
+        # The bootstrap secret is the explicit one-time authenticator for a
+        # fresh install; it is not a browser-session mutation.
+        if request.endpoint == "auth_bootstrap":
+            return None
+        # Login and registration are anonymous browser forms, so protect them
+        # even before a user session exists. Protected application routes are
+        # checked only when a valid cookie session is present; unauthenticated
+        # requests then retain their existing 401/redirect behavior.
+        anonymous_auth_mutations = {
+            "auth_login",
+            "auth_register",
+            "auth_register_complete",
+        }
+        if request.endpoint in anonymous_auth_mutations:
+            return None if _valid_csrf_token() else _csrf_failure()
+        if session.get("user_id") is None or not current_principal().authenticated:
+            return None
+        return None if _valid_csrf_token() else _csrf_failure()
+
     @app.context_processor
     def inject_current_user() -> dict[str, Any]:
-        return {"current_user": current_principal()}
+        return {"current_user": current_principal(), "csrf_token": csrf_token}
+
+    @app.get("/auth/csrf")
+    def auth_csrf():
+        response = jsonify({"ok": True, "csrf_token": csrf_token()})
+        response.headers["Cache-Control"] = "no-store"
+        return response
+
+    @app.post("/auth/bootstrap")
+    def auth_bootstrap():
+        configured = str(current_app.config.get("BOOTSTRAP_TOKEN", ""))
+        provided = request.headers.get("X-PRG32-Bootstrap-Token", "").strip()
+        if not configured:
+            return jsonify({"ok": False, "error": "bootstrap unavailable"}), 404
+        if not provided or not hmac.compare_digest(configured, provided):
+            return jsonify({"ok": False, "error": "invalid bootstrap token"}), 403
+
+        db = get_db()
+        payload = request.get_json(silent=True) if request.is_json else request.form
+        payload = payload or {}
+        username = str(payload.get("username", "")).strip()
+        email = _normalize_email(str(payload.get("email", "")))
+        password = str(payload.get("password", ""))
+        password_confirm = str(payload.get("password_confirm", password))
+        errors: list[str] = []
+        if not username or len(username) > 80:
+            errors.append("username is required and must be at most 80 characters")
+        if not email or "@" not in email:
+            errors.append("email must be valid")
+        if len(password) < 10:
+            errors.append("password must be at least 10 characters")
+        if password != password_confirm:
+            errors.append("password confirmation does not match")
+        if errors:
+            return jsonify({"ok": False, "error": "; ".join(errors)}), 400
+
+        try:
+            # Serialize the check and insert so two first-run requests cannot
+            # both create administrator accounts with the same setup secret.
+            db.execute("BEGIN IMMEDIATE")
+            existing_admin = db.execute(
+                "SELECT id FROM users WHERE role = 'admin' OR username = 'admin' LIMIT 1"
+            ).fetchone()
+            completed = db.execute(
+                "SELECT value FROM store_settings WHERE key = 'auth_bootstrap_completed'"
+            ).fetchone()
+            if existing_admin is not None or (completed and completed["value"] == "true"):
+                db.rollback()
+                return jsonify({"ok": False, "error": "bootstrap already completed"}), 409
+
+            cursor = db.execute(
+                """
+                INSERT INTO users(username, email, password_hash, role)
+                VALUES (?, ?, ?, 'admin')
+                """,
+                (username, email, generate_password_hash(password)),
+            )
+            db.execute("INSERT OR IGNORE INTO groups(name) VALUES ('editors')")
+            group = db.execute("SELECT id FROM groups WHERE name = 'editors'").fetchone()
+            db.execute(
+                "INSERT OR IGNORE INTO user_groups(user_id, group_id) VALUES (?, ?)",
+                (int(cursor.lastrowid), int(group["id"])),
+            )
+            db.execute(
+                """
+                INSERT INTO store_settings(key, value)
+                VALUES ('auth_bootstrap_completed', 'true')
+                ON CONFLICT(key) DO UPDATE SET value = excluded.value
+                """
+            )
+            db.commit()
+        except sqlite3.IntegrityError:
+            db.rollback()
+            return jsonify({"ok": False, "error": "username or email already exists"}), 409
+
+        user_id = int(cursor.lastrowid)
+        session.clear()
+        session.permanent = True
+        session["user_id"] = user_id
+        session["role"] = "admin"
+        return jsonify({"ok": True, "user": load_user(user_id).as_dict()}), 201
 
     @app.get("/auth/register")
     def auth_register_form():
@@ -687,9 +832,11 @@ def register_auth_routes(app: Flask) -> None:
 
     @app.post("/auth/register")
     def auth_register():
-        errors = validate_email_registration(request.form)
+        form = request.get_json(silent=True) if request.is_json else request.form
+        form = form or {}
+        errors = validate_email_registration(form)
         allow_registration = True
-        email = _normalize_email(request.form.get("email", ""))
+        email = _normalize_email(form.get("email", ""))
         try:
             from ..settings import get_setting
 
@@ -730,14 +877,16 @@ def register_auth_routes(app: Flask) -> None:
 
     @app.post("/auth/register/complete")
     def auth_register_complete():
-        token = request.form.get("token", "")
+        form = request.get_json(silent=True) if request.is_json else request.form
+        form = form or {}
+        token = str(form.get("token", ""))
         record = _load_registration_token(token)
         if record is None:
             if _wants_json():
                 return jsonify({"ok": False, "error": "registration link is invalid or expired"}), 400
             return render_template("error.html", error="Registration link is invalid or expired."), 400
 
-        errors = validate_registration_password(request.form)
+        errors = validate_registration_password(form)
         if errors:
             if _wants_json():
                 return jsonify({"ok": False, "error": "; ".join(errors)}), 400
@@ -770,13 +919,14 @@ def register_auth_routes(app: Flask) -> None:
         user_id = create_local_user(
             email,
             email,
-            request.form["password"],
+            str(form["password"]),
             role=role,
         )
         if role == "admin":
             add_user_to_group(user_id, "editors")
         _mark_registration_token_used(int(record["id"]))
         session.clear()
+        session.permanent = True
         session["user_id"] = user_id
         session["role"] = role
         if _wants_json():
@@ -790,8 +940,10 @@ def register_auth_routes(app: Flask) -> None:
 
     @app.post("/auth/login")
     def auth_login():
-        username = request.form.get("username", "")
-        password = request.form.get("password", "")
+        form = request.get_json(silent=True) if request.is_json else request.form
+        form = form or {}
+        username = str(form.get("username", ""))
+        password = str(form.get("password", ""))
         principal = authenticate_local_user(username, password)
         if not principal.authenticated:
             if _wants_json():
@@ -803,6 +955,7 @@ def register_auth_routes(app: Flask) -> None:
         )
         get_db().commit()
         session.clear()
+        session.permanent = True
         session["user_id"] = principal.id
         session["role"] = principal.role
         if _wants_json():

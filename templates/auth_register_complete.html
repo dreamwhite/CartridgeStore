@@ -11,6 +11,7 @@
   </ul>
   {% endif %}
   <form method="post" action="/auth/register/complete">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input type="hidden" name="token" value="{{ token }}">
     <label>Username<input value="{{ email }}" disabled></label>
     <label>Password<input name="password" type="password" autocomplete="new-password" minlength="10" required></label>

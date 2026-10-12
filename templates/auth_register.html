@@ -11,6 +11,7 @@
   </ul>
   {% endif %}
   <form method="post" action="/auth/register">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label>Email<input name="email" type="email" autocomplete="email" required></label>
     <button class="primary" type="submit">Send Registration Link</button>
   </form>

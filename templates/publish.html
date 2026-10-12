@@ -7,6 +7,7 @@
 <section class="bundle-panel">
   <h1>Upload Cartridge Package</h1>
   <form id="bundle-publish-form" method="post" action="/publish" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label>Cartridge bundle (.zip)<input type="file" name="bundle" accept=".zip" required></label>
     <button class="primary" type="submit">Upload for Review</button>
   </form>

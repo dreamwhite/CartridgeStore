@@ -6,6 +6,7 @@
 <section class="table-panel">
   <h1>Users</h1>
   <form method="post" action="/admin/users" class="inline-admin-form">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <input name="username" placeholder="username" required>
     <input name="email" type="email" placeholder="email" required>
     <input name="password" type="password" placeholder="password">
@@ -24,6 +25,7 @@
       {% for user in users %}
       <tr>
         <form method="post" action="/admin/users/{{ user.id }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <td><input name="username" value="{{ user.username }}" required></td>
           <td><input name="email" type="email" value="{{ user.email }}" required></td>
           <td>
@@ -46,6 +48,7 @@
             <button type="submit">Save</button>
         </form>
             <form method="post" action="/admin/users/{{ user.id }}/delete">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button type="submit">Delete</button>
             </form>
           </td>

@@ -13,6 +13,7 @@
       {% for game in games %}
       <tr>
         <form method="post" action="/admin/cartridges/{{ game.id }}/{{ game.selected_version }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <td><a href="/games/{{ game.id }}">{{ game.id }}</a></td>
           <td>{{ game.selected_version }}</td>
           <td>
@@ -25,10 +26,12 @@
             <button type="submit">Save</button>
         </form>
             <form method="post" action="/admin/cartridges/{{ game.id }}/{{ game.selected_version }}/delete">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button type="submit">Delete Version</button>
             </form>
             {% for architecture in game.architectures %}
             <form method="post" action="/admin/cartridges/{{ game.id }}/{{ game.selected_version }}/delete">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <input type="hidden" name="architecture" value="{{ architecture }}">
               <button type="submit">Delete {{ architecture }}</button>
             </form>

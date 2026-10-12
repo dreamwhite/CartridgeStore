@@ -4,6 +4,7 @@
 
 {% block content %}
 <form method="post" action="/setup" class="setup-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <section>
     <h1>Setup</h1>
     <h2>Identity</h2>
@@ -112,11 +113,13 @@
 
 <section class="split">
   <form method="post" action="/setup/logo" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <h2>Logo</h2>
     <label>Logo File<input type="file" name="logo" accept="image/png,image/jpeg,image/svg+xml" required></label>
     <button type="submit">Upload Logo</button>
   </form>
   <form method="post" action="/setup/favicon" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <h2>Favicon</h2>
     <label>Favicon File<input type="file" name="favicon" accept="image/png,image/jpeg,image/svg+xml" required></label>
     <button type="submit">Upload Favicon</button>

@@ -37,7 +37,8 @@ def can_view_user(user: dict[str, Any]) -> bool:
 def can_view_run(run: dict[str, Any]) -> bool:
     owner = run.get("user_id")
     if owner is None:
-        return True
+        principal = current_principal()
+        return principal.authenticated and role_at_least(principal.role, "admin")
     principal = current_principal()
     if not principal.authenticated:
         return False

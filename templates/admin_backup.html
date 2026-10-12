@@ -10,6 +10,7 @@
     <a class="button" href="/admin/backup/download">Download Backup</a>
   </div>
   <form method="post" action="/admin/backup/restore" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <h2>Restore</h2>
     <label>Backup ZIP<input type="file" name="backup" accept=".zip,application/zip" required></label>
     <button type="submit">Restore Backup</button>

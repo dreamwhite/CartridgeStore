@@ -21,6 +21,7 @@
 </section>
 
 <form method="post" action="/editor/submissions/{{ submission.id }}/verify" class="setup-form">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <section>
     <h2>Editable Metadata</h2>
     <div class="field-grid">
@@ -40,6 +41,7 @@
 
 {% if submission.status == "pending" %}
 <form method="post" action="/editor/submissions/{{ submission.id }}/reject">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <button type="submit">Reject</button>
 </form>
 {% endif %}

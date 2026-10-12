@@ -128,16 +128,20 @@ def generate_markdown_report(db_path: str | Path, run_id: str) -> str:
     return "\n".join(lines)
 
 
-def list_runs(db_path: str | Path) -> list[dict]:
+def list_runs(db_path: str | Path, *, user_id: int | None = None) -> list[dict]:
     with closing(connect(db_path)) as db:
+        where = "WHERE runs.user_id = ?" if user_id is not None else ""
+        params = (user_id,) if user_id is not None else ()
         rows = db.execute(
-            """
+            f"""
             SELECT runs.*,
                    COUNT(samples.id) AS sample_count
             FROM runs
             LEFT JOIN samples ON samples.run_id = runs.run_id
+            {where}
             GROUP BY runs.run_id
             ORDER BY runs.created_at DESC
-            """
+            """,
+            params,
         ).fetchall()
     return [dict(row) for row in rows]

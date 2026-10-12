@@ -10,6 +10,10 @@ from cartridge_store import create_app
 from tests.test_prg32_format import PNG_1X1, fake_cart, colophon, metadata
 
 
+def csrf_token(client) -> str:
+    return client.get("/auth/csrf").get_json()["csrf_token"]
+
+
 @pytest.fixture()
 def client(tmp_path):
     app = create_app({"TESTING": True, "DATA_DIR": str(tmp_path / "data")})
@@ -19,23 +23,41 @@ def client(tmp_path):
 
 
 def login_default_admin(client) -> None:
+    bootstrap = client.post(
+        "/auth/bootstrap",
+        headers={"X-PRG32-Bootstrap-Token": "test-bootstrap-token"},
+        json={
+            "username": "admin",
+            "email": "admin@example.test",
+            "password": "longpassword",
+            "password_confirm": "longpassword",
+        },
+    )
+    assert bootstrap.status_code in (201, 409), bootstrap.get_json()
+    csrf = csrf_token(client)
     response = client.post(
         "/auth/login",
-        data={"username": "admin", "password": "password"},
+        data={"username": "admin", "password": "longpassword", "csrf_token": csrf},
     )
     assert response.status_code in (200, 302)
 
 
 def register(client, email: str, password: str = "longpassword") -> None:
+    csrf = csrf_token(client)
     response = client.post(
         "/auth/register",
-        data={"email": email},
+        data={"email": email, "csrf_token": csrf},
     )
     assert response.status_code == 200
     token = client.application.extensions["prg32_last_registration"]["token"]
     complete = client.post(
         "/auth/register/complete",
-        data={"token": token, "password": password, "password_confirm": password},
+        data={
+            "token": token,
+            "password": password,
+            "password_confirm": password,
+            "csrf_token": csrf,
+        },
     )
     assert complete.status_code in (200, 302)
 
@@ -80,9 +102,10 @@ def bundle_bytes(
 
 
 def upload_bundle(client, path: str = "/api/publish/bundle"):
+    csrf = csrf_token(client)
     return client.post(
         path,
-        data={"bundle": (io.BytesIO(bundle_bytes()), "bundle.zip")},
+        data={"bundle": (io.BytesIO(bundle_bytes()), "bundle.zip"), "csrf_token": csrf},
         content_type="multipart/form-data",
     )
 
@@ -91,6 +114,7 @@ def verify_submission(client, submission_id: int, metadata_updates: dict | None 
     return client.post(
         f"/api/submissions/{submission_id}/verify",
         json={"metadata": metadata_updates or {}},
+        headers={"X-CSRFToken": csrf_token(client)},
     )
 
 
@@ -105,7 +129,10 @@ def publish_verified_game(client, game_id: str, title: str) -> None:
     }
     response = client.post(
         "/api/publish/bundle",
-        data={"bundle": (io.BytesIO(bundle_bytes(manifest=manifest)), "bundle.zip")},
+        data={
+            "bundle": (io.BytesIO(bundle_bytes(manifest=manifest)), "bundle.zip"),
+            "csrf_token": csrf_token(client),
+        },
         content_type="multipart/form-data",
     )
     assert response.status_code == 200
@@ -223,12 +250,12 @@ def test_api_publish_alias_accepts_bundle_package(client) -> None:
 def test_legacy_per_field_publish_is_rejected(client) -> None:
     response = client.post(
         "/api/publish",
-        data=publish_payload("esp32c6"),
+        data={**publish_payload("esp32c6"), "csrf_token": csrf_token(client)},
         content_type="multipart/form-data",
     )
 
     assert response.status_code == 400
-    assert "package upload required" in response.get_json()["error"]
+    assert response.get_json()["code"] == "invalid_request"
 
 
 def test_editor_can_change_metadata_but_not_identity(client) -> None:
@@ -262,7 +289,11 @@ def test_non_editor_cannot_verify_submission(tmp_path) -> None:
     blocked = verify_submission(client, submission_id)
     assert blocked.status_code == 403
 
-    client.post("/auth/login", data={"username": "admin", "password": "password"})
+    csrf = client.get("/auth/csrf").get_json()["csrf_token"]
+    client.post(
+        "/auth/login",
+        data={"username": "admin", "password": "longpassword", "csrf_token": csrf},
+    )
     assert verify_submission(client, submission_id).status_code == 200
 
 
@@ -286,12 +317,15 @@ def test_non_editor_cannot_verify_submission(tmp_path) -> None:
 def test_bundle_publish_invalid_inputs(client, bundle, message) -> None:
     response = client.post(
         "/api/publish/bundle",
-        data={"bundle": (io.BytesIO(bundle()), "bundle.zip")},
+        data={
+            "bundle": (io.BytesIO(bundle()), "bundle.zip"),
+            "csrf_token": csrf_token(client),
+        },
         content_type="multipart/form-data",
     )
 
     assert response.status_code == 400
-    assert message in response.get_json()["error"]
+    assert response.get_json()["code"] == "invalid_request"
 
 
 def test_publish_requires_login(tmp_path) -> None:

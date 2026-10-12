@@ -9,11 +9,13 @@ import shutil
 import sqlite3
 import sys
 import tempfile
+from datetime import timedelta
 from pathlib import Path
 from typing import Any
 from copy import deepcopy
 from io import BytesIO
 import zipfile
+from pathlib import PurePosixPath
 
 from flask import (
     Flask,
@@ -59,11 +61,24 @@ DEFAULT_CATALOG_PER_PAGE = 24
 MAX_CATALOG_PER_PAGE = 100
 
 
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() not in {"0", "false", "no", "off"}
+
+
 class CartridgeRequest(FlaskRequest):
     @property
     def max_content_length(self) -> int | None:
         if self.path in {"/api/publish/bundle", "/api/publish", "/publish"}:
-            return int(current_app.config["BUNDLE_MAX_CONTENT_LENGTH"])
+            return int(current_app.config["BUNDLE_MAX_ARCHIVE_BYTES"]) + int(
+                current_app.config["BUNDLE_MULTIPART_OVERHEAD_BYTES"]
+            )
+        if self.path == "/api/metrics/batch" or (
+            self.path.startswith("/api/runs") and self.method in {"POST", "PUT", "PATCH"}
+        ):
+            return int(current_app.config["METRICS_MAX_CONTENT_LENGTH"])
         return super().max_content_length
 
 
@@ -128,20 +143,83 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
         raise RuntimeError(message)
     if not secret_key:
         secret_key = "test-secret-key"
+    testing = bool(test_config and test_config.get("TESTING"))
+    same_site = os.environ.get("PRG32_SESSION_COOKIE_SAMESITE", "Lax").strip()
+    if same_site not in {"Lax", "Strict", "None"}:
+        raise RuntimeError("PRG32_SESSION_COOKIE_SAMESITE must be Lax, Strict, or None")
     app.config.update(
         DATA_DIR=data_dir,
         DATABASE=database_path,
         SERVICES_DB=None,
         MAX_CONTENT_LENGTH=DEFAULT_MAX_UPLOAD,
-        BUNDLE_MAX_CONTENT_LENGTH=int(os.environ.get("PRG32_BUNDLE_MAX_MB", "64")) * 1024 * 1024,
+        BUNDLE_MAX_CONTENT_LENGTH=int(
+            os.environ.get(
+                "PRG32_BUNDLE_MAX_ARCHIVE_MB",
+                os.environ.get("PRG32_BUNDLE_MAX_MB", "64"),
+            )
+        )
+        * 1024
+        * 1024,
+        BUNDLE_MAX_ARCHIVE_BYTES=int(
+            os.environ.get(
+                "PRG32_BUNDLE_MAX_ARCHIVE_MB",
+                os.environ.get("PRG32_BUNDLE_MAX_MB", "64"),
+            )
+        )
+        * 1024
+        * 1024,
+        BUNDLE_MAX_ENTRIES=int(os.environ.get("PRG32_BUNDLE_MAX_ENTRIES", "128")),
+        BUNDLE_MAX_ENTRY_UNCOMPRESSED_BYTES=int(
+            os.environ.get("PRG32_BUNDLE_MAX_ENTRY_MB", "32")
+        )
+        * 1024
+        * 1024,
+        BUNDLE_MAX_TOTAL_UNCOMPRESSED_BYTES=int(
+            os.environ.get("PRG32_BUNDLE_MAX_UNCOMPRESSED_MB", "128")
+        )
+        * 1024
+        * 1024,
+        BUNDLE_MAX_COMPRESSION_RATIO=float(
+            os.environ.get("PRG32_BUNDLE_MAX_COMPRESSION_RATIO", "100")
+        ),
+        BUNDLE_MAX_MANIFEST_BYTES=int(
+            os.environ.get("PRG32_BUNDLE_MAX_MANIFEST_KB", "256")
+        )
+        * 1024,
+        BUNDLE_MULTIPART_OVERHEAD_BYTES=1024 * 1024,
+        METRICS_MAX_CONTENT_LENGTH=int(
+            os.environ.get("PRG32_METRICS_MAX_MB", "2")
+        )
+        * 1024
+        * 1024,
+        METRICS_MAX_SAMPLES_PER_REQUEST=int(
+            os.environ.get("PRG32_METRICS_MAX_SAMPLES", "1024")
+        ),
+        METRICS_MAX_DB_WORK=int(os.environ.get("PRG32_METRICS_MAX_DB_WORK", "2048")),
         MULTIPLAYER_MAX_PEERS=int(os.environ.get("PRG32_MP_MAX_PEERS", "8")),
         STORE_NAME="PRG32 Cartridge Store",
         STORE_VERSION="1.0.0",
         USERS=None,
         SECRET_KEY=secret_key,
+        BOOTSTRAP_TOKEN=os.environ.get(
+            "PRG32_BOOTSTRAP_TOKEN",
+            "test-bootstrap-token" if testing else "",
+        ),
+        SESSION_COOKIE_HTTPONLY=True,
+        SESSION_COOKIE_SECURE=_env_bool(
+            "PRG32_SESSION_COOKIE_SECURE",
+            default=(os.environ.get("PRG32_ENV", "").strip().lower() == "production" and not testing),
+        ),
+        SESSION_COOKIE_SAMESITE=same_site,
+        PERMANENT_SESSION_LIFETIME=timedelta(
+            hours=max(int(os.environ.get("PRG32_SESSION_LIFETIME_HOURS", "8")), 1)
+        ),
+        SESSION_REFRESH_EACH_REQUEST=True,
     )
     if test_config:
         app.config.update(test_config)
+        if "BUNDLE_MAX_ARCHIVE_BYTES" not in test_config and "BUNDLE_MAX_CONTENT_LENGTH" in test_config:
+            app.config["BUNDLE_MAX_ARCHIVE_BYTES"] = app.config["BUNDLE_MAX_CONTENT_LENGTH"]
         if "DATABASE" not in test_config:
             app.config["DATABASE"] = str(
                 Path(app.config["DATA_DIR"]) / "cartridge_store.sqlite"
@@ -167,11 +245,24 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     @app.errorhandler(fmt.ColophonValidationError)
     def handle_store_error(exc: Exception):
         if request.path.startswith("/api/"):
-            return jsonify({"ok": False, "error": str(exc)}), 400
+            current_app.logger.warning("store request rejected at %s: %s", request.path, exc)
+            return jsonify(
+                {"ok": False, "error": "invalid request", "code": "invalid_request"}
+            ), 400
         return render_template("error.html", error=str(exc)), 400
 
     @app.errorhandler(413)
     def handle_too_large(exc: Exception):
+        if request.path == "/api/metrics/batch" or (
+            request.path.startswith("/api/runs") and request.method in {"POST", "PUT", "PATCH"}
+        ):
+            return jsonify(
+                {
+                    "ok": False,
+                    "error": "metrics payload is too large",
+                    "code": "metrics_payload_too_large",
+                }
+            ), 413
         if request.path.startswith("/api/") or request.path.startswith("/setup/"):
             return jsonify({"ok": False, "error": "upload is too large"}), 413
         return render_template("error.html", error="Upload is too large."), 413
@@ -639,9 +730,6 @@ def create_app(test_config: dict[str, Any] | None = None) -> Flask:
     @app.post("/api/publish/bundle")
     @login_required
     def api_publish_bundle():
-        limit = int(app.config["BUNDLE_MAX_CONTENT_LENGTH"])
-        if request.content_length is not None and request.content_length > limit:
-            return jsonify({"ok": False, "error": "bundle upload is too large"}), 413
         result = publish_bundle_request(store)
         return jsonify(result)
 
@@ -978,7 +1066,11 @@ def publish_bundle_request(store: GameStore) -> dict[str, Any]:
     upload = request.files.get("bundle")
     if upload is None or not upload.filename:
         raise StoreError("missing upload: bundle")
-    bundle = upload.read()
+    bundle = _read_limited_upload(
+        upload,
+        int(current_app.config["BUNDLE_MAX_ARCHIVE_BYTES"]),
+        "bundle upload is too large",
+    )
     if not bundle:
         raise StoreError("empty upload: bundle")
     if not bundle.startswith((b"PK\x03\x04", b"PK\x05\x06", b"PK\x07\x08")):
@@ -986,7 +1078,7 @@ def publish_bundle_request(store: GameStore) -> dict[str, Any]:
     try:
         with zipfile.ZipFile(BytesIO(bundle)) as zf:
             prepared = _prepare_bundle(zf)
-    except zipfile.BadZipFile as exc:
+    except (zipfile.BadZipFile, RuntimeError, ValueError, OSError) as exc:
         raise StoreError("bundle must be a valid zip file") from exc
 
     submission = create_submission(prepared)
@@ -1006,10 +1098,37 @@ def publish_bundle_request(store: GameStore) -> dict[str, Any]:
 
 
 def _prepare_bundle(zf: zipfile.ZipFile) -> list[dict[str, Any]]:
-    names = {info.filename for info in zf.infolist() if not info.is_dir()}
+    infos = zf.infolist()
+    max_entries = int(current_app.config["BUNDLE_MAX_ENTRIES"])
+    if len(infos) > max_entries:
+        raise StoreError("bundle contains too many entries")
+
+    infos_by_name: dict[str, zipfile.ZipInfo] = {}
+    total_uncompressed = 0
+    max_entry_size = int(current_app.config["BUNDLE_MAX_ENTRY_UNCOMPRESSED_BYTES"])
+    max_total_size = int(current_app.config["BUNDLE_MAX_TOTAL_UNCOMPRESSED_BYTES"])
+    max_ratio = float(current_app.config["BUNDLE_MAX_COMPRESSION_RATIO"])
+    for info in infos:
+        _validate_archive_filename(info.filename, allow_directory=info.is_dir())
+        if info.filename in infos_by_name:
+            raise StoreError("bundle contains duplicate filenames")
+        infos_by_name[info.filename] = info
+        if info.file_size < 0 or info.compress_size < 0:
+            raise StoreError("bundle contains an invalid entry size")
+        if info.file_size > max_entry_size:
+            raise StoreError("bundle entry is too large")
+        total_uncompressed += info.file_size
+        if total_uncompressed > max_total_size:
+            raise StoreError("bundle uncompressed data is too large")
+        if info.file_size and (
+            info.file_size / max(info.compress_size, 1) > max_ratio
+        ):
+            raise StoreError("bundle compression ratio is too high")
+
+    names = {info.filename for info in infos if not info.is_dir()}
     if "manifest.json" not in names:
         raise StoreError("bundle is missing manifest.json")
-    manifest = _read_manifest(zf)
+    manifest = _read_manifest(zf, infos_by_name["manifest.json"])
     if manifest.get("abi") != fmt.METADATA_ABI:
         raise StoreError(f"manifest.abi must be {fmt.METADATA_ABI}")
     fmt.validate_metadata(manifest)
@@ -1019,7 +1138,7 @@ def _prepare_bundle(zf: zipfile.ZipFile) -> list[dict[str, Any]]:
     icon_name = _manifest_filename(assets.get("icon"), "manifest.assets.icon")
     if icon_name not in names:
         raise StoreError("bundle icon file is missing")
-    icon = zf.read(icon_name)
+    icon = _read_bundle_entry(zf, infos_by_name[icon_name])
     if fmt.detect_image_mime(icon) is None:
         raise StoreError("bundle icon must be PNG or JPEG")
 
@@ -1029,7 +1148,7 @@ def _prepare_bundle(zf: zipfile.ZipFile) -> list[dict[str, Any]]:
         splash_file = _manifest_filename(splash_name, "manifest.assets.splash")
         if splash_file not in names:
             raise StoreError("bundle splash file is missing")
-        splash = zf.read(splash_file)
+        splash = _read_bundle_entry(zf, infos_by_name[splash_file])
         if fmt.detect_image_mime(splash) is None:
             raise StoreError("bundle splash must be PNG or JPEG")
 
@@ -1056,7 +1175,7 @@ def _prepare_bundle(zf: zipfile.ZipFile) -> list[dict[str, Any]]:
         metadata = _bundle_metadata_for_cartridge(manifest)
         colophon = _bundle_colophon(manifest)
         image = fmt.build_cartridge(
-            zf.read(file_name),
+            _read_bundle_entry(zf, infos_by_name[file_name]),
             metadata=metadata,
             icon=icon,
             screenshot=splash,
@@ -1076,9 +1195,9 @@ def _prepare_bundle(zf: zipfile.ZipFile) -> list[dict[str, Any]]:
     return prepared
 
 
-def _read_manifest(zf: zipfile.ZipFile) -> dict[str, Any]:
+def _read_manifest(zf: zipfile.ZipFile, info: zipfile.ZipInfo) -> dict[str, Any]:
     try:
-        manifest = json.loads(zf.read("manifest.json").decode("utf-8"))
+        manifest = json.loads(_read_bundle_entry(zf, info).decode("utf-8"))
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise StoreError("manifest.json must be valid UTF-8 JSON") from exc
     if not isinstance(manifest, dict):
@@ -1090,9 +1209,57 @@ def _manifest_filename(value: Any, label: str) -> str:
     if not isinstance(value, str) or not value.strip():
         raise StoreError(f"{label} is required")
     filename = value.strip()
-    if filename.startswith("/") or ".." in Path(filename).parts:
+    _validate_archive_filename(filename, label=label)
+    if filename.endswith("/"):
         raise StoreError(f"{label} must be a relative filename")
     return filename
+
+
+def _validate_archive_filename(
+    filename: str, *, label: str = "bundle filename", allow_directory: bool = False
+) -> None:
+    if not isinstance(filename, str) or not filename or "\x00" in filename:
+        raise StoreError(f"{label} must be a safe relative filename")
+    normalized = filename.replace("\\", "/")
+    if allow_directory and normalized.endswith("/"):
+        normalized = normalized.rstrip("/")
+    if not normalized:
+        raise StoreError(f"{label} must be a safe relative filename")
+    path = PurePosixPath(normalized)
+    if (
+        normalized.startswith("/")
+        or path.is_absolute()
+        or (len(normalized) >= 2 and normalized[1] == ":")
+        or any(part in {"", ".", ".."} for part in normalized.split("/"))
+    ):
+        raise StoreError(f"{label} must be a safe relative filename")
+
+
+def _read_bundle_entry(zf: zipfile.ZipFile, info: zipfile.ZipInfo) -> bytes:
+    limit = int(current_app.config["BUNDLE_MAX_ENTRY_UNCOMPRESSED_BYTES"])
+    if info.filename == "manifest.json":
+        limit = int(current_app.config["BUNDLE_MAX_MANIFEST_BYTES"])
+    if info.file_size > limit:
+        raise StoreError("bundle entry is too large")
+    with zf.open(info, "r") as source:
+        data = source.read(limit + 1)
+    if len(data) > limit:
+        raise StoreError("bundle entry is too large")
+    return data
+
+
+def _read_limited_upload(upload: Any, limit: int, error_message: str) -> bytes:
+    output = BytesIO()
+    remaining = limit + 1
+    while remaining > 0:
+        chunk = upload.stream.read(min(1024 * 1024, remaining))
+        if not chunk:
+            break
+        output.write(chunk)
+        remaining -= len(chunk)
+        if output.tell() > limit:
+            raise StoreError(error_message)
+    return output.getvalue()
 
 
 def _bundle_metadata_for_cartridge(manifest: dict[str, Any]) -> dict[str, Any]:
