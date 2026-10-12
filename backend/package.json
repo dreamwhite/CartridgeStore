@@ -1,0 +1,45 @@
+{
+  "name": "prg32-cartridge-store-backend",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Read-only TypeScript backend foundation for PRG32 Cartridge Store",
+  "type": "module",
+  "packageManager": "pnpm@12.5.1",
+  "engines": {
+    "node": ">=24.0.0 <25",
+    "npm": ">=10"
+  },
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/server.js",
+    "reconcile": "tsx src/reconcile.ts",
+    "secrets:migrate": "tsx src/secrets/cli.ts migrate",
+    "secrets:rollback": "tsx src/secrets/cli.ts rollback",
+    "secrets:rotate": "tsx src/secrets/cli.ts rotate",
+    "secrets:keygen": "tsx src/secrets/keygen.ts",
+    "capacity:check": "tsx tests/operations/m63b-run.ts",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "check": "npm run typecheck && npm run lint && npm run test && npm run build"
+  },
+  "dependencies": {
+    "@fastify/multipart": "^9.4.0",
+    "better-sqlite3": "^13.0.3",
+    "drizzle-orm": "^0.41.0",
+    "fastify": "^5.3.0",
+    "fflate": "^0.8.3"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.22.0",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^22.13.10",
+    "eslint": "^9.22.0",
+    "node-gyp": "^11.0.0",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2",
+    "typescript-eslint": "^8.26.0",
+    "vitest": "^3.0.8"
+  }
+}
