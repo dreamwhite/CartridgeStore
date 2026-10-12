@@ -35,14 +35,14 @@ data directory.
 Stop the service:
 
 ```bash
-docker compose down
+docker compose --profile prod down
 ```
 
 Restore the data directory, then start again:
 
 ```bash
 tar -xzf cartridge-store-data.tgz
-docker compose up -d
+docker compose --profile prod up -d
 ```
 
 ## Health Check
@@ -69,8 +69,10 @@ API review.
 
 ## User Registration
 
-The service seeds a default `admin` / `password` administrator. Change that
-password before real use. New users enter only an email address at
+Fresh installations do not seed a known administrator password. Set a random
+`PRG32_BOOTSTRAP_TOKEN` and use the one-time `/auth/bootstrap` operation from
+the [API guide](api.md). Existing administrator credentials, IDs, groups, and
+roles are preserved. New users enter only an email address at
 `/auth/register`; the service sends a verification link that lets them set a
 password. Their username is the verified email address.
 
@@ -99,7 +101,7 @@ uses database users in the `editors` group.
 ## Logs
 
 ```bash
-docker compose logs -f
+docker compose --profile prod logs -f
 ```
 
 For local Python runs, logs are printed to the terminal that started the server.
@@ -120,9 +122,9 @@ During class, prefer deleting only the records you intend to reset. For a full
 reset of all service data:
 
 ```bash
-docker compose down
+docker compose --profile prod down
 rm -rf data
-docker compose up -d
+docker compose --profile prod up -d
 ```
 
 This removes verified cartridges, pending submissions, score records, and

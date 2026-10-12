@@ -6,7 +6,8 @@ game cartridges.
 ## Quick Deploy With Docker
 
 ```bash
-docker compose up --build
+SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" \
+docker compose --profile prod up --build
 ```
 
 Open <http://127.0.0.1:5080/>.
@@ -17,7 +18,7 @@ cartridges, scores, metrics, and the catalog index persist across restarts.
 Stop the service:
 
 ```bash
-docker compose down
+docker compose --profile prod down
 ```
 
 See [docs/docker.md](docs/docker.md) for manual `docker run`, LAN deployment,
@@ -47,15 +48,12 @@ For a detailed environment setup, see
 
 ## Users and Roles
 
-The service seeds a default administrator account:
-
-```text
-username: admin
-password: password
-```
-
-Change that password before real use. New users register by entering an email
-address, receiving a verification link, and setting a password from that link.
+Fresh installations do not create a known administrator password. Set a
+random, one-time operator secret in `PRG32_BOOTSTRAP_TOKEN`, start the service,
+and create the first administrator with the documented bootstrap request in
+[`docs/api.md`](docs/api.md). Existing administrator accounts and their roles
+are preserved. New users register by entering an email address, receiving a
+verification link, and setting a password from that link.
 Their username is the verified email address.
 
 Authenticated users can upload cartridge packages. Users in the `editors` group
@@ -207,7 +205,7 @@ pytest -q
 Start here:
 
 - [Getting started](docs/getting_started.md): local Python setup, first-run
-  Store configuration, default administrator login, package upload and review,
+  Store configuration, one-time administrator bootstrap, package upload and review,
   score submission, metrics smoke tests, mDNS, SMTP, external auth, and theme
   customization.
 - [Getting started with PRG32 game development](docs/getting_started_game_development.md):

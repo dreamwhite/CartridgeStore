@@ -17,17 +17,19 @@ with TXT record `abi=prg32-store-discovery-1.0`.
 ## Authentication
 
 The server requires `SECRET_KEY` and uses Flask signed-cookie sessions for
-browser login. A default administrator account is created with username
-`admin` and password `password`; change that password before using the service
-outside a throwaway classroom demo. New users start at `/auth/register` by
-entering only an email address. The server sends a verification link; following
-that link lets the user set a password. The account username is the verified
-email address.
+browser login. Fresh installations require an operator-supplied,
+one-time `PRG32_BOOTSTRAP_TOKEN`; no known administrator password is created.
+Existing administrator credentials, IDs, groups, and roles are preserved.
+New users start at `/auth/register` by entering only an email address. The
+server sends a verification link; following that link lets the user set a
+password. The account username is the verified email address.
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | `GET/POST` | `/auth/register` | Request an email verification link |
 | `GET/POST` | `/auth/register/complete` | Complete registration from the emailed link |
+| `GET` | `/auth/csrf` | Get a session-bound CSRF token for browser/Next mutations |
+| `POST` | `/auth/bootstrap` | One-time first administrator setup using the operator header secret |
 | `GET/POST` | `/auth/login` | Authenticate and set the session cookie |
 | `POST` | `/auth/logout` | Clear the session |
 | `GET` | `/auth/me` | Current user JSON |
@@ -49,6 +51,29 @@ curl -X POST http://host:5080/auth/tokens \
   -H 'Content-Type: application/json' \
   -d '{"label":"board"}'
 ```
+
+First-run bootstrap (send the secret only in the header; it is never returned
+or logged):
+
+```bash
+export PRG32_BOOTSTRAP_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+curl -X POST http://host:5080/auth/bootstrap \
+  -H "X-PRG32-Bootstrap-Token: $PRG32_BOOTSTRAP_TOKEN" \
+  -H 'Content-Type: application/json' \
+  -d '{"username":"admin","email":"admin@example.test","password":"replace-with-a-unique-password","password_confirm":"replace-with-a-unique-password"}'
+```
+
+The endpoint returns `409` after the first successful setup or when an
+administrator already exists. Keep the operator secret out of shell history,
+CI logs, Compose files, and source control; unset it after setup if the
+deployment does not need to recover a fresh database.
+
+Cookie-authenticated state-changing requests require the session CSRF token.
+HTML forms receive a hidden `csrf_token` field. JSON clients should call
+`GET /auth/csrf` and send `X-CSRFToken`; a valid Bearer/API-token-only request
+does not require a browser CSRF token. Missing or invalid tokens return HTTP
+403 with `code: "csrf_failed"`. Firmware ingestion endpoints remain compatible
+for their existing anonymous and Bearer clients.
 
 Use it:
 

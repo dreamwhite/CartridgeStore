@@ -8,6 +8,11 @@ storage mounted outside the container or process directory.
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `SECRET_KEY` | required | Flask session signing key |
+| `PRG32_BOOTSTRAP_TOKEN` | fresh install only | One-time first-admin setup secret; never log or commit it |
+| `PRG32_ENV` | unset | Set to `production` for the production session policy |
+| `PRG32_SESSION_COOKIE_SECURE` | `0` outside production | Require HTTPS for browser session cookies |
+| `PRG32_SESSION_COOKIE_SAMESITE` | `Lax` | Cookie cross-site policy; `None` requires deliberate HTTPS configuration |
+| `PRG32_SESSION_LIFETIME_HOURS` | `8` | Permanent browser-session lifetime |
 | `PRG32_STORE_DATA` | `data` or `/data` in Docker | Cartridge files, custom static assets, and default DB location |
 | `PRG32_STORE_DB` | `<data>/cartridge_store.sqlite` | Unified SQLite database |
 | `PRG32_SCORE_DB` | unset | Legacy score DB fallback |
@@ -48,7 +53,12 @@ storage mounted outside the container or process directory.
 ## Production Checklist
 
 - Set a high-entropy `SECRET_KEY`.
-- Change the seeded `admin` / `password` administrator credentials.
+- On a fresh data directory, set a high-entropy `PRG32_BOOTSTRAP_TOKEN` and
+  call the one-time `/auth/bootstrap` endpoint. Existing admin credentials,
+  IDs, groups, and roles are preserved.
+- Set `PRG32_ENV=production` and `PRG32_SESSION_COOKIE_SECURE=1` when HTTPS
+  is terminated at the reverse proxy. Flask does not blindly trust forwarded
+  headers.
 - Configure SMTP so user registration links are delivered by email.
 - Configure mDNS, SMTP, OIDC, and SAML2 from `/setup` or environment variables.
 - Disable Flask debug mode; use Gunicorn or the Docker image.
@@ -75,11 +85,11 @@ location /api/multiplayer {
 
 ## Docker
 
-Compose requires `SECRET_KEY`:
+Compose uses the single `prod` profile and requires `SECRET_KEY`:
 
 ```bash
 export SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
-docker compose up --build
+docker compose --profile prod up --build
 ```
 
 The image continues if `zeroconf` is absent, but mDNS advertisement is disabled

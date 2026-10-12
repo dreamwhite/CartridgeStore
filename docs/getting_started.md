@@ -53,16 +53,18 @@ Start the server:
 python app.py
 ```
 
-The server creates a default administrator account:
+Fresh installations require a one-time administrator bootstrap. Generate an
+operator secret, export it for the process, start the server, then run the
+bootstrap request from [the API documentation](api.md):
 
-```text
-username: admin
-password: password
+```bash
+export PRG32_BOOTSTRAP_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
+python app.py
 ```
 
-Log in at `http://127.0.0.1:5080/auth/login` and change the password before
-using the service beyond a disposable local demo. The default admin is also in
-the `editors` group. Visit `/setup` as that user to change the store name,
+The successful bootstrap creates the administrator in the `editors` group.
+Existing administrator credentials are not overwritten. Visit `/setup` as
+that user to change the store name,
 theme, auth defaults, logo, publish settings, mDNS advertisement, SMTP mail,
 OpenID Connect, and SAML2.
 
@@ -218,7 +220,7 @@ For reproducible local deployment:
 
 ```bash
 export SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
-docker compose up --build
+docker compose --profile prod up --build
 ```
 
 Open `http://127.0.0.1:5080/`. Persistent data remains in `./data`.
