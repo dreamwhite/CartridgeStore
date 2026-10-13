@@ -19,15 +19,16 @@ services:
       PRG32_STORE_DB: /data/cartridge_store.sqlite
       PRG32_MP_MAX_PEERS: "8"
     volumes:
-      - ./data:/data
+      - ${PRG32_PROD_DATA_DIR:-./data}:/data
     restart: unless-stopped
 
   backend:
     profiles: ["backend"]
     build:
       context: ./backend
-      dockerfile: Dockerfile
-    image: riscv-prg32/cartridge-store-backend:dev
+      dockerfile: Dockerfile.dev
+    image: riscv-prg32/cartridge-store-backend:dev-hot
+    command: ["pnpm", "dev"]
     environment:
       NODE_ENV: development
       PRG32_BACKEND_HOST: 0.0.0.0
@@ -38,6 +39,8 @@ services:
     ports:
       - "127.0.0.1:5090:5090"
     volumes:
+      - ./backend:/app
+      - ${PRG32_BACKEND_NODE_MODULES_DIR:-./.local/backend/node_modules}:/app/node_modules
       - ${PRG32_BACKEND_FIXTURE_DIR:-./backend/tests/fixtures}:/fixtures:ro
     healthcheck:
       test:
@@ -53,13 +56,16 @@ services:
       start_period: 5s
 
   auth-writer-init:
-    profiles: ["writer-init"]
+    profiles: ["writer-init", "writer", "dev"]
     build:
       context: ./backend
       dockerfile: Dockerfile
     image: riscv-prg32/cartridge-store-backend:dev
-    command: ["node", "dist/disposable-fixture.js"]
-    user: "1000:1000"
+    # Pre-create SQLite files on bind mounts. Docker Desktop/macOS can report
+    # SQLITE_READONLY_DBMOVED on the first journaled write when SQLite creates
+    # the database file itself inside a shared host directory.
+    command: ["sh", "-c", "touch \"$$PRG32_WRITER_AUTH_DB\" \"$$PRG32_WRITER_SHADOW_DB\" && node dist/disposable-fixture.js && if [ ! -f \"$$PRG32_WRITER_KEY_REGISTRY\" ]; then node dist/secrets/keygen.js --output \"$$PRG32_WRITER_KEY_REGISTRY\" --id prg32-dev-key-1; fi"]
+    user: "${PRG32_WRITER_UID:-0}:${PRG32_WRITER_GID:-0}"
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
@@ -71,18 +77,23 @@ services:
       PRG32_WRITER_AUTH_DB: /writer-data/auth.sqlite
       PRG32_WRITER_SHADOW_DB: /writer-shadow/shadow.sqlite
       PRG32_WRITER_STORE_DATA: /writer-store
+      PRG32_WRITER_KEY_REGISTRY: /writer-data/key-registry.json
     volumes:
-      - prg32_auth_writer_data:/writer-data
-      - prg32_auth_writer_shadow:/writer-shadow
-      - prg32_auth_writer_store:/writer-store
+      - ${PRG32_WRITER_DATA_DIR:-./.local/writer/auth-data}:/writer-data
+      - ${PRG32_WRITER_SHADOW_DIR:-./.local/writer/shadow}:/writer-shadow
+      - ${PRG32_WRITER_STORE_DIR:-./.local/writer/store}:/writer-store
 
   auth-writer:
-    profiles: ["writer"]
+    profiles: ["writer", "dev"]
     build:
       context: ./backend
-      dockerfile: Dockerfile
-    image: riscv-prg32/cartridge-store-backend:dev
-    user: "1000:1000"
+      dockerfile: Dockerfile.dev
+    image: riscv-prg32/cartridge-store-backend:dev-hot
+    command: ["pnpm", "dev"]
+    user: "${PRG32_WRITER_UID:-0}:${PRG32_WRITER_GID:-0}"
+    depends_on:
+      auth-writer-init:
+        condition: service_completed_successfully
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
@@ -101,6 +112,10 @@ services:
       PRG32_BACKEND_AUTH_WRITE_MODE: test
       PRG32_BACKEND_AUTH_WRITE_DB: /writer-data/auth.sqlite
       PRG32_BACKEND_AUTH_DISPOSABLE_ROOT: /writer-data
+      PRG32_BACKEND_OIDC_PUBLIC_ORIGIN: ${PRG32_AUTH_PUBLIC_ORIGIN:-https://api.prg32.dream.test/}
+      PRG32_BACKEND_FEDERATION_PUBLIC_ORIGIN: ${PRG32_AUTH_PUBLIC_ORIGIN:-https://api.prg32.dream.test/}
+      PRG32_BACKEND_FRONTEND_PUBLIC_ORIGIN: ${PRG32_FRONTEND_PUBLIC_ORIGIN:-https://store.prg32.dream.test/}
+      PRG32_BACKEND_CORS_ORIGINS: ${PRG32_BACKEND_CORS_ORIGINS:-https://store.prg32.dream.test}
       PRG32_BACKEND_SUBMISSION_WRITE_ENABLED: "true"
       PRG32_BACKEND_SUBMISSION_WRITE_MODE: test
       PRG32_BACKEND_SUBMISSION_DISPOSABLE_ROOT: /writer-store
@@ -133,16 +148,21 @@ services:
       PRG32_BACKEND_REVIEW_MAX_SUBMISSIONS: ${PRG32_BACKEND_REVIEW_MAX_SUBMISSIONS:-1000}
       PRG32_BACKEND_SESSION_SECRET: ${PRG32_WRITER_SESSION_SECRET:-local-disposable-session-secret-change-me-123456}
       PRG32_BACKEND_BOOTSTRAP_TOKEN: ${PRG32_WRITER_BOOTSTRAP_TOKEN:-local-disposable-bootstrap-token-change-me-123456}
-      PRG32_BACKEND_SESSION_SECURE: "false"
+      PRG32_BACKEND_SESSION_SECURE: ${PRG32_BACKEND_SESSION_SECURE:-true}
+      PRG32_BACKEND_SESSION_SAMESITE: ${PRG32_BACKEND_SESSION_SAMESITE:-none}
       PRG32_BACKEND_SECRET_ENCRYPTION_ENABLED: ${PRG32_BACKEND_SECRET_ENCRYPTION_ENABLED:-false}
-      PRG32_BACKEND_SECRET_KEY_REGISTRY: /run/secrets/prg32-key-registry.json
+      PRG32_BACKEND_SECRET_KEY_REGISTRY: ${PRG32_WRITER_KEY_REGISTRY:-/writer-data/key-registry.json}
     ports:
       - "127.0.0.1:5091:5090"
+    networks:
+      - app
+      - default
     volumes:
-      - prg32_auth_writer_data:/writer-data
-      - prg32_auth_writer_shadow:/writer-shadow:ro
-      - prg32_auth_writer_store:/writer-store
-      - ${PRG32_SECRET_KEY_REGISTRY_FILE:-./.secrets/prg32-key-registry.json}:/run/secrets/prg32-key-registry.json:ro
+      - ./backend:/app
+      - ${PRG32_BACKEND_NODE_MODULES_DIR:-./.local/backend/node_modules}:/app/node_modules
+      - ${PRG32_WRITER_DATA_DIR:-./.local/writer/auth-data}:/writer-data
+      - ${PRG32_WRITER_SHADOW_DIR:-./.local/writer/shadow}:/writer-shadow:ro
+      - ${PRG32_WRITER_STORE_DIR:-./.local/writer/store}:/writer-store
     healthcheck:
       test:
         - CMD
@@ -156,23 +176,60 @@ services:
       retries: 3
       start_period: 5s
 
+  # Opt-in edge bridge for the dual-origin browser contract. It is a proxy
+  # rather than a second Fastify process, so the ordinary writer remains the
+  # only owner of the disposable auth database.
+  auth-writer-edge-proxy:
+    profiles: ["dual-origin", "dev"]
+    image: docker.io/library/nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de
+    depends_on:
+      auth-writer:
+        condition: service_healthy
+    volumes:
+      - ./docker/auth-writer-edge-proxy.conf:/etc/nginx/nginx.conf:ro
+    networks:
+      - app
+      - edge
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: ${DREAM_EDGE_NETWORK:-dream_edge}
+      traefik.http.routers.prg32-auth-api-dual.rule: Host(`${PRG32_API_DOMAIN:-api.prg32.dream.test}`) && (PathPrefix(`/auth`) || PathPrefix(`/api/auth`) || PathPrefix(`/api/admin/federation`))
+      traefik.http.routers.prg32-auth-api-dual.priority: "100"
+      traefik.http.routers.prg32-auth-api-dual.entrypoints: websecure
+      traefik.http.routers.prg32-auth-api-dual.tls: "true"
+      traefik.http.routers.prg32-auth-api-dual.middlewares: dream-security-headers@file
+      traefik.http.services.prg32-auth-api-dual.loadbalancer.server.port: "5090"
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:5090/health || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 3s
+
   flask:
     profiles: ["dev"]
     build:
       context: .
       dockerfile: Dockerfile
     image: riscv-prg32/cartridge-store:dev
+    command: ["flask", "--app", "app:app", "run", "--host=0.0.0.0", "--port=5080", "--debug"]
     environment:
-      SECRET_KEY: ${PRG32_DEV_SECRET_KEY:-}
-      PRG32_BOOTSTRAP_TOKEN: ${PRG32_DEV_BOOTSTRAP_TOKEN:-}
+      # These stable values are local-development fallbacks only. Production
+      # uses a separate service and still requires an explicit SECRET_KEY.
+      SECRET_KEY: ${PRG32_DEV_SECRET_KEY:-prg32-local-development-secret-do-not-use-in-production-2026}
+      PRG32_BOOTSTRAP_TOKEN: ${PRG32_DEV_BOOTSTRAP_TOKEN:-prg32-local-development-bootstrap-token-2026}
       PRG32_ENV: development
       PRG32_SESSION_COOKIE_SECURE: "0"
       PRG32_STORE_DATA: /data
       PRG32_STORE_DB: /data/cartridge_store.sqlite
       PRG32_MP_MAX_PEERS: ${PRG32_MP_MAX_PEERS:-8}
       PRG32_MDNS_DISABLED: "${PRG32_MDNS_DISABLED:-1}"
+      FLASK_APP: app:app
+      FLASK_DEBUG: "1"
+      PYTHONDONTWRITEBYTECODE: "1"
     volumes:
-      - cartridge_store_dev_data:/data
+      - .:/app
+      - ${PRG32_FLASK_DATA_DIR:-./.local/flask/data}:/data
     networks:
       - app
       - edge
@@ -205,19 +262,31 @@ services:
       context: ./frontend
       dockerfile: Dockerfile.dev
     image: riscv-prg32/cartridge-store-frontend:dev
+    command: ["sh", "-c", "pnpm install --frozen-lockfile && exec pnpm exec next dev --webpack --hostname 0.0.0.0"]
     depends_on:
       flask:
+        condition: service_healthy
+      auth-writer-edge-proxy:
         condition: service_healthy
     environment:
       NODE_ENV: development
       NEXT_TELEMETRY_DISABLED: "1"
+      WATCHPACK_POLLING: "true"
+      WATCHPACK_POLLING_INTERVAL: "1000"
       FLASK_PROXY_TARGET: http://flask:5080
       PRG32_ADMIN_FASTIFY_TARGET: ${PRG32_ADMIN_FASTIFY_TARGET:-}
+      PRG32_FEDERATION_ADMIN_INTEGRATION_ENABLED: ${PRG32_FEDERATION_ADMIN_INTEGRATION_ENABLED:-false}
+      PRG32_FEDERATION_ADMIN_FASTIFY_TARGET: ${PRG32_FEDERATION_ADMIN_FASTIFY_TARGET:-}
+      PRG32_AUTH_INTEGRATION_ENABLED: ${PRG32_AUTH_INTEGRATION_ENABLED:-false}
+      PRG32_AUTH_FASTIFY_TARGET: ${PRG32_AUTH_FASTIFY_TARGET:-}
+      PRG32_DUAL_ORIGIN_INTEGRATION_ENABLED: ${PRG32_DUAL_ORIGIN_INTEGRATION_ENABLED:-true}
+      NEXT_PUBLIC_PRG32_DUAL_ORIGIN_ENABLED: ${PRG32_DUAL_ORIGIN_INTEGRATION_ENABLED:-true}
+      NEXT_PUBLIC_PRG32_API_ORIGIN: ${PRG32_DUAL_ORIGIN_API_ORIGIN:-https://api.prg32.dream.test}
       NEXT_PUBLIC_FLASK_WS_URL: wss://${PRG32_API_DOMAIN:-api.prg32.dream.test}/api/multiplayer
     volumes:
       - ./frontend:/app
-      - frontend_node_modules:/app/node_modules
-      - frontend_next_cache:/app/.next
+      - ${PRG32_FRONTEND_NODE_MODULES_DIR:-./.local/frontend/node_modules}:/app/node_modules
+      - ${PRG32_FRONTEND_NEXT_CACHE_DIR:-./.local/frontend/next-cache}:/app/.next
     networks:
       - app
       - edge
@@ -236,17 +305,3 @@ networks:
   edge:
     name: ${DREAM_EDGE_NETWORK:-dream_edge}
     external: true
-
-volumes:
-  cartridge_store_dev_data:
-    name: prg32_cartridge_store_dev_data
-  frontend_node_modules:
-    name: prg32_cartridge_store_frontend_node_modules
-  frontend_next_cache:
-    name: prg32_cartridge_store_frontend_next_cache
-  prg32_auth_writer_data:
-    name: ${PRG32_WRITER_VOLUME_PREFIX:-prg32_cartridge_store}_auth_writer_data
-  prg32_auth_writer_shadow:
-    name: ${PRG32_WRITER_VOLUME_PREFIX:-prg32_cartridge_store}_auth_writer_shadow
-  prg32_auth_writer_store:
-    name: ${PRG32_WRITER_VOLUME_PREFIX:-prg32_cartridge_store}_auth_writer_store

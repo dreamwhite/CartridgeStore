@@ -16,6 +16,10 @@ eggs/
 .eggs/
 lib/
 lib64/
+# `lib/` above is the Python packaging default; frontend source modules are
+# repository files and must remain visible to version control.
+!/frontend/src/lib/
+!/frontend/src/lib/**
 parts/
 sdist/
 var/
@@ -168,6 +172,7 @@ frontend/out/
 frontend/coverage/
 *.tsbuildinfo
 .dev-data/
+.local/
 
 # Spyder project settings
 .spyderproject
@@ -231,3 +236,5 @@ __marimo__/
 
 # Local secret-key registries and migration capsules
 .secrets/
+# Disposable Authentik/Playwright integration reports; never commit browser artifacts.
+/tests/integration/authentik/reports/

@@ -6,21 +6,22 @@ multiplayer WebSocket relay as one service.
 ## Compose profiles
 
 The repository uses one `docker-compose.yml` with explicit profiles. The
-`dev` profile runs the transitional Flask compatibility API and Next.js behind
-the shared Dream Platform Traefik installation. It expects the external
-`dream_edge` network created by that platform.
+`dev` profile runs Next.js, the Fastify authentication/federation writer, the
+transitional Flask compatibility API, and an edge bridge behind the shared
+Dream Platform Traefik installation. It expects the external `dream_edge`
+network created by that platform.
 
 Start the platform Traefik service first, then run:
 
 ```bash
-docker compose --profile dev up --build
+docker compose --profile dev up -d --build
 ```
 
 The dev profile exposes two HTTPS hostnames through Traefik:
 
 ```text
-https://store.prg32.dream.test  # Next.js application and same-origin HTTP proxy
-https://api.prg32.dream.test    # Flask compatibility API and WebSocket relay
+https://store.prg32.dream.test  # Next.js application
+https://api.prg32.dream.test    # Fastify auth + Flask compatibility API/WS
 ```
 
 The defaults can be overridden without editing Compose:
@@ -28,25 +29,95 @@ The defaults can be overridden without editing Compose:
 ```bash
 PRG32_STORE_DOMAIN=store.prg32.dream.test \
 PRG32_API_DOMAIN=api.prg32.dream.test \
-docker compose --profile dev up --build
+docker compose --profile dev up -d --build
 ```
 
-Next.js uses `FLASK_PROXY_TARGET=http://flask:5080` for server-side HTTP
-rewrites. Browser sessions remain same-origin on the store hostname. The
-multiplayer WebSocket uses `wss://api.prg32.dream.test/api/multiplayer`, so
-Traefik forwards the upgrade directly to Flask. Dev data and frontend caches
-use named Docker volumes and do not touch the production `data/` bind mount.
+The API host is split by route ownership: `/auth/*`, `/api/auth/*`, and
+`/api/admin/federation/*` go through the Fastify writer bridge; legacy Flask
+routes, including `/api/games` and `/api/multiplayer`, remain on Flask. The
+Next.js browser calls the API origin directly in dev, while Traefik still
+provides the HTTPS edge and WebSocket upgrade path.
 
-The Flask service requires `PRG32_DEV_SECRET_KEY`; the application refuses to
-start if it is missing. Generate a local-only value before starting it:
+The dev profile starts `auth-writer-init`, `auth-writer`,
+`auth-writer-edge-proxy`, `flask`, and `next`. It does not start an identity
+provider or browser-test infrastructure. All writable dev state is
+bind-mounted below `.local/`; neither service mounts production `./data`.
+
+### Repository-local Docker state
+
+The Compose file deliberately does not declare Docker-managed data volumes.
+Writable state and rebuildable caches use explicit bind directories relative to
+the repository root:
+
+```text
+data/                         production Flask data
+.local/flask/data/            dev Flask data
+.local/writer/                dev Fastify auth/shadow/store data
+.local/backend/node_modules/  backend dependency cache
+.local/frontend/              frontend dependency and Next cache
+```
+
+`.local/` is ignored by Git. A fresh checkout therefore starts with an empty,
+visible local state tree, and moving the repository to another machine does
+not require importing anonymous Docker volumes. The disposable writer init
+also creates its local synthetic key registry inside `.local/writer/auth-data`;
+no ignored `.secrets` file is required for the default dev profile. Persistent
+production data is still explicit under `data/` (or `PRG32_PROD_DATA_DIR`).
+Override any state location with the corresponding `PRG32_*_DIR` Compose
+variable when the host uses a separate data disk.
+
+The dev writer defaults to UID/GID `0:0` because Docker Desktop bind mounts
+preserve host ownership and the host UID is not portable across machines. Set
+`PRG32_WRITER_UID` and `PRG32_WRITER_GID` when the host uses a matching Linux
+UID/GID; this affects only the dev/writer profiles, not production images.
+
+### Development hot reload
+
+The `dev` profile watches the mounted source trees inside the containers:
+
+- `backend/` is mounted into Fastify and `tsx watch` restarts the TypeScript
+  backend after source changes.
+- The repository root is mounted into Flask and `flask run --debug` reloads the
+  transitional compatibility API after Python/template/static changes.
+- `frontend/` is mounted into Next.js. Next runs its webpack development server
+  with Watchpack polling so HMR also works reliably when the repository is on a
+  Docker Desktop/macOS filesystem.
+
+Start the stack with:
 
 ```bash
-export PRG32_DEV_SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
-export PRG32_DEV_BOOTSTRAP_TOKEN="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
-docker compose --profile dev up --build
+source "$HOME/.nvm/nvm.sh"
+nvm use 24
+docker compose --profile dev up -d --build
 ```
 
-Do not commit this value or reuse it in production.
+Follow reload activity with:
+
+```bash
+docker compose --profile dev logs -f auth-writer flask next
+```
+
+Changes to `package.json` or either lockfile require a rebuild so the bind
+mounted dependency directories are reseeded:
+
+```bash
+docker compose --profile dev up -d --build auth-writer next
+```
+
+The Compose file supplies stable local-only fallback secrets for Flask and the
+Fastify disposable writer, so the canonical command needs no manual exports.
+Override them with uncommitted environment values when desired; never reuse
+them in production.
+
+```bash
+docker compose --profile dev up -d --build
+```
+
+Stop dev without deleting repository-local state:
+
+```bash
+docker compose --profile dev down --remove-orphans
+```
 
 The isolated TypeScript backend foundation is available through the `backend`
 profile. It binds only to `127.0.0.1:5090` and uses read-only fixture data:
@@ -67,29 +138,35 @@ docker compose --profile writer up --build auth-writer
 ```
 
 `auth-writer-init` creates only synthetic databases and a disposable cartridge
-filesystem in named volumes. The writer mounts its shadow SQLite volume
-read-only and its auth/database and cartridge volumes separately. The writer
-container has a read-only root filesystem, dropped capabilities, and
+filesystem in explicit bind directories. It pre-creates the two SQLite files
+before applying the schema because SQLite's first journaled write is not
+reliable on a newly-created Docker Desktop/macOS bind-mounted database file.
+The writer mounts its shadow SQLite directory read-only and its auth/database
+and cartridge directories separately. The writer container has a read-only
+root filesystem, dropped capabilities, and
 `no-new-privileges`. It does not mount `/data`, the production database, or the
 operational cartridge directory.
 
 The init step is deliberately explicit: normal startup does not create missing
-databases. To isolate smoke-test volume names, set
-`PRG32_WRITER_VOLUME_PREFIX` before both commands. Removing this test data is
-limited to the dedicated prefix, for example:
+databases. To isolate smoke-test state, set the bind-directory variables before
+both commands. Removing this test data is limited to those explicit paths, for
+example:
 
 ```bash
-PRG32_WRITER_VOLUME_PREFIX=prg32_m45_smoke \
-docker compose --profile writer --profile writer-init down -v
+PRG32_WRITER_DATA_DIR=./.local/m45-smoke/auth-data \
+PRG32_WRITER_SHADOW_DIR=./.local/m45-smoke/shadow \
+PRG32_WRITER_STORE_DIR=./.local/m45-smoke/store \
+docker compose --profile writer --profile writer-init down
+rm -rf -- ./.local/m45-smoke
 ```
 
 This is a trusted development boundary, not a defense against a privileged
 host administrator, Docker daemon access, or an untrusted process that can
-modify the named volumes.
+modify the bind-mounted state directories.
 
 M5.1 enables submission writes only in `auth-writer`. Bundle uploads are
 validated and staged below `pending/<submission_id>/` in the disposable
-`/writer-store` volume. The service does not write the published catalog index;
+`/writer-store` bind directory. The service does not write the published catalog index;
 review and publication remain Flask responsibilities until the later M5.2
 gate.
 

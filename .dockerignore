@@ -8,6 +8,7 @@ __pycache__
 *.pyc
 *.pyo
 .secrets
+.local
 *.sqlite
 *.db
 data
