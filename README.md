@@ -1,9 +1,35 @@
 # PRG32 Cartridge Store
 
-An installable Flask/PWA catalog and classroom service hub for PRG32 `.prg32`
-game cartridges.
+PRG32 Cartridge Store is the classroom service for `.prg32` cartridges. The
+repository is in an incremental migration: Next.js is the active frontend,
+TypeScript/Fastify is the new backend foundation, and Flask remains the
+authoritative compatibility service for the existing catalog, firmware, score,
+metrics, publishing, and multiplayer contracts.
 
-## Quick Deploy With Docker
+Read the [documentation index](docs/README.md) first. The [architecture
+guide](docs/architecture.md) describes the current route ownership and
+container topology; [development](docs/development.md) is the canonical local
+workflow.
+
+## Quick development with Docker
+
+The normal development workflow uses the single Compose file and the shared
+Traefik edge:
+
+```bash
+docker compose --profile dev up -d --build
+```
+
+Open:
+
+- <https://store.prg32.dream.test> for Next.js;
+- <https://api.prg32.dream.test> for API and WebSocket routes.
+
+The profile uses repository-local `.local/` bind mounts, hot reload for Flask,
+Fastify, and Next.js, and no anonymous persistent Docker volumes. See
+[docs/development.md](docs/development.md) for prerequisites and diagnostics.
+
+## Quick production deployment
 
 ```bash
 SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')" \
@@ -21,10 +47,10 @@ Stop the service:
 docker compose --profile prod down
 ```
 
-See [docs/docker.md](docs/docker.md) for manual `docker run`, LAN deployment,
-logs, and maintenance notes.
+See [docs/docker.md](docs/docker.md) for profiles, persistent data, manual
+`docker run`, LAN deployment, logs, and maintenance notes.
 
-## Run With Python
+## Transitional Flask-only workflow
 
 ```bash
 python3 -m venv .venv
@@ -43,8 +69,9 @@ Set `PRG32_STORE_DB=/path/to/cartridge_store.sqlite` to choose a different
 SQLite database. Legacy `PRG32_SCORE_DB` and `PRG32_METRICS_DB` environment
 variables are also honored when `PRG32_STORE_DB` is not set.
 
-For a detailed environment setup, see
-[docs/getting_started.md](docs/getting_started.md).
+For a detailed Python compatibility setup, see
+[docs/getting_started.md](docs/getting_started.md). For the TypeScript/Next.js
+workflow, use [docs/development.md](docs/development.md).
 
 ## Users and Roles
 
@@ -203,6 +230,17 @@ pytest -q
 ## Documentation
 
 Start here:
+
+- [Documentation index](docs/README.md): current architecture, development,
+  configuration, security, operations, API, and migration history.
+- [Current architecture](docs/architecture.md): real service topology, route
+  ownership, persistence, and migration invariants.
+- [Development guide](docs/development.md): Node 24, pnpm, Docker profiles,
+  HMR, direct processes, and verification commands.
+- [Configuration reference](docs/configuration.md): runtime variables,
+  isolation switches, resource limits, and origins.
+- [Security model](docs/security.md): trust boundaries, authentication,
+  federation, upload limits, and production invariants.
 
 - [Getting started](docs/getting_started.md): local Python setup, first-run
   Store configuration, one-time administrator bootstrap, package upload and review,

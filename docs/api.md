@@ -1,5 +1,13 @@
 # Unified Service API
 
+This is the public compatibility contract, not a list of whichever process is
+currently serving each route. During the migration, Flask remains authoritative
+for the legacy catalog, firmware, score, metrics, publishing, and multiplayer
+paths, while the isolated Fastify backend provides the new auth and generic
+OIDC/SAML/federation boundaries. See [Current architecture](architecture.md)
+for route ownership and [the contract baseline](modernization/13-api-contracts.md)
+for the compatibility evidence.
+
 PRG32 Cartridge Store combines cartridge catalog, score, metrics, multiplayer,
 authentication, and statistics contracts on one host.
 

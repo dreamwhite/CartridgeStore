@@ -10,7 +10,15 @@ This directory is the isolated Next.js/TypeScript application for the incrementa
 
 ## Development
 
-From the repository root, start Flask on its normal port in one terminal. In a second terminal:
+The canonical integrated workflow is documented at
+[`../docs/development.md`](../docs/development.md):
+
+```bash
+docker compose --profile dev up -d --build
+```
+
+For a direct process workflow, start Flask on its normal port in one terminal.
+In a second terminal:
 
 ```bash
 source "$HOME/.nvm/nvm.sh"

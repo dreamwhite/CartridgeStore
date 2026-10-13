@@ -1916,3 +1916,28 @@ Authentik E2E remains removed by explicit project direction. No subsequent
 milestone was started. Recommended next action: create a review/commit
 boundary, then authorize the next small transaction-sensitive maintainability
 batch independently.
+
+## Documentation foundation — 2026-10-13
+
+Report: `docs/modernization/69-documentation-foundation-report.md`
+
+Completed:
+
+- added a documentation index and current architecture guide;
+- documented the single Compose file, profiles, container count, bind-mounted
+  `.local/` state, Traefik origins, HMR, and production multi-stage images;
+- documented Node 24/pnpm development, direct-process fallback, verification
+  commands, and the active backend-only federation validation boundary;
+- added configuration and security references derived from the actual parser,
+  Compose file, route registration, and service boundaries;
+- aligned the root README, frontend README, and API guide with the real
+  transitional Flask/Fastify/Next.js topology.
+
+No application behavior, schema, API identifier, firmware contract, WebSocket
+route, authentication behavior, deployment route, or sibling repository was
+changed. No credentials or production artifacts were added.
+
+Milestone result: **GO for the documentation foundation**. Next milestone:
+select one explicit migration boundary, update its contract evidence and route
+ownership documentation together, and keep Flask until parity and cutover
+criteria are proven.
