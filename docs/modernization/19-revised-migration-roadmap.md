@@ -1102,3 +1102,817 @@ The production cutover gate remains closed. Key escrow/retention ownership,
 Flask transitional secret handling, registration-link log remediation, and
 explicit classification of any SAML private-key material remain prerequisites
 for a later cutover milestone.
+
+## M6.3d.2h.1 federated authentication and identity mapping audit
+
+M6.3d.2h.1 is complete as an audit and architecture gate. The evidence and
+final TypeScript design are recorded in
+docs/modernization/54-m6-3d2h1-federated-authentication-identity-mapping-audit.md.
+No code, dependency, schema, secret, frontend flow, Compose service, Flask
+behavior, production route, production data, commit, or deployment changed.
+
+This milestone is a newly required architecture decision following the
+M6.3d.2g.2 security and key-lifecycle work. Earlier roadmap text that excluded
+OIDC/SAML adapters from the TypeScript target is preserved as historical
+planning context; that exclusion is superseded by this approved final
+architecture decision and must not be interpreted as permission to implement
+federation in the audit milestone.
+
+Completed audit work:
+
+- verified that M6.3d.2h.1 was available and did not conflict with an existing
+  report identifier;
+- audited the Fastify local authentication lifecycle, sessions, CSRF,
+  bearer/API-token compatibility, revocation, account disablement gap, and
+  process-local rate limiting;
+- assessed the current users.external_id/users.external_provider fields and
+  defined a conceptual issuer/provider-scoped identity-link model without
+  executing DDL;
+- defined Flask-independent identity, account-state, protocol-validation,
+  replay, linking, group-mapping, secret, logging, and emergency-admin
+  invariants;
+- selected openid-client as the preferred OIDC implementation candidate;
+- selected @node-saml/node-saml as the preferred SAML candidate subject to a
+  current patched release and security regression review;
+- deferred samlify and rejected Passport as the Fastify SAML boundary;
+- defined OIDC Authorization Code + PKCE, narrow SP-initiated SAML, provider
+  configuration, protected secret references, local-session integration,
+  frontend contract boundaries, threat model, and disposable authentik E2E
+  architecture;
+- defined future M6.3d.2h.2 OIDC, M6.3d.2h.3 SAML, and M6.3d.2h.4
+  authentik-E2E milestones with acceptance, rollback, and exclusion criteria.
+
+Architecture decisions and restrictions:
+
+- OIDC is implementation-first; SAML is implementation-second and
+  SP-initiated only initially.
+- No automatic email linking is permitted.
+- External groups cannot grant local roles or admin capability.
+- A future explicit disabled-account representation is mandatory before any
+  federated login is enabled; the current schema does not provide one.
+- A durable/shared single-use transaction and replay store is mandatory before
+  multi-replica federation.
+- Provider-scoped secret references are required for multiple OIDC providers
+  and SAML private keys; raw protocol material must not be persisted or logged.
+- Authentik is a disposable test provider only; it is not a runtime dependency.
+- Existing firmware/API contracts, Flask/Jinja routes, local authentication,
+  Docker production routing, and the companion PRG32 repository remain
+  unchanged.
+
+M6.3d.2h.1 status: **complete as audit; production federation and cutover are
+not approved**. The next implementation milestone is M6.3d.2h.2, conditional
+on resolving the report's open decisions and accepting its security
+invariants. M6.3d.2h.3 and M6.3d.2h.4 remain future work. No earlier
+milestone is being retroactively marked complete.
+
+Verification evidence for this audit:
+
+- Node 24.20.0 selected with nvm use 24;
+- Fastify backend check passed with 20 Vitest files and 111 tests;
+- Next.js frontend check passed with 4 Vitest files and 10 tests using the
+  existing Flask proxy target;
+- all requested Compose profiles passed configuration normalization;
+- Python compilation passed;
+- the compatible Python 3.13 environment ran 64 Flask tests with 63 passed
+  and the known mDNS/SECRET_KEY pre-existing failure;
+- git diff --check passed, and no companion-repository files changed.
+
+The deviation from the initial TypeScript roadmap is deliberate: federated
+authentication was initially excluded as a conditional future concern and is
+now newly required as the final TypeScript architecture. This gate changes
+the planning decision only; it does not authorize implementation, migration,
+provider enablement, or production cutover.
+
+## M6.3d.2h.2 federated identity foundation evidence
+
+M6.3d.2h.2 is complete only for the isolated Fastify/TypeScript writer
+foundation. The implementation and verification evidence is recorded in
+`docs/modernization/55-m6-3d2h2-federated-identity-foundation-security-prerequisites-report.md`.
+
+Completed:
+
+- additive, idempotent writer-only schema migration with explicit account
+  disablement, provider, identity, durable session, transaction, replay, and
+  provider-secret tables;
+- durable encrypted sessions with HMAC-only session identifiers and CSRF
+  protection;
+- centralized disabled-account enforcement and an additive administrative
+  enable/disable operation with token/session revocation;
+- provider-neutral, disabled-by-default configuration with strict issuer and
+  URL binding;
+- branded external-identity boundary with no email auto-linking, no external
+  role elevation, retired-link reservation, and recent local reauthentication;
+- transactional single-use state/nonce/PKCE storage and replay detection;
+- provider-scoped secret envelope integration, backup preflight, rotation, and
+  legacy staged-restore compatibility;
+- disposable foundation regression tests.
+
+Evidence:
+
+- backend Node 24 check: 21 Vitest files / 115 tests, typecheck, ESLint, and
+  build passed;
+- frontend Node 24 check with `FLASK_PROXY_TARGET=http://flask:5080` passed:
+  typecheck, ESLint, 4 Vitest files / 10 tests, and Next.js build;
+- all requested Compose profiles normalized successfully;
+- `git diff --check` passed;
+- Python baseline remains 63 passed and one pre-existing mDNS failure caused by
+  `TESTING=False` without `SECRET_KEY`.
+
+No OIDC/SAML flow, Authentik integration, frontend login, Flask change,
+production route, deployment, schema change in the operational database,
+production-data migration, commit, or push was performed. M6.3d.2h.2 has no
+reverse DDL; rollback requires a verified pre-migration writer backup and an
+explicit operator decision.
+
+The prior roadmap wording that placed OIDC directly in M6.3d.2h.2 is
+superseded by this security gate. The next sequence is now:
+
+1. **M6.3d.2h.3 — OIDC protocol implementation**;
+2. **M6.3d.2h.4 — narrow SP-initiated SAML implementation**;
+3. **M6.3d.2h.5 — disposable Authentik OIDC/SAML end-to-end validation**.
+
+Production federation and Flask retirement remain closed until those later
+milestones have independent acceptance evidence.
+
+## M6.3d.2h.3 OpenID Connect protocol implementation evidence
+
+M6.3d.2h.3 is complete for the isolated Fastify/TypeScript writer profile and
+is **NO-GO for production federation**. Evidence is recorded in
+`docs/modernization/56-m6-3d2h3-openid-connect-protocol-implementation-report.md`.
+
+Completed:
+
+- pinned `openid-client@6.8.8` and runtime `jose@6.2.12` under Node 24;
+- added explicit trusted callback-origin configuration and exact callback path
+  validation;
+- added bounded provider discovery, same-origin metadata/endpoints, HTTPS
+  enforcement outside test mode, redirect rejection, timeout, and body limits;
+- implemented Authorization Code + PKCE with S256, encrypted durable nonce
+  and verifier material, hashed state, signed HttpOnly browser correlation,
+  single-use callback consumption, and replay rejection;
+- validated ID-token signature against same-origin JWKS plus issuer, audience,
+  nonce, subject, and authorized-party rules;
+- resolved only pre-linked external identities, with no email/group auto-linking,
+  disabled-account rejection, durable session rotation, stable errors, and
+  bounded audit events;
+- added a loopback-only disposable OIDC protocol mock and end-to-end tests for
+  valid authentication, PKCE, signature rejection, unknown identity, disabled
+  account, browser-binding failure, replay, and token non-persistence;
+- preserved Flask, Jinja, firmware contracts, operational data, Compose
+  routing, and the companion `../PRG32` repository.
+
+Verification evidence:
+
+- backend `pnpm run check`: PASS, 22 Vitest files / 118 tests, typecheck,
+  ESLint, and TypeScript build;
+- frontend typecheck, ESLint, and 10 tests: PASS; Next.js production build:
+  PASS with the already-required `FLASK_PROXY_TARGET=http://backend:5080`;
+- `pnpm audit --prod`: PASS with no known vulnerabilities;
+- Python syntax: PASS; Python suite: 63 passed and one pre-existing mDNS
+  failure caused by `TESTING=False` without `SECRET_KEY`;
+- all Compose profiles config: PASS; existing Flask Docker image build: PASS;
+- `git diff --check`: PASS.
+
+Remaining work before production approval is provider administration and
+encrypted-secret lifecycle, confidential-provider integration, distributed
+rate limiting and cache policy, JWKS/key rotation, logout policy, frontend
+integration, and independent security review. The next milestone is
+**M6.3d.2h.4 — narrow SP-initiated SAML implementation**, not Authentik or
+production cutover. No commit or push was performed.
+
+## M6.3d.2h.4 SAML 2.0 Service Provider implementation evidence
+
+M6.3d.2h.4 is complete for the isolated Fastify/TypeScript writer profile and
+is **NO-GO for production federation**. Evidence is recorded in
+`docs/modernization/57-m6-3d2h4-saml2-service-provider-implementation-report.md`.
+
+Completed:
+
+- pinned and integrated `@node-saml/node-saml@5.1.0` under Node 24 after
+  reviewing its upstream security advisories and XML-validation behavior;
+- added additive federation schema version 4 fields for SAML IdP/SP metadata,
+  certificates, signature policy, NameID format, entry point, clock skew, and
+  manual metadata lifecycle;
+- implemented SP-initiated HTTP-Redirect AuthnRequest, HTTP-POST ACS, SP
+  metadata, safe provider listing, persistent NameID enforcement, exact
+  issuer/audience checks, response/assertion signature validation, exact ACS
+  destination and verified subject recipient checks;
+- reused durable federation transactions, replay storage, encrypted provider
+  secrets, identity links, session rotation, RBAC boundaries, and audit log;
+- added a dedicated `SameSite=None; Secure` SAML browser correlation cookie,
+  bounded RelayState, stable error envelopes, resource limits, and replay
+  checks for request, response, assertion, and response-content identifiers;
+- added disposable RSA-key SAML integration tests through the real Node-SAML
+  validation path, including negative signature, browser, issuer, audience,
+  destination, recipient, temporal, and replay cases;
+- preserved Flask/Jinja routes, firmware contracts, frontend behavior,
+  production routing, operational data, and the companion `../PRG32` repo.
+
+Verification evidence:
+
+- backend Node 24: typecheck, ESLint, build, and **23 Vitest files / 121 tests**
+  passed;
+- frontend Node 24 with `FLASK_PROXY_TARGET=http://backend:5080`: typecheck,
+  ESLint, **4 files / 10 tests**, and Next.js production build passed;
+- `pnpm audit --prod`: PASS; full audit retains four test-only Vitest/Tinypool
+  findings;
+- Compose profiles `prod`, `backend`, `writer-init`, `writer`, and `dev`:
+  configuration normalization passed;
+- Python compilation passed; Python suite remains **63 passed and one
+  pre-existing mDNS/SECRET_KEY failure**;
+- `git diff --check`: PASS; no commit or push performed.
+
+The next milestone is **M6.3d.2h.5 — disposable Authentik OIDC/SAML
+end-to-end validation**. It remains a local disposable test gate only; it must
+not enable production federation, add frontend login, retire Flask, or deploy.
+
+## M6.3d.2h.5 Authentik OIDC/SAML end-to-end validation evidence
+
+M6.3d.2h.5 is **INCOMPLETE / NO-GO**. Evidence is recorded in
+`docs/modernization/58-m6-3d2h5-authentik-oidc-saml-end-to-end-validation-report.md`.
+
+Completed in the disposable `authentik-e2e` profile:
+
+- pinned Authentik 2026.8.3 server/worker and PostgreSQL 16 topology;
+- isolated Compose project, network, volumes, generated CA/certificates, and
+  runtime-only credentials;
+- supported Authentik API provisioning for a pre-linked test user,
+  confidential OIDC provider/application, SAML provider/application,
+  persistent NameID, strict origins, and signed RSA-SHA256 configuration;
+- encrypted OIDC secret initialization in the Fastify writer;
+- Node 24 backend/frontend verification and existing regression suites.
+- a multistage Playwright test image retaining the official browsers while
+  replacing the runner binary with pinned Node 24 LTS.
+
+The real Node 24 run reached a healthy writer and launched the Playwright
+browsers, but the browser container did not complete HTTP navigation to the
+Compose services.
+No OIDC or SAML browser result is counted as passed. Certificate rotation and
+browser cookie assertions therefore remain unverified. The next milestone is
+not authorized until this browser-network blocker is fixed and the full matrix
+is rerun.
+
+## M6.3d.2h.5a Playwright connectivity recovery evidence
+
+M6.3d.2h.5a is **COMPLETE for the disposable connectivity and federation E2E
+gate; NO-GO for production federation**. Evidence is recorded in
+`docs/modernization/59-m6-3d2h5a-playwright-connectivity-recovery-e2e-report.md`.
+
+Completed:
+
+- recovered and independently diagnosed browser-container DNS, TCP, TLS, and
+  HTTP readiness for `authentik.test:8443` and `writer.test:8443`;
+- added explicit disposable CA trust for Node, Chromium, Firefox NSS, and
+  WebKit, with health-gated Compose dependencies;
+- retained Node 24 LTS (`v24.21.0`) and all three official Playwright engines;
+- made the single lifecycle command provision, test, report, clean, and return
+  nonzero on failure;
+- stabilized Authentik flow rendering and consent interaction without
+  weakening backend validation or exposing credentials;
+- validated OIDC and SAML on Chromium, Firefox, and WebKit: **6/6 scenarios
+  passed**;
+- verified linked-user identity through Fastify `/auth/me`, SAML correlation
+  cookie lifecycle, disposable JSON reporting, and cleanup.
+
+Evidence:
+
+- `./tests/integration/authentik/run.sh diagnose`: PASS;
+- `./tests/integration/authentik/run.sh smoke`: PASS for Chromium/Firefox/WebKit;
+- `./tests/integration/authentik/run.sh saml`: PASS, 3/3;
+- `./tests/integration/authentik/run.sh run`: PASS, 6/6 (OIDC+SAML × three
+  engines);
+- backend protocol-level negative/replay and account-state regressions remain
+  green in the existing Vitest suite;
+- the disposable Compose stack removed its containers, volumes, and network
+  after the final run.
+
+The deviation from the previous M6.3d.2h.5 status is limited to the authorized
+5a recovery: the earlier browser navigation blocker is now resolved and the
+full matrix is counted. WebKit's ACS request inspection omits the raw Cookie
+header, so its cookie acceptance uses combined server redirect, authenticated
+session, and cookie-clearing evidence; no cookie value is logged. A transient
+provisioning HTTP 500 was observed during one disposable retry but did not
+recur in the final full run and remains an operational flake to monitor.
+
+This gate uses Authentik only as a disposable real OIDC/SAML provider to test
+the generic federation boundary. It does not use the production provider,
+credentials, Traefik, production DNS, production data, frontend login, public
+routing, or Flask retirement. Certificate rollover/revocation, browser-level
+negative/replay journeys, and production federation remain open. The next
+milestone requires separate authorization; no automatic transition was made.
+
+## M6.3d.2h.5b Federation certificate lifecycle and provider operations
+
+M6.3d.2h.5b implementation is **COMPLETE for the authorized code and fixture
+scope; verification INCOMPLETE / NO-GO for production federation**. Evidence is
+recorded in `docs/modernization/60-m6-3d2h5b-federation-certificate-lifecycle-provider-operations-report.md`.
+
+Completed:
+
+- added provider generations and generation-bound federation transactions;
+- invalidated pending callbacks on provider disablement, security changes, and
+  secret rotation, preventing revival after re-enable;
+- added bounded SAML A+B trust overlap with explicit retirement and expiry
+  validation, without trusting embedded certificates;
+- added safe provider status with certificate fingerprints and no secrets;
+- added encrypted provider-scoped secret rotation and identity-link retirement
+  operations;
+- applied local-account disablement through existing immediate session/token
+  invalidation;
+- added disposable, test-only lifecycle operator routes and a `lifecycle`
+  integration command without creating a production admin surface;
+- added OIDC and SAML rollover/retirement fixture coverage.
+
+Evidence:
+
+- backend Node 24 `pnpm run check`: PASS, 24 Vitest files / 126 tests;
+- `pnpm audit --prod`: PASS, no known production vulnerabilities;
+- frontend Node 24 `FLASK_PROXY_TARGET=http://backend:5080 pnpm run check`:
+  PASS, 4 test files / 10 tests and Next.js production build;
+- OIDC fixture rollover: 4/4; SAML fixture rollover: 4/4; lifecycle unit
+  tests: 3/3;
+- the preceding 5a disposable Authentik gate remains 6/6 across Chromium,
+  Firefox, and WebKit;
+- the new browser lifecycle verification was intentionally skipped at the
+  user's request and is not counted as passed;
+- no Flask, firmware, production data, production credentials, or deployment
+  changes were made, and no commit or push was performed.
+
+Remaining work is real Authentik key/certificate rotation, completed browser
+lifecycle evidence, and a production administrative surface using native RBAC,
+CSRF, reauthentication, and audit controls. The next milestone requires
+separate authorization; do not begin it automatically.
+
+## M6.3d.2h.6 Federation security audit and frontend integration readiness
+
+M6.3d.2h.6 is complete as an audit and is **GO for an isolated Next.js
+authentication implementation; NO-GO for production federation**. Evidence is
+recorded in
+`docs/modernization/61-m6-3d2h6-federation-security-frontend-readiness-audit.md`.
+
+Completed:
+
+- audited local password authentication, account disablement, session rotation,
+  expiration, revocation, logout, bearer separation, CSRF, and rate limits;
+- audited generic OIDC authorization-code/PKCE, state, nonce, issuer, audience,
+  `azp`, signature/JWKS, redirect, provider-generation, expiry, replay, and
+  browser-correlation behavior;
+- audited generic SP-initiated SAML Redirect/POST, trusted certificate sets,
+  signatures, issuer/audience/destination/recipient/`InResponseTo`, temporal
+  validation, persistent NameID, replay, correlation, and session behavior;
+- confirmed exact external identity binding by protocol/provider/issuer/subject,
+  no email auto-linking, no automatic user creation, centralized RBAC, account
+  disablement, provider generation invalidation, encrypted provider secrets, and
+  bounded audit/error behavior;
+- audited test-only lifecycle route registration and disposable Authentik
+  isolation without using production credentials or the sibling `../PRG32` repo;
+- inventoried the exact backend endpoint matrix and current Next.js client/proxy
+  boundary, including the absence of frontend login UI and production provider
+  administration;
+- recorded findings for test-route operational isolation, missing admin
+  reauthentication, SAML concurrent-consume coverage, and local-only logout;
+- verified frontend readiness separately from production federation readiness.
+
+Verification:
+
+- backend Node 24 `pnpm run check`: PASS, 24 Vitest files / 126 tests;
+- backend `pnpm audit --prod`: PASS, no known vulnerabilities;
+- targeted auth/OIDC/SAML/federation/RBAC/admin tests: PASS, 7 files / 37 tests;
+- frontend Node 24 `FLASK_PROXY_TARGET=http://backend:5080 pnpm run check`:
+  PASS, 4 test files / 10 tests and Next.js production build;
+- single root Compose profile configuration: PASS;
+- full browser lifecycle was intentionally skipped and is not counted as passed;
+- real provider key/certificate rollover remains unverified;
+- no application behavior, production data, schema, deployment, commit, or push
+  was changed by this audit.
+
+Decision and next work:
+
+- **Frontend:** GO for an isolated Next.js authentication UI/integration
+  milestone using the exact existing contracts and same-origin proxy model.
+- **Production federation:** NO-GO until provider administration has native
+  RBAC/CSRF/reauthentication/audit controls, lifecycle routes fail closed behind
+  an explicit test-only gate, SAML concurrent-consume coverage is added, logout
+  policy is decided, and real generic-provider rotation evidence exists.
+- Next authorized milestone: **M6.3d.2h.7 — Next.js authentication integration
+  readiness**. It must preserve Flask/Jinja routes and must not enable production
+  federation automatically.
+
+## M6.3d.2h.7 Next.js authentication UI and isolated Fastify integration
+
+M6.3d.2h.7 is **COMPLETE for isolated local authentication UI and routing;
+GO for isolated manual UI testing; NO-GO for production federation**. Evidence is
+recorded in
+`docs/modernization/62-m6-3d2h7-nextjs-authentication-ui-isolated-fastify-integration-report.md`.
+
+Completed:
+
+- implemented the responsive Next.js `/login` page with local username/email and
+  password authentication;
+- added CSRF acquisition, same-origin credentials, stable error mapping, and
+  local logout through the verified Fastify contracts;
+- added dynamic provider discovery and provider-neutral OIDC/SAML browser
+  initiation without Authentik-specific code;
+- added TanStack Query current-user state with anonymous/error distinction,
+  session refresh, logout invalidation, and disabled-account/error handling;
+- added isolated `/account` protected navigation without globally protecting
+  Flask-backed or legacy Jinja pages;
+- added development/test-only `/__auth-fastify/*` rewrites and canonical OIDC
+  callback/SAML ACS forwarding, disabled by default;
+- rejected unsafe production activation of the auth proxy at Next config load;
+- connected the disposable writer to the Compose `app` network and made its
+  public federation origin configurable without enabling it by default;
+- added focused frontend tests for providers, local login, CSRF, safe redirects,
+  session states, logout, sanitization, and isolation.
+
+Verification:
+
+- backend Node 24 `pnpm run check`: PASS, 24 files / 126 tests;
+- backend `pnpm audit --prod`: PASS, no known vulnerabilities;
+- frontend Node 24 `pnpm run check`: PASS, 8 files / 24 tests and Next build;
+- production guard test: PASS, configured auth proxy rejected by production
+  build;
+- Compose dev/writer configuration: PASS;
+- disposable Next-to-Fastify local integration: PASS for CSRF, bootstrap,
+  session `/auth/me`, logout, and post-logout 401;
+- full lifecycle Playwright matrix was not executed;
+- real OIDC/SAML provider login was not executed and is not counted as passed;
+- no Flask/Python, firmware, production database, sibling repository,
+  deployment, commit, or push change was made.
+
+Remaining work and next milestone:
+
+- M6.3d.2h.6 findings FND-01 through FND-04 remain open;
+- provider callback configuration must use the public canonical callback paths;
+- real generic OIDC/SAML interoperability and HTTPS cookie behavior remain
+  unverified;
+- next authorized milestone: **M6.3d.2h.8 — isolated manual federation
+  interoperability and callback verification**;
+- do not begin provider administration, production federation, Fastify cutover,
+  Flask retirement, or deployment automatically.
+
+## M6.3d.2h.8 Canonical authentication routing and secure provider administration
+
+M6.3d.2h.8 is **COMPLETE for the isolated Fastify/Next.js foundation; NO-GO
+for production federation and cutover**. Evidence is recorded in
+`docs/modernization/63-m6-3d2h8-canonical-auth-routing-secure-provider-administration-api-report.md`.
+
+Completed:
+
+- removed the active frontend dependency on `/__auth-fastify/*` and moved the
+  Next.js client to canonical `/auth/*` and `/api/auth/*` contracts;
+- made isolated canonical auth routing explicit, disabled by default,
+  production-rejected, and pattern-isolated from Flask catch-alls;
+- preserved exact OIDC callback, SAML ACS, and SAML metadata paths and the
+  existing same-origin cookie/public-origin model;
+- added native provider-neutral Fastify administration routes for safe listing,
+  creation, update, status, enable/disable, secret rotation, certificate
+  rollover, pending-transaction revocation, and explicit identity link
+  administration;
+- added centralized federation read/manage permissions, browser-session and
+  CSRF enforcement, session-bound recent local administrator reauthentication,
+  bounded failed-step-up attempts, and audit preflight;
+- added additive session migration version 6 for recent reauthentication;
+- hardened lifecycle test route activation behind an explicit non-production
+  test flag, isolated-root assertions, and the existing constant-time token;
+- added malformed certificate validation, atomic provider updates, and a
+  deterministic multi-handle duplicate transaction-consumption test;
+- preserved generic OIDC/SAML semantics and did not add Authentik-specific
+  administration logic or a provider UI.
+
+Verification:
+
+- backend Node 24 `pnpm run check`: PASS, 25 Vitest files / 130 tests;
+- backend `pnpm audit --prod`: PASS, no known production vulnerabilities;
+- frontend Node 24 `FLASK_PROXY_TARGET=http://backend:5080 pnpm run check`:
+  PASS, 8 Vitest files / 24 tests and Next production build;
+- canonical rewrite inspection: PASS, canonical auth destinations and
+  pattern-level Flask exclusions;
+- production auth-integration guard: PASS;
+- all-profile single-root Compose configuration: PASS;
+- `git diff --check`: PASS;
+- no Flask, firmware, production data, deployment, sibling repository, commit,
+  or push change was made.
+
+Limitations:
+
+- real generic OIDC/SAML browser callbacks and certificate rollover remain
+  unverified in this milestone;
+- the full Playwright lifecycle matrix remains intentionally skipped;
+- local logout remains local-only; upstream OIDC/SAML logout is deferred;
+- provider administration UI, production route ownership, and Flask retirement
+  are not included.
+
+Next authorized milestone: **M6.3d.2h.9 — Generic OIDC/SAML Provider
+Administration UI**. Do not enable production federation or perform cutover
+automatically.
+
+## M6.3d.2h.9 Generic OIDC/SAML provider administration UI
+
+M6.3d.2h.9 is **COMPLETE for the isolated provider-neutral Next.js UI; GO for
+isolated manual UI testing; NO-GO for production federation and real-provider
+interoperability**. Evidence is recorded in
+`docs/modernization/64-m6-3d2h9-generic-oidc-saml-provider-administration-ui-report.md`.
+
+Completed:
+
+- added RBAC-aware federation navigation and direct-access guards;
+- added provider overview, listing, safe detail, creation, editing, and
+  enable/disable workflows;
+- added generic OIDC and SAML forms without Authentik-specific assumptions;
+- added canonical callback/ACS/metadata display and copy actions;
+- added secret rotation, safe status, pending-transaction revocation, and
+  SAML trusted-certificate trust-set replacement;
+- added explicit identity-link listing, creation, and retirement;
+- added reusable local administrator reauthentication and per-mutation CSRF;
+- added typed Zod-validated API client and TanStack Query cache invalidation;
+- kept Zustand limited to transient selected-provider UI state;
+- added narrowly scoped canonical `/api/admin/federation/*` dev/test rewrites,
+  preserving Flask routing and rejecting production activation;
+- extended the backend safe provider envelope additively with non-secret fields
+  required by editing, and validated lifecycle status envelopes separately.
+
+Verification:
+
+- backend Node 24 check: PASS — 25 files / 130 tests;
+- backend production audit: PASS — no known vulnerabilities;
+- frontend Node 24 check with `FLASK_PROXY_TARGET=http://backend:5080`:
+  PASS — typecheck, ESLint, 10 files / 29 tests, Next build;
+- focused federation backend tests: PASS — 3 tests;
+- focused frontend API/guard tests: PASS — 2 files / 5 tests;
+- Compose all-profile configuration: PASS;
+- production federation integration guard: PASS;
+- isolated Fastify app-injection admin regression: PASS;
+- full browser administration/real-provider interoperability: not executed;
+- no production data, deployment, sibling repository, commit, or push.
+
+Remaining work and next milestone:
+
+- real generic OIDC/SAML browser interoperability, HTTPS cookie, and actual
+  rollover evidence remain open;
+- local-user lookup is not available, so explicit linking uses an existing
+  numeric local-user ID;
+- upstream logout, Flask/Fastify cutover, and production activation remain
+  prohibited;
+- next authorized milestone: **M6.3d.2h.10 — Manual Generic OIDC/SAML
+  Interoperability & Browser Login Verification**.
+
+## M6.3d.2h.10 Dual-origin local integration and generic OIDC/SAML interoperability
+
+M6.3d.2h.10 is **PARTIALLY COMPLETE: dual-origin foundation is implemented
+and verified; full browser federation acceptance is pending**. Evidence is
+recorded in
+`docs/modernization/65-m6-3d2h10-dual-origin-local-integration-oidc-saml-interoperability-report.md`.
+
+Completed:
+
+- established explicit `store.prg32.dream.test` / `api.prg32.dream.test`
+  configuration for the local Next.js/Fastify boundary;
+- added a single-origin resolver for direct browser auth/federation API calls,
+  with credentialed requests and canonical CSRF headers only in opt-in mode;
+- rejected mixing direct dual-origin mode with temporary Next.js auth/federation
+  rewrites, and rejected dual-origin variables in production builds;
+- added exact-origin Fastify CORS with stable denied-preflight errors;
+- added secure host-only cookie and trusted frontend post-login redirect
+  configuration without changing default same-origin behaviour;
+- added the single-file Compose `dual-origin` profile and Traefik edge bridge;
+  Flask remains the owner of transitional non-Fastify paths;
+- verified local Traefik routing, Next startup, CORS preflight, credentialed
+  CSRF request, and unknown-origin rejection;
+- updated the federation administration UI so callback/ACS/metadata fallback
+  URLs use the API origin rather than `window.location.origin`.
+
+Verification:
+
+- backend Node 24 typecheck and tests: PASS — 26 files / 132 tests;
+- frontend Node 24 typecheck, ESLint, tests, and production build: PASS — 10
+  files / 29 tests;
+- all-profile Compose configuration: PASS;
+- local dual-origin Compose/Traefik smoke: PASS;
+- exact-origin CORS app-injection tests: PASS;
+- host Playwright browser smoke: blocked because the local Chromium executable
+  is absent;
+- real disposable generic OIDC/SAML browser callbacks on the exact dual origins:
+  not run and not counted as passed. The existing disposable harness uses its
+  own internal `writer.test` origin.
+
+Remaining work:
+
+- add a focused exact-dual-origin disposable browser fixture for linked and
+  unlinked OIDC/SAML identities, disabled provider/account, invalid state,
+  replay, logout, and privilege isolation;
+- install/use the browser runtime inside that isolated fixture rather than
+  relying on a host cache;
+- retain the current optional long lifecycle matrix as a separate concern;
+- keep production federation, Flask retirement, and route cutover prohibited.
+
+Next authorized milestone: **M6.3d.2h.11 — Exact dual-origin disposable
+OIDC/SAML browser verification**. Do not begin cutover automatically.
+
+## M6.3d.2h.11 Exact dual-origin OIDC/SAML browser verification
+
+M6.3d.2h.11 is **NO-GO**. The isolated Node 24 Playwright fixture was
+implemented and the disposable Authentik/Fastify/Next stack reached the browser
+container. The first run recorded a Dream Traefik TLS blocker: the edge served
+`TRAEFIK DEFAULT CERT` for `store.prg32.dream.test` instead of the configured
+`dream.test` certificate. The browser therefore rejected TLS before any
+authentication flow ran. Evidence is recorded in
+`docs/modernization/66-m6-3d2h11-exact-dual-origin-oidc-saml-browser-verification-report.md`.
+
+Completed:
+
+- added the exact-origin disposable browser runner and runtime CA import;
+- added disposable Next.js and API-edge services to the existing single root
+  Compose file under the existing `authentik-e2e` profile;
+- added disposable local user/admin fixture credentials without repository
+  secrets or production data;
+- verified Node 24, Compose configuration, fixture builds, Authentik
+  provisioning, writer initialization, and Next startup;
+- diagnosed the blocker from the browser container using SNI certificate
+  evidence, without TLS bypasses or host trust changes.
+
+Blocked:
+
+- full exact-origin browser acceptance remains blocked after TLS recovery:
+  the first post-TLS run exposed a client auth-feature-flag issue; that flag
+  is now corrected, but two subsequent disposable runs ended when the Next
+  container exited with code 0 before the browser dependency became healthy;
+- M6.3d.2h.12 must not begin until this milestone is rerun and reaches GO.
+
+Infrastructure recovery evidence:
+
+- Dream Traefik now renders validated dynamic TLS YAML from
+  `DREAM_TLS_CERT_NAMES` in a disposable runtime volume;
+- `store.prg32.dream.test` and `api.prg32.dream.test` both serve the existing
+  mkcert-rooted certificate with `DNS:*.prg32.dream.test`;
+- the exact browser command was rerun with Node 24 after recovery;
+- a verifier-only wait for asynchronous provider discovery was added, but the
+  browser gate still ended NO-GO before OIDC/SAML flows.
+
+The Dream recovery report is recorded in
+`/Users/ivan/dream-platform/docs/services/traefik-tls-recovery-report-2026-10-13.md`.
+
+No production routing, database schema, deployment, sibling repository,
+credentials, commit, or push was changed.
+
+## M6.3d.2h.11 development integration recovery
+
+The canonical local development command is:
+
+```bash
+docker compose --profile dev up -d --build
+```
+
+The `dev` profile now starts Next.js, Fastify auth/federation writer and its
+initialization job, the Nginx API edge bridge, Flask transitional routes, and
+the shared Dream Traefik network. Authentik and Playwright remain opt-in under
+`authentik-e2e`; the two profiles must not run concurrently because they use
+the exact same public hostnames.
+
+Evidence recorded in report 66:
+
+- Compose config and dev service healthchecks passed;
+- Dream DNS/TLS verification passed for `store.prg32.dream.test` and
+  `api.prg32.dream.test` using the existing mkcert root;
+- Fastify `/auth/csrf` and `/api/auth/providers` returned HTTP 200;
+- Flask `/api/games` returned HTTP 200;
+- Next frontend `/`, `/login`, `/account`, and `/admin/federation` returned
+  HTTP 200;
+- Nginx Docker-DNS resolution now survives Fastify container recreation;
+- client dual-origin auth enablement and Next exact-origin HMR allowance were
+  corrected.
+
+Milestone status remains **NO-GO** only for the disposable full browser
+acceptance because the exact command still has a nondeterministic Next
+container lifecycle. The original TLS NO-GO history is preserved. Do not begin
+M6.3d.2h.12. The next authorized action is to make that disposable browser
+startup deterministic, then rerun the same gate.
+
+## M6.3d.2h.11 final execution update — 2026-10-13
+
+The disposable Next lifecycle is now deterministic. Docker events proved that
+the former `Exited (0)` state was an OOM condition caused by the 512 MiB fixture
+limit; the healthcheck process was killed with exit 137. The fixture now has
+dedicated frontend volumes, a 1 GiB disposable Next limit, and explicit
+readiness polling before Playwright execution.
+
+The exact `tests/integration/authentik/run.sh dual-origin` command reached
+Chromium, verified the exact store/API HTTPS origins, provider discovery, and
+local login/session/logout, then reached the Authentik OIDC flow. Authentik's
+`ak-flow-executor` remained in loading state with a spinner and no credential
+input, so OIDC/SAML browser flows, callbacks, cookies, negative cases, and
+federation-admin UI remain **NOT VERIFIED**.
+
+The ordinary development environment was restored with
+`docker compose --profile dev up -d --build`; exact-origin checks returned 200.
+Decision: development environment **GO**; M6.3d.2h.11 federation browser
+acceptance **NO-GO**. Diagnose the disposable Authentik flow UI next; do not
+begin M6.3d.2h.12.
+
+## M6.3d.2h.11 Authentik flow diagnosis update — 2026-10-13
+
+The disposable Authentik flow diagnosis is complete enough to reject the
+original spinner hypothesis: the flow executor API, identification chunk, and
+fonts all returned successfully; the response advertised two user fields; and
+the browser screenshot contained the credential form. No page errors or failed
+requests were observed. The pinned disposable image's loading attribute is a
+custom-element rendering detail, not a proven server-side flow failure.
+
+The runner now records redacted diagnostics and handles the custom-element
+boundary without using the user's persistent `https://sso.dream.test`
+instance. The exact run still produces no OIDC callback after the browser
+interaction and therefore remains **NO-GO** for OIDC/SAML browser acceptance.
+Development integration remains **GO** and was restored after the disposable
+run. The next authorized action is a focused callback/interaction trace for
+the disposable fixture; M6.3d.2h.12 remains blocked.
+
+## M6.3d.2h.11 scope reduction — backend-only verification
+
+The disposable Playwright/Authentik browser integration was subsequently
+removed by explicit user direction. The active validation boundary is now the
+backend/API layer: TypeScript contract tests, authentication, OIDC, SAML,
+federation lifecycle, authorization, and dual-origin tests remain in the
+repository and are the acceptance evidence. The `authentik-e2e` Compose
+profile, browser runner, disposable certificates/reports, and frontend
+Playwright dependency are no longer part of the project workflow.
+
+The historical M6.3d.2h.11 browser NO-GO evidence is retained above for audit
+traceability; it is not converted into a pass. The persistent generic provider
+at `https://sso.dream.test` was not contacted or modified. No M6.3d.2h.12 work
+was started.
+
+## Architecture audit and controlled SRP batch — 2026-10-13
+
+Report: `docs/modernization/67-architecture-audit-srp-refactoring-maintainability-report.md`
+
+Completed:
+
+- audited the active TypeScript backend and Next.js frontend, including
+  composition roots, large services, federation boundaries, tests, and the
+  existing dirty-tree constraints;
+- extracted federation service composition from `backend/src/app.ts` into the
+  feature-owned `backend/src/federation/runtime.ts`, preserving the exact
+  write/session gate and constructor graph;
+- extracted the federation re-authentication action lifecycle into the
+  feature-owned `frontend/src/components/federation/use-sensitive-actions.tsx`;
+- ran backend and frontend typecheck, lint, tests, builds, Compose validation,
+  and diff validation successfully.
+
+Evidence and deviations:
+
+- no public contract, database schema, firmware, WebSocket, binary, auth,
+  OIDC/SAML, or Docker production behavior was changed;
+- no broad SRP split was attempted for publication, backup, configuration, or
+  protocol services because those boundaries are security/transaction
+  sensitive and require more characterization tests;
+- the historical browser NO-GO remains documented. Playwright, disposable
+  Authentik fixtures, and the `authentik-e2e` profile remain removed by explicit
+  project direction; its Compose check is intentionally not applicable;
+- M6.3d.2h.12 was not started.
+
+Remaining work and next milestone:
+
+- add focused characterization tests around publication and backup failure
+  modes before splitting their orchestration seams;
+- keep federation browser verification as a separately authorized decision;
+- perform the next small maintainability batch only after the current dirty-tree
+  milestone work has a review/commit boundary.
+
+## Publication and backup SRP refactoring — 2026-10-13
+
+Report: `docs/modernization/68-publication-backup-srp-refactoring-report.md`
+
+The authorized characterization and refactoring batch is complete. The
+publication service now delegates filesystem safety, atomic persistence, and
+publication locking to `backend/src/consistency/publication-files.ts`. The
+backup service now delegates filesystem inventory, managed-data copying and
+clearing, reference validation, and capacity calculations to
+`backend/src/backup/inventory.ts`. The journal, recovery, compensation,
+database transaction, archive, and restore orchestration boundaries were kept
+intact because their ordering is the safety contract.
+
+Evidence:
+
+- backend lint, typecheck, build, and tests passed: 26 files, 135 tests;
+- frontend typecheck, lint, tests, and the proxy-configured Next production
+  build passed: 10 files, 29 tests;
+- `docker compose --profile dev config --quiet` passed;
+- the canonical dev stack rebuilt successfully and representative Traefik
+  requests returned HTTP 200 for both store routes and API routes;
+- focused publication/backup characterization coverage was added and passed;
+- no API, schema, journal, archive, binary, firmware, WebSocket, auth,
+  federation, Flask, or production routing behavior was intentionally changed.
+
+Deviation: the original audit proposed first adding characterization tests and
+then deciding whether to split publication and backup. The tests showed that
+filesystem primitives and inventory/reference validation were safe seams, while
+the transaction-sensitive journal/recovery orchestration was not. Those latter
+boundaries remain deliberately intact and are documented as maintainability
+debt rather than being forced into abstractions.
+
+Milestone result: **GO for this isolated SRP refactoring batch**. The
+historical federation browser NO-GO remains unchanged, and Playwright/
+Authentik E2E remains removed by explicit project direction. No subsequent
+milestone was started. Recommended next action: create a review/commit
+boundary, then authorize the next small transaction-sensitive maintainability
+batch independently.
