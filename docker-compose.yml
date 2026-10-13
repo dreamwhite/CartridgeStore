@@ -89,7 +89,10 @@ services:
       context: ./backend
       dockerfile: Dockerfile.dev
     image: riscv-prg32/cartridge-store-backend:dev-hot
-    command: ["pnpm", "dev"]
+    # The bind-mounted node_modules directory is disposable host state. Seed
+    # it from the lockfile on every writer start so dependency additions such
+    # as @fastify/websocket cannot be masked by an older cache or image layer.
+    command: ["sh", "-c", "pnpm install --frozen-lockfile && exec pnpm dev"]
     user: "${PRG32_WRITER_UID:-0}:${PRG32_WRITER_GID:-0}"
     depends_on:
       auth-writer-init:
@@ -275,6 +278,9 @@ services:
       WATCHPACK_POLLING_INTERVAL: "1000"
       FLASK_PROXY_TARGET: http://flask:5080
       PRG32_ADMIN_FASTIFY_TARGET: ${PRG32_ADMIN_FASTIFY_TARGET:-}
+      # Optional M2 isolated publishing/review owner. Keep empty unless the
+      # disposable Fastify writer is intentionally enabled for this dev run.
+      PRG32_WORKFLOW_FASTIFY_TARGET: ${PRG32_WORKFLOW_FASTIFY_TARGET:-}
       PRG32_FEDERATION_ADMIN_INTEGRATION_ENABLED: ${PRG32_FEDERATION_ADMIN_INTEGRATION_ENABLED:-false}
       PRG32_FEDERATION_ADMIN_FASTIFY_TARGET: ${PRG32_FEDERATION_ADMIN_FASTIFY_TARGET:-}
       PRG32_AUTH_INTEGRATION_ENABLED: ${PRG32_AUTH_INTEGRATION_ENABLED:-false}

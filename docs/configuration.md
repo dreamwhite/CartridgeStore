@@ -110,8 +110,8 @@ variable becomes part of the supported interface.
 | --- | --- |
 | `FLASK_PROXY_TARGET` | Flask origin for compatibility rewrites; required for production builds |
 | `NEXT_PUBLIC_FLASK_WS_URL` | Direct Flask WebSocket URL; Next rewrites do not proxy upgrades |
-| `PRG32_DUAL_ORIGIN_INTEGRATION_ENABLED` | Enable direct browser API-origin mode |
-| `NEXT_PUBLIC_PRG32_API_ORIGIN` | Exact API origin required by dual-origin mode |
+| `PRG32_DUAL_ORIGIN_INTEGRATION_ENABLED` | Enable direct browser API-origin mode for authentication and federation integration; public operational APIs continue through Next same-origin compatibility rewrites |
+| `NEXT_PUBLIC_PRG32_API_ORIGIN` | Exact HTTPS API origin used by direct authentication/federation browser requests in dual-origin mode |
 | `PRG32_AUTH_INTEGRATION_ENABLED` | Opt into an isolated Fastify auth proxy mode |
 | `PRG32_AUTH_FASTIFY_TARGET` | Fastify auth origin required by that mode |
 | `PRG32_FEDERATION_ADMIN_INTEGRATION_ENABLED` | Opt into isolated federation admin proxy mode |
@@ -121,4 +121,3 @@ variable becomes part of the supported interface.
 
 The production Next image uses `output: standalone`. Development-only
 integration flags are rejected by the production build configuration.
-
