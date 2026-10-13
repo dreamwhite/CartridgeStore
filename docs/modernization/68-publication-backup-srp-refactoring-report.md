@@ -1,7 +1,7 @@
 # PRG32 Cartridge Store — Publication and Backup SRP Refactoring Report
 
-Date: 2026-10-13  
-Scope: controlled maintainability refactor of the TypeScript backend  
+Date: 2026-10-13
+Scope: controlled maintainability refactor of the TypeScript backend
 Status: **GO for the isolated refactor; no new milestone started**
 
 ## Objective

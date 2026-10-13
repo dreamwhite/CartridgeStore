@@ -1,6 +1,6 @@
 # PRG32 Cartridge Store — M6.3d.2h.10 Dual-Origin Local Integration & Generic OIDC/SAML Interoperability
 
-Date: 2026-10-13  
+Date: 2026-10-13
 Status: **FOUNDATION IMPLEMENTED; FULL BROWSER FEDERATION ACCEPTANCE PENDING**
 
 ## Scope and decision

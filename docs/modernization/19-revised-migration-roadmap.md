@@ -1941,3 +1941,631 @@ Milestone result: **GO for the documentation foundation**. Next milestone:
 select one explicit migration boundary, update its contract evidence and route
 ownership documentation together, and keep Flask until parity and cutover
 criteria are proven.
+
+## Autonomous Flask-to-Fastify cutover readiness audit — 2026-10-13
+
+Report: `docs/modernization/70-flask-to-fastify-cutover-readiness-audit.md`
+
+The read-only audit reconstructed the current Flask/Fastify/Next/Dream
+Traefik topology, inventoried runtime routes, compared public contracts,
+traced the `../PRG32` firmware and host-tool consumers, and mapped database,
+filesystem, authentication, backup, mDNS, WebSocket, and test ownership.
+
+Decision: **NO-GO for Flask retirement**.
+
+Blocking evidence:
+
+- Fastify has no `POST /api/scores`;
+- Fastify has no `POST /api/runs`, `POST /api/metrics/batch`, or
+  `POST /api/runs/<run_id>/finish`;
+- Fastify has no `/api/multiplayer` WebSocket relay;
+- Flask remains the public catalog, publication/review, download-event,
+  legacy-Jinja, mDNS, and operational SQLite/filesystem owner;
+- Fastify writer profiles are disposable and a live ownership/rollback
+  rehearsal is not complete;
+- the Next.js storefront is still a foundation shell, and Flask/Fastify
+  session-cookie migration is unresolved.
+
+Verification evidence for this audit: Fastify `26` files/`135` tests passed;
+frontend `10` files/`29` tests, typecheck, lint, and production build passed;
+Python `.venv313` passed `64` tests with a synthetic `SECRET_KEY` (the
+no-secret invocation exposed one reproducibility failure); Compose profile
+configuration passed. Node checks used Node `24.20.0` through `nvm use 24`.
+
+The audit does not define or start `M6.3d.2h.12`, does not change historical
+milestone text, and does not authorize deployment, public routing, commits, or
+pushes. Recommended next work is explicitly authorized firmware write parity,
+multiplayer parity, operational publication/backup cutover rehearsal,
+session/federation transition, and Next storefront closure before the final
+canary and Flask retirement gate.
+
+## Firmware score and metrics ingestion parity closure — 2026-10-13
+
+Report: `docs/modernization/71-firmware-score-metrics-ingestion-parity-closure.md`
+
+The authorized follow-up investigated `CUTOVER-002` and `CUTOVER-003` instead
+of assuming that the previous route inventory was correct. The four Fastify
+POST endpoints were already implemented and composed, but registered through
+Fastify object-form `app.route(...)`, which the previous scanner omitted.
+
+Completed evidence:
+
+- `POST /api/scores`, `POST /api/runs`, `POST /api/metrics/batch`, and
+  `POST /api/runs/:run_id/finish` are present in the runtime route table;
+- read-only Fastify registers the bindings but returns stable `503` responses
+  before any database access when write gates are disabled;
+- existing isolated score/metrics services and HTTP tests accept the actual
+  firmware payloads, preserve anonymous ingestion, limits, duplicate-frame
+  behavior, dropped-sample accounting, and transaction rollback;
+- a disposable writer network smoke returned HTTP 200 for all four requests;
+- the writer gates were restored to `false` after the smoke test;
+- a new runtime registration regression test was added.
+
+Status: **CUTOVER-002 and CUTOVER-003 closed for isolated Fastify route and
+contract parity**. This does not authorize public routing or Flask retirement.
+Flask remains the operational writer and public compatibility owner, and the
+default development writer remains disabled. `M6.3d.2h.12` is not defined or
+started. The next remaining migration work is operational ownership/canary
+closure plus the separate multiplayer, catalog/publication, mDNS, and session
+gates.
+
+## Fastify multiplayer WebSocket parity — 2026-10-13
+
+Report: `docs/modernization/72-multiplayer-websocket-fastify-parity-implementation-report.md`
+
+The authorized multiplayer implementation is complete for isolated Fastify
+parity. Fastify now registers the compatible HTTP status/info routes and a
+same-path WebSocket upgrade using `@fastify/websocket`, with a per-app
+in-memory relay preserving Flask and PRG32 firmware `join`, `state`, `leave`,
+`welcome`, `peer`, and `leave` behavior. The existing peer cap, signature
+isolation, player-id allocation, state clamping, legacy `PRG32_USERS` path, and
+connection cleanup are covered by runtime tests.
+
+Evidence:
+
+- two real TCP WebSocket Fastify tests passed, including authorization, state
+  relay, invalid/unknown frames, leave cleanup, room isolation, and cap
+  enforcement;
+- the existing Flask real-WebSocket integration test passed;
+- the complete Fastify suite passed with 27 files and 138 tests;
+- Python passed 64 tests with a synthetic test secret;
+- frontend checks and the proxy-configured production build passed;
+- Compose configuration passed;
+- a real public `wss://api.prg32.dream.test/api/multiplayer` smoke received a
+  Flask `welcome` frame, and the public HTTP response identified Werkzeug,
+  confirming that public route ownership was not changed;
+- edge configuration still forwards HTTP/1.1 WebSocket upgrade headers.
+
+Status: **CUTOVER-004 closed for isolated Fastify protocol/runtime parity**.
+This does not authorize the public route switch, Flask retirement, a broker or
+horizontal scaling design, or storefront multiplayer UI. Flask remains the
+operational multiplayer owner. No schema, firmware, production routing,
+Authentik, Playwright, deployment, commit, or push work was performed, and
+`M6.3d.2h.12` was not started. The next milestone should address controlled
+canary ownership and runtime scaling/rollback, or another separately authorized
+migration boundary.
+
+## Next.js Storefront M1 — catalog, details, and downloads — 2026-10-14
+
+Report: `docs/modernization/73-nextjs-storefront-m1-catalog-details-downloads.md`
+
+The first user-facing Storefront slice is implemented in the existing Next.js
+application. The home page now discovers published cartridges through the
+Flask-owned catalog API, supports documented text search and pagination, and
+provides bounded client-side architecture filtering and title/update sorting.
+The dynamic `/games/[gameId]` route loads real detail responses, displays
+metadata/media/version/architecture information, and links directly to the
+Flask binary-download endpoint so existing download accounting remains intact.
+URL state is shareable, response envelopes are validated, and loading, empty,
+error, missing, accessibility, and responsive states are covered by focused
+Vitest/React Testing Library tests.
+
+Evidence: Node `24.20.0` via `nvm use 24`; frontend 12 files/34 tests,
+typecheck, lint, and proxy-configured production build passed; Fastify 27
+files/138 tests plus typecheck/lint/build passed; Flask Python 3.13 suite
+passed 64 tests with a synthetic test secret; Compose config and diff checks
+passed. A read-only public smoke returned HTTP 200 for the Next store and the
+existing empty Flask catalog. No production fixture was created merely to
+force a download test.
+
+Status: **GO for isolated Storefront M1; NO-GO for Flask retirement, public
+Fastify cutover, deployment, schema changes, or production data changes.**
+The next milestone should add the next explicitly authorized storefront or
+controlled API boundary, with catalog ownership and download telemetry still
+remaining on Flask until cutover evidence is complete. Playwright/Authentik
+and browser E2E remain intentionally out of scope.
+
+## Next.js Storefront M2 — publishing, review, and developer workspace — 2026-10-14
+
+Report: `docs/modernization/74-nextjs-storefront-m2-publishing-review-developer-workspace.md`
+
+Completed:
+
+- added `/workspace` with isolated authenticated principal context and an
+  explicit ownership-contract gap state;
+- added `/publish` as a real four-step ZIP submission wizard against the
+  existing isolated Fastify `POST /api/publish/bundle` contract;
+- added `/review` with backend-permission-gated listing/detail, supported
+  metadata editing, confirmed approval/rejection, CSRF, and post-mutation
+  invalidation;
+- added the same-origin `/__workflow-fastify/*` development proxy with a
+  production guard and optional Compose dev target;
+- added Zod validation for submission list/detail/result envelopes and API
+  tests covering proxy paths, multipart upload, CSRF, authorization failure,
+  and unavailable integration behavior;
+- preserved Flask operational ownership, existing API identifiers, database
+  schema, firmware contracts, and the no-fallback boundary;
+- recorded exact verification evidence: frontend 13 files/38 tests,
+  typecheck/lint/build pass; Fastify 27 files/138 tests plus typecheck/lint/
+  build pass; Python 3.13 Flask 64 tests pass with the existing synthetic test
+  secret; Compose config and diff checks pass.
+
+Deviation: the brief requested a developer view of owned submissions, but the
+audited backend exposes no ownership-scoped list/detail contract. The
+frontend therefore reports that capability as unavailable and never calls the
+editor-only global list for normal users. A backend ownership contract must
+be authorized separately before adding that view.
+
+Milestone result: **GO for isolated Storefront M2 implementation; NO-GO for
+operational Fastify publishing/review cutover or Flask retirement**. The
+disposable auth-writer was unhealthy during the environment check due to its
+pre-existing stale bind-mounted `node_modules` cache, so no live publish or
+review smoke is claimed. Next milestone: authorize the ownership-scoped
+submission contract and repair/rehearse the disposable writer environment, or
+select another read-only storefront boundary. Do not define or start
+`M6.3d.2h.12` automatically.
+
+## Next.js Storefront M2.1 — developer ownership API and disposable workflow integration — 2026-10-14
+
+Report: `docs/modernization/75-nextjs-storefront-m2-1-developer-ownership-disposable-workflow.md`
+
+Completed:
+
+- diagnosed the unhealthy disposable writer as a stale bind-mounted
+  `.local/backend/node_modules` tree missing the declared
+  `@fastify/websocket` dependency; confirmed the image layer was also stale
+  and the edge proxy failure was a causal upstream 502;
+- refreshed only the disposable dependency mount with
+  `pnpm install --frozen-lockfile`, recreated only `auth-writer` and
+  `auth-writer-edge-proxy`, and made writer startup reinstall from the lockfile
+  automatically;
+- added authenticated `GET /api/submissions/mine` using the existing
+  server-controlled `submitted_by_user_id`, bounded pagination, stable status
+  filtering, and no caller-controlled ownership selector;
+- preserved ordinary authenticated developer access via `catalog:submit`,
+  kept editor queue/approval/rejection permissions unchanged, and preserved
+  read-only/no-CSRF behavior for the owner endpoint;
+- integrated real ownership data and pending/verified/rejected status badges
+  into `/workspace` through `/__workflow-fastify/*`;
+- verified the complete disposable HTTP lifecycle from developer login and
+  ZIP submission through owner isolation, reviewer queue/detail, CSRF failure,
+  approval, final owner state, and disposable cartridge artifact;
+- recorded current verification: Fastify 28 files/142 tests, frontend 14
+  files/40 tests, Flask 64 tests, typecheck/lint/build, Compose config, and
+  diff checks all pass.
+
+Milestone result: **GO for isolated M2.1; NO-GO for operational Fastify
+cutover, Flask retirement, production routing, deployment, schema changes, or
+production data.** Remaining work is the explicitly authorized owner-index /
+feedback contract decision and later operational cutover evidence. Do not
+define or start `M6.3d.2h.12` automatically.
+
+## Next.js Storefront M3 — statistics, scoreboard, and developer documentation — 2026-10-14
+
+Report: `docs/modernization/76-nextjs-storefront-m3-statistics-scoreboard-documentation.md`
+
+Completed:
+
+- added `/stats` using the real public download, score-summary, and run-summary
+  contracts, with bounded tables, accessible relative-volume bars, explicit
+  empty/error states, and no synthetic history or architecture breakdowns;
+- added `/scores` using the established `GET /api/scores` filters and ordering
+  (`score DESC`, then oldest timestamp), bounded limits, page-relative response
+  positions, and no client-side identity/ranking invention;
+- added `/docs` and `/docs/[slug]` with eight curated source-labeled articles
+  covering getting started, cartridge format, metadata, publishing,
+  architectures, multiplayer, scores, metrics, and Store APIs;
+- added Zod-validated statistics, score, and metrics API adapters while
+  preserving the shared Next.js API client, Query cache, theme, design tokens,
+  and existing M1/M2/M2.1 routes;
+- kept detailed metrics and sample data behind the existing owner/admin
+  authorization boundary; public statistics expose only the documented
+  aggregate run counters;
+- verified the active development Compose profile and read-only public origin
+  requests without contacting persistent Authentik or mutating scores,
+  metrics, catalog, or production data.
+
+Evidence: Node `24.20.0` through `nvm use 24`; frontend typecheck/lint/build
+passed and Vitest passed with 18 files/51 tests; Fastify typecheck/lint/build
+passed and Vitest passed with 28 files/142 tests; Python passed 64 tests;
+Compose config and `git diff --check` passed. Read-only public GET requests
+returned HTTP 200 for `/api/stats/downloads`, `/api/scores`,
+`/api/stats/runs`, and `/docs`; the operational responses were empty/zero and
+were rendered as empty states rather than filled with fixtures.
+
+Limitations: the public stats contract does not provide an architecture
+timeseries; score reads expose a bounded limit rather than a pagination
+envelope; detailed metrics samples require an authenticated owner/admin view
+and bounded sample policy. No backend behavior, routing ownership, schema,
+Flask retirement, deployment, Authentik, sibling repository, Playwright,
+commit, or push work was performed. `M6.3d.2h.12` was not started.
+
+Milestone result: **GO for isolated Storefront M3; NO-GO for operational
+Fastify cutover, Flask retirement, production routing, deployment, schema
+changes, or write enablement.** Recommended next milestone: authorize a
+bounded authenticated metrics/run view or another read-only Storefront slice;
+keep operational ownership unchanged until a separate cutover gate is met.
+
+## Next.js Storefront M4 — visual, functional, and CORS integration audit — 2026-10-14
+
+Report: `docs/modernization/77-nextjs-storefront-m4-visual-functional-audit.md`
+
+Completed:
+
+- audited the current Store, detail, publish, review, workspace, statistics,
+  scoreboard, documentation, and authentication surfaces against the supplied
+  compact PRG32 storefront reference;
+- tightened the shared shell with the PRG32 brand mark, responsive navigation,
+  accessible light/dark theme control, compact hero actions, and token-based
+  light/dark surfaces without fabricating catalog data;
+- added real owner-workspace pagination controls backed by the existing
+  `GET /api/submissions/mine` pagination envelope;
+- diagnosed the browser CORS defect as public Flask-owned `/api/*` requests
+  being sent directly from `store.prg32.dream.test` to
+  `api.prg32.dream.test`, where Flask correctly has no permissive CORS policy;
+- repaired the boundary by keeping public catalog, media, download, scores,
+  statistics, and metrics requests on the existing Next same-origin Flask
+  rewrites; authentication and federation remain direct exact-origin
+  integrations;
+- verified that anonymous `/auth/me` remains a truthful `401` with exact
+  Fastify CORS headers and is still handled as an anonymous UI state;
+- updated the configuration reference so dual-origin mode is documented as
+  direct auth/federation integration, not a blanket public-API CORS contract.
+
+Evidence:
+
+- frontend Node `24.20.0` through `nvm use 24`: typecheck, lint, 20 Vitest
+  files/55 tests, and proxy-configured production build passed;
+- Fastify backend typecheck, lint, 28 Vitest files/142 tests, and build passed;
+- Python 3.13 isolated `.venv313` with an ephemeral test secret passed all 64
+  tests and byte-compilation; the pre-existing Python 3.9 `.venv` was
+  incompatible with Werkzeug scrypt and is recorded as an environment
+  failure, not a code pass;
+- `docker compose config`, `docker compose --profile dev config`, both Flask
+  and existing Node 24 multi-stage frontend image builds, and `git diff
+  --check` passed;
+- read-only HTTP verification showed same-origin Store `/api/games` returning
+  the existing Flask envelope, direct Flask catalog CORS remaining absent, and
+  direct Fastify auth CORS restricted to the exact Store origin;
+- Chrome browser verification loaded Store, Stats, Scores, and Docs, observed
+  truthful empty states, switched light/dark themes, and reported no console
+  errors. No Playwright suite was used.
+
+Deviation: the supplied visual reference contains populated cartridge cards,
+media, ratings, and statistics, but the real development catalog is empty. M4
+kept the empty state truthful instead of manufacturing data. A populated-data
+visual acceptance pass therefore remains open.
+
+Milestone result: **GO for the isolated M4 storefront boundary and same-origin
+public API repair; NO-GO for Fastify public cutover, Flask retirement,
+production routing, deployment, schema changes, or additional E2E
+infrastructure.** Recommended next milestone: a separately authorized
+disposable-fixture visual acceptance pass and one explicitly scoped public API
+ownership/cutover gate. `M6.3d.2h.12` was not started.
+
+## M5 — operational ownership, data convergence and incremental cutover preparation — 2026-10-14
+
+Report: `docs/modernization/78-operational-ownership-cutover-preparation.md`
+
+Supporting artifacts:
+
+- `docs/modernization/78-route-ownership-matrix.md`
+- `docs/modernization/78-route-inventory.json`
+- `docs/modernization/78-database-filesystem-convergence.md`
+- `docs/modernization/78-incremental-cutover-plan.md`
+
+Completed:
+
+- reconstructed the current dual-origin Docker topology, including Next.js,
+  Flask, isolated Fastify auth/writer bridge, external Dream Traefik network,
+  and generic external OIDC/SAML provider boundary;
+- generated a current Flask runtime route inventory and Fastify runtime/source
+  inventory, with route-by-route ownership, parity classification, side effects,
+  conditional registration and cutover blockers;
+- documented the eleven-table legacy SQLite authority, indexes/foreign keys,
+  WAL/journal considerations, public cartridge filesystem, pending staging,
+  publication journals, backup ownership and the prohibition on dual writers;
+- evaluated convergence strategies and selected a future legacy-schema/path
+  adoption plus stop-the-world single-writer handover as the safest direction;
+- documented publication/review state machines, auth/session/CSRF/RBAC
+  continuity risks, catalog/download, scores, metrics, multiplayer,
+  firmware/mDNS, backup/recovery and observability gates;
+- selected `GET /api/stats/runs` and `GET /api/stats/scores` as the first
+  disposable read-only differential candidate;
+- recorded the incremental stages, rollback invariant, risk register and
+  acceptance gates without changing operational ownership;
+- verified Node 24, frontend and Fastify checks, Python 3.13 tests, Compose
+  dev configuration and `git diff --check`.
+
+Evidence and limitations:
+
+- runtime inspection used isolated/read-only state; no production database,
+  filesystem, provider, sibling `../PRG32`, deployment route, commit or push
+  was changed;
+- Flask remains the operational public writer and mDNS advertiser;
+- Fastify route matches are not treated as parity where session formats,
+  download telemetry, filesystem/index semantics, authorization, firmware
+  behavior, backup/recovery or WebSocket ownership differ;
+- verification passed: frontend 20 Vitest files/55 tests, Fastify 28 files/142
+  tests, Python 64 tests, typechecks/lints/builds, Compose config and diff
+  check;
+- no operational route cutover, schema migration, live auth/session migration,
+  deployment, Playwright infrastructure, or `M6.3d.2h.12` work was started.
+
+Milestone result: **GO for M5 preparation and disposable validation planning;
+NO-GO for Fastify operational cutover, shared DB/filesystem writes, Flask
+retirement, authentication/federation transition, deployment or schema
+migration.** Next implementation milestone: a disposable differential gate for
+the two read-only statistics routes, with exact response/header comparison and
+proof of zero writes.
+
+## M5.2 — canonical data model, storage architecture and migration design — 2026-10-14
+
+Reports:
+
+- `docs/modernization/79-canonical-storage-architecture.md`
+- `docs/modernization/79-storage-schema-specification.md`
+- `docs/modernization/79-storage-migration-plan.md`
+- `docs/modernization/79-storage-compatibility-matrix.md`
+
+Architectural decision:
+
+- the final Fastify backend will use a normalized SQLite data model as the
+  canonical source for cartridge identity, releases, architectures, artifacts,
+  media, publication state, submissions, reviews and download relationships;
+- the filesystem will store immutable binary/media objects, staging data and
+  recovery material, and will not independently define catalog membership;
+- the legacy Flask filesystem organization is not the preferred final target;
+- `index.json` will not remain an authoritative mutable catalog store. It is a
+  legacy migration input and, at most, a generated compatibility export during
+  transition;
+- public HTTP and firmware contracts remain unchanged, including `game_id`,
+  version, `esp32c6`, `qemu`, discovery, metadata/colophon ABIs, binary
+  download semantics, scores, metrics, publishing, review, WebSocket and mDNS.
+
+Completed:
+
+- verified against `../PRG32` that firmware and host tooling use HTTP catalog
+  and download APIs, not server filesystem paths or `index.json`; documented
+  observable identifiers, query parameters, binary bytes, headers, discovery
+  and architecture behavior;
+- separated current Flask implementation, current isolated Fastify
+  implementation, and target Fastify architecture;
+- designed normalized target entities for cartridges, releases, artifacts,
+  media, storage objects, submissions, submission artifacts, review decisions,
+  publication operations/events and artifact-linked download events;
+- specified release revisions and publication ordering without introducing
+  semantic-version sorting or silent overwrites;
+- specified stable-ID immutable object storage, media extraction, staging and
+  object resolution with SQLite as the sole catalog authority;
+- specified journaled publication visibility, atomic object promotion,
+  crash-state recovery, compensation, idempotency, backup/restore, integrity
+  audit and explicit garbage collection;
+- classified all `index.json` consumers and defined the retirement sequence;
+- designed a read-only legacy inventory, new-database migration, filesystem
+  transformation, secret-free machine-readable manifest, resumability,
+  exception handling and rollback plan;
+- added a complete compatibility matrix and target schema specification;
+- preserved M5.1 as the first disposable read-only statistics differential
+  parity gate; no implementation milestone was started automatically.
+
+Evidence and boundary:
+
+- firmware/host source inspection was read-only; `../PRG32` was not modified;
+- current Flask/Fastify storage and publication implementations were inspected;
+- no operational SQLite, cartridge, media, backup, Traefik, provider, Docker
+  mount, route, or deployment state was changed;
+- no target schema was applied, no real data was migrated, no dual writer was
+  enabled, no Fastify cutover or Flask retirement was performed, and
+  `M6.3d.2h.12` was not started.
+
+Milestone result: **GO for M5.2 target architecture and implementation-ready
+specifications; NO-GO for operational migration, production schema changes,
+public Fastify cutover, Flask retirement, deployment or live data mutation.**
+
+Proposed future implementation milestones, not started here:
+
+- M5.2a disposable target schema, object store and read-only integrity
+  fixtures;
+- M5.2b legacy inventory and migration manifest generator against copied
+  fixtures;
+- M5.2c legacy-to-target database/filesystem transformation in a disposable
+  root;
+- M5.2d differential API, download, telemetry and firmware compatibility;
+- M5.2e backup/recovery/rollback rehearsal;
+- M5.2f separately authorized operational handover decision.
+
+## M5.2a — canonical storage foundation implementation — 2026-10-14
+
+Implementation evidence is recorded in
+`docs/modernization/80-canonical-storage-m5-2a-implementation.md`.
+
+Completed in the isolated TypeScript backend foundation:
+
+- initialized the corrected compatible/target SQLite schema only in an empty
+  disposable root, with schema/layout/journal/backup version checks;
+- established the portable bind-mount layout for immutable objects, staging,
+  journal, quarantine, backups, and compatibility material;
+- made `storage_objects` the sole authority for physical `storage_key`,
+  `sha256`, `size_bytes`, and `media_type`; `artifacts`, `media`, and
+  `site_assets` retain only relationship data;
+- retained staged hash/size only in `submission_artifacts` for pre-promotion
+  integrity;
+- changed publication item identity to
+  `UNIQUE(operation_id, expected_object_id)`, added `target_role`, and
+  validated artifact/media/site-asset kind relationships in application code;
+- covered four media variants in one operation, bounded submission staging,
+  immutable promotion, resolver checks, read-only integrity findings, and six
+  injected failure points;
+- corrected all four M5.2 design documents to match the implemented schema and
+  added the implementation report.
+
+Evidence boundary:
+
+- no Flask route/startup behavior, operational database, production data,
+  Docker mount, deployment, or `../PRG32` file was changed;
+- the module is not imported by the running backend and does not read
+  `index.json` or the legacy operational filesystem;
+- Node 24 backend checks passed: typecheck, lint, 29 Vitest files/160 tests,
+  and build;
+- Node 24 frontend checks passed: typecheck, lint, 20 Vitest files/55 tests,
+  and production build with `FLASK_PROXY_TARGET=http://flask:5080`;
+- Python 3.13 compile and pytest passed: 64 tests;
+- `docker compose --profile dev config --quiet` and `git diff --check` passed.
+  Frontend Vitest emitted only the existing Vite config-loader deprecation
+  warning.
+
+Milestone result: **GO for isolated canonical-storage foundation; NO-GO for
+legacy import, operational writes, schema migration, route cutover, Flask
+retirement, deployment, or M5.2b.** The next milestone remains a separately
+authorized read-only legacy inventory and secret-free migration manifest gate.
+
+## M5.2b — legacy storage inventory and deterministic migration manifest — 2026-10-14
+
+Implementation evidence is recorded in
+`docs/modernization/81-legacy-inventory-m5-2b-implementation.md`.
+
+Completed:
+
+- corrected the target schema documentation (`site_asset` publication item,
+  submissions foreign key, and trailing-comma syntax) and added an executable
+  documentation/schema contract test;
+- added an explicit prepared-snapshot model with a marker, relative component
+  paths, readonly SQLite access, schema/column validation, row counts,
+  foreign-key checks, and database/WAL fingerprints;
+- added deterministic, bounded, symlink-safe catalog and filesystem inventory;
+- verified legacy artifact existence, path safety, streaming SHA-256, sizes,
+  catalog declarations, PRG32 metadata identity, embedded icon/screenshot
+  media, colophon and orphan files without extracting or copying bytes;
+- inventoried pending/verified/rejected submissions while preserving integer
+  IDs and avoiding account secrets;
+- inventoried download telemetry without exporting IP hashes/user agents and
+  without fabricating artifact relationships;
+- added stable anomaly taxonomy, `INVENTORY_COMPLETE`, `MIGRATION_READY`,
+  and permanently false `OPERATIONAL_CUTOVER_READY` gates;
+- added canonical secret-free manifest serialization, manifest fingerprinting,
+  independent source verification, human report generation, disposable
+  fixtures, and developer-only `inventory`/`verify`/`report` CLI commands.
+
+Evidence boundary:
+
+- no operational SQLite, `index.json`, cartridge, submission, backup, Docker,
+  Flask, Fastify route, Next.js, Traefik, Authentik, or `../PRG32` state was
+  modified;
+- no target store was initialized or populated and no migration executor,
+  dual writer, cutover, deployment, M5.2c, or M6.3d.2h.12 work was started;
+- Node 24 backend checks passed with the new inventory tests: 31 files and
+  167 tests, plus build; frontend, Python, Compose and diff checks are recorded
+  in the implementation report after final execution.
+
+Milestone result: **GO for isolated read-only legacy inventory and
+deterministic manifest generation against an explicitly prepared disposable
+snapshot; NO-GO for M5.2c migration, operational writes, cutover, deployment,
+or Flask retirement.**
+
+## M5.2c — disposable legacy-to-canonical migration executor — 2026-10-14
+
+Implementation evidence is recorded in
+`docs/modernization/82-storage-migration-m5-2c-implementation.md`.
+
+Completed:
+
+- added a developer-only TypeScript migration executor requiring an explicit
+  verified M5.2b manifest, explicit target root, exact disposable
+  authorization and non-overlapping source/target paths;
+- added deterministic target IDs and an additive schema-version-2
+  `migration_exceptions` table for unmappable historical records;
+- copied compatible users, groups, tokens, settings, scores, runs and samples
+  with explicit common-column mappings and preserved identifiers;
+- transformed catalog games/versions/architectures into target cartridges,
+  releases and artifacts without treating `index.json` as target authority;
+- added bounded streaming immutable file promotion for artifacts, embedded
+  ICON/SCRN media and configured site assets;
+- migrated private submission staging, lifecycle state, review evidence and
+  legacy integer submission IDs without auto-approving pending work;
+- preserved exact download telemetry mappings and explicit exceptions without
+  fabricating artifact relationships;
+- added atomic final publication visibility, durable JSON journals,
+  checkpointed resume, deterministic fault injection, idempotent reruns and
+  guarded incomplete-target disposal;
+- added an independent target integrity/differential verifier and synthetic
+  fixtures for migration, source mutation, authorization, interruption,
+  resume, idempotency and unmappable telemetry.
+
+Evidence boundary:
+
+- only synthetic disposable source snapshots and new temporary target roots
+  are used by M5.2c tests;
+- no operational SQLite, cartridge, submission, backup, Flask, Fastify route,
+  Next.js rewrite, Docker volume, Traefik, Authentik, or `../PRG32` state was
+  changed;
+- the migration executor is not imported by runtime startup and does not
+  connect storage-v2 to public routes;
+- target schema documentation, executable schema and schema contract tests
+  remain synchronized after the justified additive exception table.
+
+Milestone result: **GO for disposable M5.2c migration execution and
+independent verification; NO-GO for operational migration, Fastify cutover,
+Flask retirement, public storage-v2 routes, deployment, M5.2d or
+M6.3d.2h.12.**
+
+## M5.2d — differential API, binary and firmware compatibility verification — 2026-10-14
+
+Implementation evidence is recorded in
+`docs/modernization/83-storage-api-parity-m5-2d-implementation.md`.
+
+Completed:
+
+- inventoried and exercised the actual Flask catalog/detail/media/colophon/
+  download read contracts through `app.test_client()`;
+- inspected companion firmware/host source for discovery, metadata, colophon,
+  architecture, URL, MIME, filename, content-length and binary observables
+  without modifying `../PRG32`;
+- created one populated deterministic synthetic snapshot with multiple
+  cartridges, versions, both `esp32c6`/`qemu`, architecture-specific media,
+  pending staging, historical telemetry, scores, runs and samples;
+- added a structured differential CLI and test-only Flask helper with explicit
+  JSON/header/binary normalization rules;
+- added a canonical read-only SQL/object projection that does not use
+  `index.json`, staging, filesystem enumeration, or public route registration;
+- preserved legacy public variant fields needed for response compatibility in
+  migration compatibility metadata without exposing canonical storage keys;
+- verified 22/22 populated catalog, search, pagination, detail, version,
+  architecture, media, colophon, binary and error cases;
+- verified exact binary/media bytes and SHA-256 values, corrupt-object refusal,
+  source immutability, three historical telemetry rows and 9/9 interrupted
+  migration resumes.
+
+Evidence boundary:
+
+- no operational SQLite, cartridge, media, backup, Docker volume, Flask route,
+  Fastify startup route, Next.js route, Traefik, Authentik, deployment or
+  `../PRG32` state was changed;
+- operational download telemetry parity, firmware runtime execution,
+  conditional/range behavior, live Fastify ownership, backup/restore and
+  rollback remain NOT_VERIFIED;
+- M5.2e was not started.
+
+Milestone result: **GO for the disposable M5.2d differential compatibility
+gate; NO-GO for operational migration, Fastify cutover, Flask retirement,
+deployment, or production data mutation.**
+
+Next implementation milestone: **M5.2e — backup/restore, fine-grained crash
+recovery and rollback rehearsal against disposable copies**, with explicit live
+telemetry write ownership still required before any operational handover.
+
+Final M5.2d verification evidence: backend Node 24 typecheck, lint, build and
+33-file/172-test suite passed; frontend typecheck, lint, build and 20-file/
+55-test suite passed; Python compile and 64-test suite passed; Compose profile
+configuration and `git diff --check` passed. The Vite native-config loader
+warning and expected Flask fixture rejection warnings were non-fatal.

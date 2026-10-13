@@ -1,6 +1,6 @@
 # PRG32 Cartridge Store — M6.3d.2h.11 Exact Dual-Origin OIDC/SAML Browser Verification
 
-Date: 2026-10-13  
+Date: 2026-10-13
 Status: **NO-GO — Dream TLS recovered, but downstream browser acceptance remains incomplete**
 
 ## Scope

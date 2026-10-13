@@ -1,7 +1,7 @@
 # PRG32 Cartridge Store — Architecture Audit, SRP Refactoring & Maintainability Report
 
-Date: 2026-10-13  
-Scope: active TypeScript backend and Next.js frontend  
+Date: 2026-10-13
+Scope: active TypeScript backend and Next.js frontend
 Milestone: post-M6.3d.2h.11, before M6.3d.2h.12
 
 ## Executive decision

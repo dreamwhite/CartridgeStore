@@ -1,6 +1,6 @@
 # PRG32 Cartridge Store — Documentation Foundation Report
 
-Date: 2026-10-13  
+Date: 2026-10-13
 Status: **Documentation foundation complete; implementation unchanged**
 
 ## Objective
