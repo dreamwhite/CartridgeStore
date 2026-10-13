@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
-import { ApiResponseValidationError, requestJson } from "./client";
+import { ApiResponseValidationError, requestJson, requestSameOriginJson } from "./client";
 import { discoveryDocumentSchema } from "./schemas";
 
 beforeEach(() => {
@@ -20,6 +20,15 @@ test("uses same-origin credentials for API requests", async () => {
   const init = call?.[1];
   expect(init).toEqual(expect.objectContaining({ credentials: "same-origin" }));
   expect((init?.headers as Headers).get("Accept")).toBe("application/json");
+});
+
+test("keeps operational public requests on the same-origin compatibility boundary", async () => {
+  vi.mocked(fetch).mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
+
+  await requestSameOriginJson<{ ok: true }>("/api/games?page=1&per_page=100");
+  const call = vi.mocked(fetch).mock.calls[0];
+  expect(call?.[0]).toBe("/api/games?page=1&per_page=100");
+  expect(call?.[1]).toEqual(expect.objectContaining({ credentials: "same-origin" }));
 });
 
 test("merges caller headers without dropping the JSON accept header", async () => {

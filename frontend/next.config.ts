@@ -2,6 +2,7 @@ import type { NextConfig } from "next";
 
 const configuredFlaskTarget = process.env.FLASK_PROXY_TARGET?.trim();
 const configuredAdminFastifyTarget = process.env.PRG32_ADMIN_FASTIFY_TARGET?.trim();
+const configuredWorkflowFastifyTarget = process.env.PRG32_WORKFLOW_FASTIFY_TARGET?.trim();
 const configuredFederationAdminFastifyTarget = process.env.PRG32_FEDERATION_ADMIN_FASTIFY_TARGET?.trim();
 const configuredFederationAdminIntegration = process.env.PRG32_FEDERATION_ADMIN_INTEGRATION_ENABLED?.trim().toLowerCase() === "true";
 const configuredAuthFastifyTarget = process.env.PRG32_AUTH_FASTIFY_TARGET?.trim();
@@ -20,6 +21,12 @@ if (isProductionBuild && !configuredFlaskTarget) {
 if (isProductionBuild && configuredAdminFastifyTarget) {
   throw new Error(
     "PRG32_ADMIN_FASTIFY_TARGET is development/test-only and must not be configured for production builds.",
+  );
+}
+
+if (isProductionBuild && configuredWorkflowFastifyTarget) {
+  throw new Error(
+    "PRG32_WORKFLOW_FASTIFY_TARGET is development/test-only and must not be configured for production builds.",
   );
 }
 
@@ -107,6 +114,16 @@ if (configuredAdminFastifyTarget) {
   }
 }
 
+if (configuredWorkflowFastifyTarget) {
+  const parsedWorkflowTarget = new URL(configuredWorkflowFastifyTarget);
+  if (parsedWorkflowTarget.protocol !== "http:" && parsedWorkflowTarget.protocol !== "https:") {
+    throw new Error("PRG32_WORKFLOW_FASTIFY_TARGET must use http:// or https://.");
+  }
+  if (parsedWorkflowTarget.username || parsedWorkflowTarget.password) {
+    throw new Error("PRG32_WORKFLOW_FASTIFY_TARGET must not contain credentials.");
+  }
+}
+
 if (configuredFederationAdminFastifyTarget) {
   const parsedFederationTarget = new URL(configuredFederationAdminFastifyTarget);
   if (parsedFederationTarget.protocol !== "http:" && parsedFederationTarget.protocol !== "https:") {
@@ -128,6 +145,7 @@ if (configuredAuthFastifyTarget) {
 }
 
 const normalizedAdminFastifyTarget = configuredAdminFastifyTarget?.replace(/\/$/, "");
+const normalizedWorkflowFastifyTarget = configuredWorkflowFastifyTarget?.replace(/\/$/, "");
 const normalizedFederationAdminFastifyTarget = configuredFederationAdminFastifyTarget?.replace(/\/$/, "");
 const normalizedAuthFastifyTarget = configuredAuthFastifyTarget?.replace(/\/$/, "");
 
@@ -192,6 +210,12 @@ const nextConfig: NextConfig = {
           destination: `${normalizedAdminFastifyTarget}/:path*`,
         }]
       : [];
+    const workflowRewrites = normalizedWorkflowFastifyTarget
+      ? [{
+          source: "/__workflow-fastify/:path*",
+          destination: `${normalizedWorkflowFastifyTarget}/:path*`,
+        }]
+      : [];
     const federationAdminRewrites = normalizedFederationAdminFastifyTarget
       ? [{
           source: "/api/admin/federation/:path*",
@@ -213,7 +237,7 @@ const nextConfig: NextConfig = {
           },
         ]
       : [];
-    return [...adminRewrites, ...federationAdminRewrites, ...authRewrites, ...flaskRewrites];
+    return [...adminRewrites, ...workflowRewrites, ...federationAdminRewrites, ...authRewrites, ...flaskRewrites];
   },
 };
 

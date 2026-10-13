@@ -7,7 +7,7 @@ import "../styles/index.css";
 
 export const metadata: Metadata = {
   title: "PRG32 Cartridge Store",
-  description: "Next.js migration foundation for the PRG32 Cartridge Store.",
+  description: "Discover and download published PRG32 cartridges for hardware and QEMU.",
 };
 
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {

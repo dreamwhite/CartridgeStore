@@ -1,5 +1,5 @@
-import { FoundationShell } from "../components/foundation/FoundationShell";
+import { CatalogBrowser } from "../components/storefront/CatalogBrowser";
 
 export default function HomePage() {
-  return <FoundationShell />;
+  return <CatalogBrowser />;
 }

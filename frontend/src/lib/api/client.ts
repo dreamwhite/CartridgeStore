@@ -71,6 +71,24 @@ export function requestApiJson<T>(
   }, schema);
 }
 
+/**
+ * Use the existing Next.js compatibility rewrite for operational public APIs.
+ *
+ * Public catalog, score, metrics, and statistics routes remain Flask-owned
+ * during migration. Keeping these requests same-origin avoids expanding the
+ * browser CORS surface while preserving the original route and response.
+ */
+export function requestSameOriginJson<T>(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  schema?: z.ZodType<T>,
+): Promise<T> {
+  return requestJson(input, {
+    ...init,
+    credentials: init?.credentials ?? "same-origin",
+  }, schema);
+}
+
 export function getDiscoveryDocument() {
   return requestJson("/.well-known/prg32-store.json", undefined, discoveryDocumentSchema);
 }

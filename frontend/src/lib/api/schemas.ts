@@ -51,6 +51,58 @@ export const authLogoutResponseSchema = z
   .object({ ok: z.literal(true) })
   .passthrough();
 
+export const workflowSubmissionSchema = z
+  .object({
+    id: z.number().int().positive(),
+    game_id: z.string(),
+    version: z.string(),
+    status: z.string(),
+    submitted_by_user_id: z.number().int().nullable(),
+    submitted_by: z.string(),
+    reviewed_by_user_id: z.number().int().nullable(),
+    reviewed_by: z.string().nullable(),
+    pending_dir: z.string().nullable(),
+    metadata_json: z.string(),
+    architectures_json: z.string(),
+    created_at: z.string(),
+    reviewed_at: z.string().nullable(),
+    metadata: z.record(z.string(), z.unknown()),
+    architectures: z.array(z.record(z.string(), z.unknown())),
+  })
+  .passthrough();
+
+export const workflowSubmissionListResponseSchema = z
+  .object({ ok: z.literal(true), submissions: z.array(workflowSubmissionSchema) })
+  .passthrough();
+
+export const workflowSubmissionResponseSchema = z
+  .object({ ok: z.literal(true), submission: workflowSubmissionSchema })
+  .passthrough();
+
+export const workflowSubmissionResultSchema = z
+  .object({
+    status: z.literal("pending"),
+    ok: z.literal(true),
+    review_required: z.literal(true),
+    submission_id: z.number().int().positive(),
+    id: z.number().int().positive(),
+    version: z.string(),
+    submitted: z.array(z.object({ architecture: z.string(), file: z.string() }).passthrough()),
+  })
+  .passthrough();
+
+export const ownedSubmissionSummarySchema = z
+  .object({
+    id: z.number().int().positive(),
+    game_id: z.string(),
+    title: z.string(),
+    version: z.string(),
+    status: z.string(),
+    created_at: z.string(),
+    reviewed_at: z.string().nullable(),
+  })
+  .passthrough();
+
 const paginationSchema = z
   .object({
     page: z.number().int(),
@@ -64,7 +116,15 @@ const paginationSchema = z
   })
   .passthrough();
 
-const gameSchema = z
+export const ownedSubmissionListResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    submissions: z.array(ownedSubmissionSummarySchema),
+    pagination: paginationSchema,
+  })
+  .passthrough();
+
+export const gameSchema = z
   .object({
     id: z.string(),
     title: z.string(),
@@ -91,6 +151,13 @@ export const gamesResponseSchema = z
   })
   .passthrough();
 
+export const gameResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    game: gameSchema,
+  })
+  .passthrough();
+
 export const discoveryDocumentSchema = z
   .object({
     abi: z.literal("prg32-store-discovery-1.0"),
@@ -102,4 +169,93 @@ export const discoveryDocumentSchema = z
     roles: z.array(z.string()),
     services: z.record(z.string(), z.string()),
   })
+  .passthrough();
+
+export const downloadSeriesPointSchema = z
+  .object({ date: z.string(), downloads: z.number().int().nonnegative() })
+  .passthrough();
+
+export const downloadStatsSchema = z
+  .object({
+    series: z.array(downloadSeriesPointSchema),
+    total: z.number().int().nonnegative(),
+    top_games: z.array(z.object({
+      id: z.string(),
+      title: z.string(),
+      downloads: z.number().int().nonnegative(),
+      last_published: z.unknown(),
+    }).passthrough()),
+  })
+  .passthrough();
+
+export const gameDownloadStatsSchema = z
+  .object({
+    id: z.string(),
+    total: z.number().int().nonnegative(),
+    architectures: z.array(z.object({ architecture: z.string(), downloads: z.number().int().nonnegative() }).passthrough()),
+    series: z.array(downloadSeriesPointSchema),
+  })
+  .passthrough();
+
+export const scoreRecordSchema = z
+  .object({
+    game: z.string(),
+    player: z.string(),
+    score: z.number().int().nonnegative(),
+    created_at: z.number().int().nonnegative(),
+    submitted_by: z.string(),
+  })
+  .passthrough();
+
+export const scoresSchema = z.array(scoreRecordSchema);
+
+export const scoreStatsSchema = z
+  .object({ scores: z.array(scoreRecordSchema) })
+  .passthrough();
+
+export const runStatsSchema = z
+  .object({
+    total: z.number().int().nonnegative(),
+    finished: z.number().int().nonnegative(),
+    active_last_7_days: z.number().int().nonnegative(),
+  })
+  .passthrough();
+
+export const metricsRunSchema = z
+  .object({
+    run_id: z.string(),
+    board_id: z.string(),
+    target: z.string(),
+    display_backend: z.string(),
+    firmware_version: z.string(),
+    firmware_git_sha: z.string(),
+    game_name: z.string(),
+    sample_period_frames: z.number().int().nonnegative(),
+    started_at: z.number().int().nonnegative(),
+    finished_at: z.number().int().nonnegative().nullable(),
+    dropped_samples: z.number().int().nonnegative(),
+    created_at: z.number().int().nonnegative(),
+    submitted_by: z.string(),
+    user_id: z.number().int().nullable(),
+    sample_count: z.number().int().nonnegative().optional(),
+  })
+  .passthrough();
+
+export const metricsSummarySchema = z
+  .object({
+    sample_count: z.number().int().nonnegative(),
+    frame_us_avg: z.number().nonnegative(),
+    frame_us_median: z.number().nonnegative(),
+    frame_us_p95: z.number().nonnegative(),
+    frame_us_max: z.number().nonnegative(),
+    update_us_avg: z.number().nonnegative(),
+    draw_us_avg: z.number().nonnegative(),
+    present_us_avg: z.number().nonnegative(),
+    fps_avg: z.number().nonnegative(),
+    deadline_missed: z.number().int().nonnegative(),
+  })
+  .passthrough();
+
+export const metricsRunDetailSchema = z
+  .object({ ok: z.literal(true), run: metricsRunSchema, summary: metricsSummarySchema })
   .passthrough();
