@@ -19,6 +19,7 @@ interface ReviewRouteOptions {
 
 interface SubmissionParams { readonly submission_id: string; }
 interface SubmissionQuery { readonly status?: string; }
+interface OwnedSubmissionQuery { readonly status?: string; readonly page?: string; readonly per_page?: string; }
 
 function sendJson(reply: FastifyReply, body: unknown, status?: number): FastifyReply {
   if (status !== undefined) reply.code(status);
@@ -70,6 +71,14 @@ function id(request: FastifyRequest<{ Params: SubmissionParams }>): number {
   const value = Number(request.params.submission_id);
   if (!Number.isSafeInteger(value) || value <= 0) throw new ReviewError("submission id is invalid");
   return value;
+}
+
+function queryInteger(value: string | undefined, fallback: number): number {
+  if (value === undefined || value.trim() === "") return fallback;
+  if (!/^\d+$/.test(value.trim())) throw new ReviewError("pagination value is invalid");
+  const parsed = Number(value);
+  if (!Number.isSafeInteger(parsed)) throw new ReviewError("pagination value is invalid");
+  return parsed;
 }
 
 function metadataFromJson(payload: Record<string, unknown>): Record<string, unknown> {
@@ -129,6 +138,28 @@ function routeError(request: FastifyRequest, reply: FastifyReply, error: unknown
 export function registerReviewRoutes(app: FastifyInstance, options: ReviewRouteOptions): void {
   const unavailable = (reply: FastifyReply) => sendJson(reply, { ok: false, error: "review write isolation is unavailable", code: "review_unavailable" }, 503);
   const review = () => options.review;
+
+  app.get<{ Querystring: OwnedSubmissionQuery }>("/api/submissions/mine", async (request, reply) => {
+    const service = review();
+    if (!service) return unavailable(reply);
+    const authContext = context(request, options.auth);
+    if (!authContext.principal.authenticated) {
+      return sendJson(reply, { ok: false, error: "login required", user: principalToJson(authContext.principal) }, 401);
+    }
+    if (!permissionGuard(options.authorization, authContext.principal, "catalog:submit")) {
+      return sendJson(reply, { ok: false, error: "catalog submission permission required", code: "permission_denied" }, 403);
+    }
+    if (authContext.principal.id === null) {
+      return sendJson(reply, { ok: false, error: "submission ownership is unavailable", code: "ownership_unavailable" }, 403);
+    }
+    try {
+      const page = queryInteger(request.query.page, 1);
+      const perPage = queryInteger(request.query.per_page, 25);
+      return sendJson(reply, { ok: true, ...service.listMine(authContext.principal.id, request.query.status, page, perPage) });
+    } catch (error) {
+      return routeError(request, reply, error);
+    }
+  });
 
   app.get<{ Querystring: SubmissionQuery }>("/api/submissions", async (request, reply) => {
     const service = review();

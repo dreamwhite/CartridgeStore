@@ -35,6 +35,10 @@ import { registerSamlRoutes } from "./saml/routes.js";
 import { registerFederationLifecycleTestRoutes } from "./federation/lifecycle-test-routes.js";
 import { registerFederationAdminRoutes } from "./federation/admin-routes.js";
 import { createFederationRuntime } from "./federation/runtime.js";
+import { ANONYMOUS, normalizeRole } from "./auth/principal.js";
+import { lookupLegacyConfiguredUser } from "./auth/tokens.js";
+import { MultiplayerHub } from "./multiplayer/hub.js";
+import { registerMultiplayerRoutes } from "./multiplayer/routes.js";
 
 export interface AppOptions {
   readonly config: BackendConfig;
@@ -45,6 +49,28 @@ export interface AppOptions {
 export function buildApp(options: AppOptions): FastifyInstance {
   const database = new ReadonlyDatabaseManager(options.config);
   const auth = new AuthService({ config: options.config, readonlyDatabase: database });
+  const multiplayer = new MultiplayerHub({
+    maxPeers: options.config.multiplayerMaxPeers,
+    authenticationEnabled: options.config.legacyConfiguredUsers.length > 0 || auth.isWriteEnabled(),
+    authenticate: (token) => {
+      if (options.config.legacyConfiguredUsers.length > 0) {
+        const user = lookupLegacyConfiguredUser(options.config.legacyConfiguredUsers, token);
+        return user === null
+          ? ANONYMOUS
+          : {
+            authenticated: true,
+            id: null,
+            name: user.name,
+            username: user.name,
+            email: "",
+            role: normalizeRole(user.role),
+            groups: [],
+            authMethod: "legacy" as const
+          };
+      }
+      return auth.context(undefined, token).principal;
+    }
+  });
   const authorization = new AuthorizationService();
   const secrets = new SecretStore({
     ...(options.config.secretKeyRegistryPath ? { keyRegistryPath: options.config.secretKeyRegistryPath } : {}),
@@ -164,6 +190,7 @@ export function buildApp(options: AppOptions): FastifyInstance {
       parts: 12
     }
   });
+  registerMultiplayerRoutes(app, { hub: multiplayer });
   registerSettingsRoutes(app, { config: options.config, auth, authorization, settings });
   registerAdminRoutes(app, { auth, authorization, identity, tokens: adminTokens, catalog: catalogAdmin });
   registerBackupRoutes(app, { config: options.config, auth, authorization, backup });
@@ -265,6 +292,7 @@ export function buildApp(options: AppOptions): FastifyInstance {
   });
 
   app.addHook("onClose", () => {
+    multiplayer.close();
     auth.close();
     database.close();
   });

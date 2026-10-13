@@ -14,6 +14,15 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/server.js",
     "reconcile": "tsx src/reconcile.ts",
+    "legacy:inventory": "tsx src/storage-v2/legacy/cli.ts inventory",
+    "legacy:verify": "tsx src/storage-v2/legacy/cli.ts verify",
+    "legacy:report": "tsx src/storage-v2/legacy/cli.ts report",
+    "storage:migrate": "tsx src/storage-v2/migration/cli.ts migrate",
+    "storage:resume": "tsx src/storage-v2/migration/cli.ts resume",
+    "storage:verify": "tsx src/storage-v2/migration/cli.ts verify",
+    "storage:status": "tsx src/storage-v2/migration/cli.ts status",
+    "storage:dispose": "tsx src/storage-v2/migration/cli.ts dispose",
+    "storage:parity": "tsx src/storage-v2/differential/cli.ts",
     "secrets:migrate": "tsx src/secrets/cli.ts migrate",
     "secrets:rollback": "tsx src/secrets/cli.ts rollback",
     "secrets:rotate": "tsx src/secrets/cli.ts rotate",
@@ -26,6 +35,7 @@
   },
   "dependencies": {
     "@fastify/multipart": "^9.4.0",
+    "@fastify/websocket": "11.3.4",
     "@node-saml/node-saml": "5.1.0",
     "@xmldom/xmldom": "0.9.12",
     "better-sqlite3": "^13.0.3",
@@ -39,12 +49,14 @@
     "@eslint/js": "^9.22.0",
     "@types/better-sqlite3": "^7.6.12",
     "@types/node": "^22.13.10",
+    "@types/ws": "8.5.10",
     "eslint": "^9.22.0",
     "node-gyp": "^11.0.0",
     "tsx": "^4.19.3",
     "typescript": "^5.8.2",
     "typescript-eslint": "^8.26.0",
     "vitest": "^3.0.8",
+    "ws": "8.18.3",
     "xml-crypto": "6.3.3"
   }
 }

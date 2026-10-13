@@ -1,5 +1,7 @@
 import path from "node:path";
 
+import { parseLegacyConfiguredUsers, type LegacyConfiguredUser } from "../auth/tokens.js";
+
 export interface BackendConfig {
   readonly host: string;
   readonly port: number;
@@ -10,6 +12,8 @@ export interface BackendConfig {
   readonly storeName: string;
   readonly storeVersion: string;
   readonly busyTimeoutMs: number;
+  readonly multiplayerMaxPeers: number;
+  readonly legacyConfiguredUsers: readonly LegacyConfiguredUser[];
   readonly authWriteEnabled: boolean;
   readonly authWriteMode: string | undefined;
   readonly authWriteDatabasePath: string | undefined;
@@ -124,6 +128,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
     environment.PRG32_BACKEND_STORE_DATA ?? environment.PRG32_STORE_DATA,
     path.resolve(process.cwd(), "data")
   );
+  const legacyConfiguredUsers = parseLegacyConfiguredUsers(environment.PRG32_USERS);
 
   const authWriteEnabled = booleanValue(
     "PRG32_BACKEND_AUTH_WRITE_ENABLED",
@@ -300,6 +305,12 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
     storePortOverride: environment.PRG32_STORE_PORT?.trim() || undefined,
     storeName: nonEmpty("PRG32_STORE_NAME", environment.PRG32_STORE_NAME, "PRG32 Cartridge Store"),
     storeVersion: nonEmpty("PRG32_STORE_VERSION", environment.PRG32_STORE_VERSION, "1.0.0"),
+    multiplayerMaxPeers: positiveInteger(
+      "PRG32_MP_MAX_PEERS",
+      environment.PRG32_MP_MAX_PEERS,
+      8
+    ),
+    legacyConfiguredUsers,
     busyTimeoutMs: positiveInteger(
       "PRG32_BACKEND_BUSY_TIMEOUT_MS",
       environment.PRG32_BACKEND_BUSY_TIMEOUT_MS,

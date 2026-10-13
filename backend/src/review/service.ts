@@ -12,6 +12,8 @@ import { ReviewError, type ReviewErrorCode } from "./errors.js";
 const REVIEW_OPERATION_ROOT = "review-operations";
 const MAX_REVIEW_JOURNAL_BYTES = 512 * 1024;
 const MAX_REVIEW_SUBMISSIONS = 1000;
+const MAX_OWNED_SUBMISSIONS_PER_PAGE = 100;
+const OWNED_SUBMISSION_STATUSES = new Set(["pending", "verified", "rejected"]);
 const REVIEW_STATES = ["PREPARED", "DATABASE_UPDATED", "COMPLETED", "RECOVERY_REQUIRED"] as const;
 type ReviewState = typeof REVIEW_STATES[number];
 
@@ -31,6 +33,30 @@ export interface SubmissionRecord {
   readonly reviewed_at: string | null;
   readonly metadata: Record<string, unknown>;
   readonly architectures: readonly Record<string, unknown>[];
+}
+
+export interface OwnedSubmissionSummary {
+  readonly id: number;
+  readonly game_id: string;
+  readonly title: string;
+  readonly version: string;
+  readonly status: string;
+  readonly created_at: string;
+  readonly reviewed_at: string | null;
+}
+
+export interface OwnedSubmissionPage {
+  readonly submissions: readonly OwnedSubmissionSummary[];
+  readonly pagination: {
+    readonly page: number;
+    readonly per_page: number;
+    readonly total: number;
+    readonly pages: number;
+    readonly has_next: boolean;
+    readonly has_prev: boolean;
+    readonly next_page: number | null;
+    readonly prev_page: number | null;
+  };
 }
 
 type SubmissionRow = Omit<SubmissionRecord, "metadata" | "architectures">;
@@ -167,6 +193,43 @@ export class ReviewService {
       ? this.database.prepare("SELECT id, game_id, version, status, submitted_by_user_id, submitted_by, reviewed_by_user_id, reviewed_by, pending_dir, metadata_json, architectures_json, created_at, reviewed_at FROM cartridge_submissions ORDER BY created_at DESC, id DESC LIMIT ?").all(this.maxSubmissions)
       : this.database.prepare("SELECT id, game_id, version, status, submitted_by_user_id, submitted_by, reviewed_by_user_id, reviewed_by, pending_dir, metadata_json, architectures_json, created_at, reviewed_at FROM cartridge_submissions WHERE status = ? ORDER BY created_at DESC, id DESC LIMIT ?").all(normalized, this.maxSubmissions);
     return (rows as SubmissionRow[]).map(parseSubmission);
+  }
+
+  listMine(userId: number, status: string | undefined, page = 1, perPage = 25): OwnedSubmissionPage {
+    if (!Number.isSafeInteger(userId) || userId <= 0) fail("submission owner is invalid", "review_not_authorized", 403);
+    if (!Number.isSafeInteger(page) || page <= 0) fail("page is invalid");
+    if (!Number.isSafeInteger(perPage) || perPage <= 0 || perPage > MAX_OWNED_SUBMISSIONS_PER_PAGE) fail("per_page is invalid");
+    const normalizedStatus = status === undefined || status === "all" ? undefined : status.trim().toLowerCase();
+    if (normalizedStatus !== undefined && !OWNED_SUBMISSION_STATUSES.has(normalizedStatus)) fail("status is invalid");
+
+    const where = normalizedStatus === undefined
+      ? "WHERE submitted_by_user_id = ?"
+      : "WHERE submitted_by_user_id = ? AND status = ?";
+    const countParameters = normalizedStatus === undefined ? [userId] : [userId, normalizedStatus];
+    const total = Number((this.database.prepare(`SELECT COUNT(*) AS total FROM cartridge_submissions ${where}`).get(...countParameters) as { total: number }).total);
+    const pages = Math.ceil(total / perPage);
+    const offset = (page - 1) * perPage;
+    const rows = normalizedStatus === undefined
+      ? this.database.prepare(`SELECT id, game_id, version, status, metadata_json, created_at, reviewed_at FROM cartridge_submissions ${where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`).all(userId, perPage, offset)
+      : this.database.prepare(`SELECT id, game_id, version, status, metadata_json, created_at, reviewed_at FROM cartridge_submissions ${where} ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`).all(userId, normalizedStatus, perPage, offset);
+    const submissions = (rows as Array<{ id: number; game_id: string; version: string; status: string; metadata_json: string; created_at: string; reviewed_at: string | null }>).map((row) => {
+      const metadata = record(parseJson(row.metadata_json, "submission metadata"), "submission metadata is malformed");
+      const title = typeof metadata.title === "string" && metadata.title.trim() ? metadata.title : row.game_id;
+      return { id: row.id, game_id: row.game_id, title, version: row.version, status: row.status, created_at: row.created_at, reviewed_at: row.reviewed_at };
+    });
+    return {
+      submissions,
+      pagination: {
+        page,
+        per_page: perPage,
+        total,
+        pages,
+        has_next: page < pages,
+        has_prev: page > 1 && pages > 0,
+        next_page: page < pages ? page + 1 : null,
+        prev_page: page > 1 && pages > 0 ? page - 1 : null
+      }
+    };
   }
 
   detail(submissionId: number): SubmissionRecord {

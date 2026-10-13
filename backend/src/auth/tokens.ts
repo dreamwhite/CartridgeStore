@@ -112,6 +112,22 @@ export function parseLegacyConfiguredUsers(raw: unknown): LegacyConfiguredUser[]
       return { name: scalarString(value, "user").trim() || "user", role: normalizeRole(value), token };
     });
   }
+  if (typeof raw === "string") {
+    const text = raw.trim();
+    if (!text) return [];
+    if (text.startsWith("[") || text.startsWith("{")) {
+      return parseLegacyConfiguredUsers(JSON.parse(text));
+    }
+    return text.split(",").filter(Boolean).map((chunk) => {
+      const firstSeparator = chunk.indexOf(":");
+      const secondSeparator = firstSeparator < 0 ? -1 : chunk.indexOf(":", firstSeparator + 1);
+      if (firstSeparator < 0 || secondSeparator < 0) throw new Error("PRG32_USERS entries must be name:role:token");
+      const name = chunk.slice(0, firstSeparator).trim();
+      const role = chunk.slice(firstSeparator + 1, secondSeparator).trim();
+      const token = chunk.slice(secondSeparator + 1).trim();
+      return { name: name || role || "user", role: normalizeRole(role), token };
+    });
+  }
   throw new Error("legacy user configuration must be a JSON array or object");
 }
 

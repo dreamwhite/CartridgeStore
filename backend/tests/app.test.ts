@@ -53,4 +53,49 @@ describe("minimal backend runtime", () => {
     expect(response.body).not.toContain("private implementation detail");
     await app.close();
   });
+
+  it("registers firmware ingestion endpoints but keeps them non-writable without the writer gate", async () => {
+    const app = buildApp({
+      config: loadConfig({ PRG32_BACKEND_DB: "/does/not/exist/store.sqlite" }),
+      logger: false
+    });
+    await app.ready();
+    expect(app.hasRoute({ method: "POST", url: "/api/scores" })).toBe(true);
+    expect(app.hasRoute({ method: "POST", url: "/api/runs" })).toBe(true);
+    expect(app.hasRoute({ method: "POST", url: "/api/metrics/batch" })).toBe(true);
+    expect(app.hasRoute({ method: "POST", url: "/api/runs/:run_id/finish" })).toBe(true);
+    expect(app.hasRoute({ method: "GET", url: "/api/multiplayer/status" })).toBe(true);
+    expect(app.hasRoute({ method: "GET", url: "/api/multiplayer" })).toBe(true);
+
+    const score = await app.inject({
+      method: "POST",
+      url: "/api/scores",
+      payload: { game: "read-only", player: "fixture", score: 1 }
+    });
+    const run = await app.inject({
+      method: "POST",
+      url: "/api/runs",
+      payload: { run_id: "read-only", board_id: "fixture", target: "qemu" }
+    });
+    const batch = await app.inject({
+      method: "POST",
+      url: "/api/metrics/batch",
+      payload: { run_id: "read-only", samples: [] }
+    });
+    const finish = await app.inject({
+      method: "POST",
+      url: "/api/runs/read-only/finish",
+      payload: {}
+    });
+
+    expect(score.statusCode).toBe(503);
+    expect(score.json()).toMatchObject({ code: "scores_unavailable" });
+    expect(run.statusCode).toBe(503);
+    expect(run.json()).toMatchObject({ code: "metrics_unavailable" });
+    expect(batch.statusCode).toBe(503);
+    expect(batch.json()).toMatchObject({ code: "metrics_unavailable" });
+    expect(finish.statusCode).toBe(503);
+    expect(finish.json()).toMatchObject({ code: "metrics_unavailable" });
+    await app.close();
+  });
 });
