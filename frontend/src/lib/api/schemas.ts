@@ -1,6 +1,6 @@
 import { z } from "zod";
 
-const principalSchema = z
+export const principalSchema = z
   .object({
     id: z.number().int().nullable(),
     name: z.string(),
@@ -26,6 +26,29 @@ export const csrfResponseSchema = z
     ok: z.literal(true),
     csrf_token: z.string().min(32),
   })
+  .passthrough();
+
+export const authProvidersResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    providers: z.array(z.object({
+      provider_id: z.string().min(1),
+      protocol: z.enum(["oidc", "saml"]),
+      display_name: z.string().min(1),
+      enabled: z.boolean(),
+    })),
+  })
+  .passthrough();
+
+export const authUserResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    user: principalSchema,
+  })
+  .passthrough();
+
+export const authLogoutResponseSchema = z
+  .object({ ok: z.literal(true) })
   .passthrough();
 
 const paginationSchema = z

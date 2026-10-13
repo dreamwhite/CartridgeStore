@@ -1,6 +1,7 @@
 import type { ApiError } from "./contracts";
 import { apiErrorSchema, csrfResponseSchema, discoveryDocumentSchema, gamesResponseSchema } from "./schemas";
 import type { z } from "zod";
+import { isDualOriginEnabled, resolvePublicApiUrl } from "./origin";
 
 export class ApiRequestError extends Error {
   constructor(
@@ -58,13 +59,25 @@ export async function requestJson<T>(
   return parsed.data;
 }
 
+/** Call the explicit browser-facing API origin when dual-origin mode is enabled. */
+export function requestApiJson<T>(
+  input: RequestInfo | URL,
+  init?: RequestInit,
+  schema?: z.ZodType<T>,
+): Promise<T> {
+  return requestJson(resolvePublicApiUrl(input), {
+    ...init,
+    credentials: init?.credentials ?? (isDualOriginEnabled() ? "include" : "same-origin"),
+  }, schema);
+}
+
 export function getDiscoveryDocument() {
   return requestJson("/.well-known/prg32-store.json", undefined, discoveryDocumentSchema);
 }
 
 /** Obtain the same-origin session CSRF token before cookie-auth mutations. */
 export function getCsrfToken(init?: RequestInit) {
-  return requestJson("/auth/csrf", init, csrfResponseSchema);
+  return requestApiJson("/auth/csrf", init, csrfResponseSchema);
 }
 
 /** Add the token returned by getCsrfToken to a JSON/form mutation request. */

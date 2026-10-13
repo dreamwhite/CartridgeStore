@@ -21,6 +21,27 @@ export type CsrfResponse = {
   csrf_token: string;
 };
 
+export type AuthProvider = {
+  provider_id: string;
+  protocol: "oidc" | "saml";
+  display_name: string;
+  enabled: boolean;
+};
+
+export type AuthProvidersResponse = {
+  ok: true;
+  providers: AuthProvider[];
+};
+
+export type AuthUserResponse = {
+  ok: true;
+  user: Principal;
+};
+
+export type AuthLogoutResponse = {
+  ok: true;
+};
+
 export type Pagination = {
   page: number;
   per_page: number;

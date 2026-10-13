@@ -2,7 +2,14 @@ import type { NextConfig } from "next";
 
 const configuredFlaskTarget = process.env.FLASK_PROXY_TARGET?.trim();
 const configuredAdminFastifyTarget = process.env.PRG32_ADMIN_FASTIFY_TARGET?.trim();
+const configuredFederationAdminFastifyTarget = process.env.PRG32_FEDERATION_ADMIN_FASTIFY_TARGET?.trim();
+const configuredFederationAdminIntegration = process.env.PRG32_FEDERATION_ADMIN_INTEGRATION_ENABLED?.trim().toLowerCase() === "true";
+const configuredAuthFastifyTarget = process.env.PRG32_AUTH_FASTIFY_TARGET?.trim();
+const configuredAuthIntegration = process.env.PRG32_AUTH_INTEGRATION_ENABLED?.trim().toLowerCase() === "true";
+const configuredDualOriginIntegration = process.env.PRG32_DUAL_ORIGIN_INTEGRATION_ENABLED?.trim().toLowerCase() === "true";
+const configuredPublicApiOrigin = process.env.NEXT_PUBLIC_PRG32_API_ORIGIN?.trim();
 const isProductionBuild = process.env.NODE_ENV === "production";
+const configuredAuthUi = configuredAuthIntegration || configuredDualOriginIntegration;
 
 if (isProductionBuild && !configuredFlaskTarget) {
   throw new Error(
@@ -14,6 +21,64 @@ if (isProductionBuild && configuredAdminFastifyTarget) {
   throw new Error(
     "PRG32_ADMIN_FASTIFY_TARGET is development/test-only and must not be configured for production builds.",
   );
+}
+
+if (isProductionBuild && (configuredFederationAdminIntegration || configuredFederationAdminFastifyTarget)) {
+  throw new Error(
+    "PRG32_FEDERATION_ADMIN_INTEGRATION_ENABLED and PRG32_FEDERATION_ADMIN_FASTIFY_TARGET are development/test-only and must not be configured for production builds.",
+  );
+}
+
+if (configuredFederationAdminIntegration && !configuredFederationAdminFastifyTarget) {
+  throw new Error("PRG32_FEDERATION_ADMIN_FASTIFY_TARGET is required when PRG32_FEDERATION_ADMIN_INTEGRATION_ENABLED=true.");
+}
+
+if (!configuredFederationAdminIntegration && configuredFederationAdminFastifyTarget) {
+  throw new Error("PRG32_FEDERATION_ADMIN_INTEGRATION_ENABLED=true is required when PRG32_FEDERATION_ADMIN_FASTIFY_TARGET is configured.");
+}
+
+if (configuredFederationAdminIntegration && !configuredAuthIntegration) {
+  throw new Error("PRG32_AUTH_INTEGRATION_ENABLED=true is required when federation administration integration is enabled.");
+}
+
+if (isProductionBuild && (configuredAuthIntegration || configuredAuthFastifyTarget)) {
+  throw new Error(
+    "PRG32_AUTH_INTEGRATION_ENABLED and PRG32_AUTH_FASTIFY_TARGET are development/test-only and must not be configured for production builds.",
+  );
+}
+
+if (isProductionBuild && (configuredDualOriginIntegration || configuredPublicApiOrigin)) {
+  throw new Error(
+    "PRG32_DUAL_ORIGIN_INTEGRATION_ENABLED and NEXT_PUBLIC_PRG32_API_ORIGIN are development/test-only and must not be configured for production builds.",
+  );
+}
+
+if (configuredDualOriginIntegration && !configuredPublicApiOrigin) {
+  throw new Error("NEXT_PUBLIC_PRG32_API_ORIGIN is required when PRG32_DUAL_ORIGIN_INTEGRATION_ENABLED=true.");
+}
+
+if (!configuredDualOriginIntegration && configuredPublicApiOrigin) {
+  throw new Error("PRG32_DUAL_ORIGIN_INTEGRATION_ENABLED=true is required when NEXT_PUBLIC_PRG32_API_ORIGIN is configured.");
+}
+
+if (configuredDualOriginIntegration && (configuredAuthIntegration || configuredAuthFastifyTarget || configuredFederationAdminIntegration || configuredFederationAdminFastifyTarget)) {
+  throw new Error("Dual-origin mode owns browser auth and federation requests directly; Next.js auth/federation proxy integration must be disabled.");
+}
+
+if (configuredPublicApiOrigin) {
+  let parsedApiOrigin: URL;
+  try { parsedApiOrigin = new URL(configuredPublicApiOrigin); } catch { throw new Error("NEXT_PUBLIC_PRG32_API_ORIGIN must be a valid origin"); }
+  if (parsedApiOrigin.username || parsedApiOrigin.password || parsedApiOrigin.pathname !== "/" || parsedApiOrigin.search || parsedApiOrigin.hash || parsedApiOrigin.protocol !== "https:") {
+    throw new Error("NEXT_PUBLIC_PRG32_API_ORIGIN must be an HTTPS origin without credentials or a path.");
+  }
+}
+
+if (configuredAuthIntegration && !configuredAuthFastifyTarget) {
+  throw new Error("PRG32_AUTH_FASTIFY_TARGET is required when PRG32_AUTH_INTEGRATION_ENABLED=true.");
+}
+
+if (!configuredAuthIntegration && configuredAuthFastifyTarget) {
+  throw new Error("PRG32_AUTH_INTEGRATION_ENABLED=true is required when PRG32_AUTH_FASTIFY_TARGET is configured.");
 }
 
 const flaskTarget = configuredFlaskTarget || "http://127.0.0.1:5080";
@@ -42,11 +107,40 @@ if (configuredAdminFastifyTarget) {
   }
 }
 
+if (configuredFederationAdminFastifyTarget) {
+  const parsedFederationTarget = new URL(configuredFederationAdminFastifyTarget);
+  if (parsedFederationTarget.protocol !== "http:" && parsedFederationTarget.protocol !== "https:") {
+    throw new Error("PRG32_FEDERATION_ADMIN_FASTIFY_TARGET must use http:// or https://.");
+  }
+  if (parsedFederationTarget.username || parsedFederationTarget.password || parsedFederationTarget.search || parsedFederationTarget.hash || parsedFederationTarget.pathname !== "/") {
+    throw new Error("PRG32_FEDERATION_ADMIN_FASTIFY_TARGET must be an origin without credentials or a path.");
+  }
+}
+
+if (configuredAuthFastifyTarget) {
+  const parsedAuthTarget = new URL(configuredAuthFastifyTarget);
+  if (parsedAuthTarget.protocol !== "http:" && parsedAuthTarget.protocol !== "https:") {
+    throw new Error("PRG32_AUTH_FASTIFY_TARGET must use http:// or https://.");
+  }
+  if (parsedAuthTarget.username || parsedAuthTarget.password || parsedAuthTarget.search || parsedAuthTarget.hash || parsedAuthTarget.pathname !== "/") {
+    throw new Error("PRG32_AUTH_FASTIFY_TARGET must be an origin without credentials or a path.");
+  }
+}
+
 const normalizedAdminFastifyTarget = configuredAdminFastifyTarget?.replace(/\/$/, "");
+const normalizedFederationAdminFastifyTarget = configuredFederationAdminFastifyTarget?.replace(/\/$/, "");
+const normalizedAuthFastifyTarget = configuredAuthFastifyTarget?.replace(/\/$/, "");
 
 const proxyPaths = [
-  "/api/:path*",
-  "/auth/:path*",
+  // In isolated mode the canonical auth namespaces are excluded from the
+  // Flask catch-alls at pattern level. This keeps the boundary correct even
+  // if rewrite ordering changes in a future Next.js release.
+  ...(configuredAuthIntegration
+    ? [
+        "/api/:path((?!auth(?:/|$)|admin/federation(?:/|$)).*)",
+        "/auth/:path((?!auth(?:/|$)).*)",
+      ]
+    : ["/api/:path*", "/auth/:path*"]),
   "/admin/:path*",
   "/editor/:path*",
   "/users/:path*",
@@ -61,19 +155,65 @@ const proxyPaths = [
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // The dev browser reaches Next through the shared Dream Traefik HTTPS
+  // origin. Allow that exact host for HMR/dev resources.
+  allowedDevOrigins: [process.env.PRG32_STORE_DOMAIN?.trim() || "store.prg32.dream.test"],
+  env: {
+    // Dual-origin mode keeps the Next proxy disabled, but the browser UI must
+    // still expose the login/provider controls and call the API origin.
+    NEXT_PUBLIC_AUTH_INTEGRATION_ENABLED: configuredAuthUi ? "true" : "false",
+    NEXT_PUBLIC_PRG32_DUAL_ORIGIN_ENABLED: configuredDualOriginIntegration ? "true" : "false",
+    ...(configuredPublicApiOrigin ? { NEXT_PUBLIC_PRG32_API_ORIGIN: configuredPublicApiOrigin } : {}),
+  },
   output: "standalone",
   async rewrites() {
-    const flaskRewrites = proxyPaths.map((source) => ({
-      source,
-      destination: `${normalizedFlaskTarget}${source}`,
-    }));
+    const flaskRewrites = configuredAuthIntegration
+      ? [
+          {
+            source: "/api/:path((?!auth(?:/|$)|admin/federation(?:/|$)).*)",
+            destination: `${normalizedFlaskTarget}/api/:path*`,
+          },
+          {
+            source: "/auth/:path((?!auth(?:/|$)).*)",
+            destination: `${normalizedFlaskTarget}/auth/:path*`,
+          },
+          ...proxyPaths.filter((source) => !source.startsWith("/api/") && !source.startsWith("/auth/")).map((source) => ({
+            source,
+            destination: `${normalizedFlaskTarget}${source}`,
+          })),
+        ]
+      : proxyPaths.map((source) => ({
+          source,
+          destination: `${normalizedFlaskTarget}${source}`,
+        }));
     const adminRewrites = normalizedAdminFastifyTarget
       ? [{
           source: "/__admin-fastify/:path*",
           destination: `${normalizedAdminFastifyTarget}/:path*`,
         }]
       : [];
-    return [...adminRewrites, ...flaskRewrites];
+    const federationAdminRewrites = normalizedFederationAdminFastifyTarget
+      ? [{
+          source: "/api/admin/federation/:path*",
+          destination: `${normalizedFederationAdminFastifyTarget}/api/admin/federation/:path*`,
+        }]
+      : [];
+    const authRewrites = normalizedAuthFastifyTarget
+      ? [
+          // Canonical authentication paths are temporarily owned by Fastify
+          // only in the explicit isolated integration mode. The catch-all
+          // Flask rewrites remain the owner everywhere else.
+          {
+            source: "/auth/:path*",
+            destination: `${normalizedAuthFastifyTarget}/auth/:path*`,
+          },
+          {
+            source: "/api/auth/:path*",
+            destination: `${normalizedAuthFastifyTarget}/api/auth/:path*`,
+          },
+        ]
+      : [];
+    return [...adminRewrites, ...federationAdminRewrites, ...authRewrites, ...flaskRewrites];
   },
 };
 
