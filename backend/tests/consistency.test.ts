@@ -125,6 +125,16 @@ describe("disposable publication consistency", () => {
     database.close();
   });
 
+  it("characterizes a missing pending artifact before creating a journal operation", () => {
+    const { root, database } = fixture();
+    fs.rmSync(path.join(root, "pending/1/qemu.prg32"));
+    const service = new PublicationConsistencyService({ root, database });
+    expect(() => service.prepare(1)).toThrow("pending cartridge file is missing");
+    expect(service.listOperations()).toHaveLength(0);
+    expect((database.prepare("SELECT status FROM cartridge_submissions WHERE id = 1").get() as { status: string }).status).toBe("pending");
+    database.close();
+  });
+
   it("restores backed-up files and index when compensation follows a replacement", () => {
     const { root, database } = fixture();
     const initialService = new PublicationConsistencyService({ root, database });
@@ -147,6 +157,25 @@ describe("disposable publication consistency", () => {
     expect(service.recover(operation.operationId, "compensate").state).toBe("COMPENSATED");
     expect(fs.readFileSync(targetPath)).toEqual(previousTarget);
     expect(fs.readFileSync(indexPath)).toEqual(previousIndex);
+    expect((database.prepare("SELECT status FROM cartridge_submissions WHERE id = 2").get() as { status: string }).status).toBe("pending");
+    database.close();
+  });
+
+  it("characterizes compensation after a filesystem replacement interruption", () => {
+    const { root, database } = fixture();
+    const initialService = new PublicationConsistencyService({ root, database });
+    initialService.execute(initialService.prepare(1).operationId);
+    const targetPath = path.join(root, "cartridges/org.example.consistency/1.0.0/qemu.prg32");
+    const previousTarget = fs.readFileSync(targetPath);
+    insertPending(database, root, 2, "org.example.consistency", "1.0.0", true, "Replacement Fixture");
+    let interrupted = false;
+    const service = new PublicationConsistencyService({ root, database, fault: (point) => {
+      if (point === "after-binary-replacement" && !interrupted) { interrupted = true; throw new Error("filesystem interruption"); }
+    } });
+    const operation = service.prepare(2);
+    expect(() => service.execute(operation.operationId)).toThrow("filesystem interruption");
+    expect(service.recover(operation.operationId, "compensate").state).toBe("COMPENSATED");
+    expect(fs.readFileSync(targetPath)).toEqual(previousTarget);
     expect((database.prepare("SELECT status FROM cartridge_submissions WHERE id = 2").get() as { status: string }).status).toBe("pending");
     database.close();
   });

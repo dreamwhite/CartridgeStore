@@ -337,6 +337,27 @@ describe("M6.3c.2 application backup", () => {
     expect((await upload(symlink)).json()).toMatchObject({ code: "backup_unsupported_file_type" });
   });
 
+  it("characterizes validation-before-mutation for an archive with an inventory mismatch", async () => {
+    const test = fixture();
+    const auth = await adminSession(test.app);
+    const exported = await exportArchive(test.app, auth);
+    const entries = unzipSync(exported.rawPayload);
+    delete entries["data/cartridges/unicode-ゲーム/1.0.0/qemu.prg32"];
+    const payload = multipart(zipSync(entries), auth.csrf);
+    const response = await test.app.inject({
+      method: "POST",
+      url: "/admin/backup/restore",
+      headers: { cookie: auth.cookie, "content-type": payload.contentType },
+      payload: payload.body
+    });
+    expect(response.statusCode).toBe(400);
+    expect(response.json()).toMatchObject({ code: "backup_inventory_mismatch" });
+    expect(fs.readFileSync(path.join(test.storeRoot, "cartridges/unicode-ゲーム/1.0.0/qemu.prg32"))).toEqual(Buffer.from([0, 1, 2, 3, 4]));
+    const database = new Database(test.databasePath, { readonly: true });
+    expect((database.prepare("PRAGMA integrity_check").get() as { integrity_check: string }).integrity_check).toBe("ok");
+    database.close();
+  });
+
   it("rolls back a failed post-filesystem restore", async () => {
     const test = createDatabase();
     const db = new Database(test.databasePath);

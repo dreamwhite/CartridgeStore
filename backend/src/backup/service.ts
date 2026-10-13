@@ -5,14 +5,12 @@ import path from "node:path";
 import Database from "better-sqlite3";
 
 import type { BackendConfig } from "../config/env.js";
-import { ReadonlyCatalog } from "../catalog/catalog.js";
 import { compareSchemaSnapshots } from "../compatibility/schema.js";
 import { inspectSchema, REQUIRED_TABLES, type SchemaSnapshot } from "../db/schema-inspection.js";
+import { applyFederationMigrations, FEDERATION_TABLES, hasFederationTable } from "../db/federation-migrations.js";
 import {
   assertInside,
   BACKUP_ENCRYPTION_MAGIC,
-  BACKUP_DERIVED_DIRECTORIES,
-  BACKUP_DERIVED_FILES,
   BACKUP_V2_ABI,
   BackupError,
   isDerivedRelativePath,
@@ -29,6 +27,15 @@ import {
   scanZipArchive
 } from "./archive.js";
 import type { SecretStore } from "../secrets/service.js";
+import {
+  availableBytes,
+  assertRegularFile,
+  clearManagedData,
+  collectFiles,
+  copyDataTree,
+  directoryBytes,
+  validateFilesystemReferences
+} from "./inventory.js";
 
 const LOCK_FILE = "publication.lock";
 const STAGING_DIRECTORY = ".prg32-backup-staging";
@@ -62,14 +69,6 @@ interface RestoreJournal {
   readonly recoveryRelative?: string;
   readonly format?: string;
   readonly errorCode?: string;
-}
-
-interface LiveFile {
-  readonly relative: string;
-  readonly archivePath: string;
-  readonly path: string;
-  readonly size: number;
-  readonly sha256: string;
 }
 
 interface RecoveryPoint {
@@ -146,108 +145,28 @@ function ensureDirectory(root: string, relative: string): string {
   return candidate;
 }
 
-function isDatabaseArtifact(candidate: string, databasePath: string): boolean {
-  const normalizedCandidate = path.resolve(candidate);
-  const normalizedDatabase = path.resolve(databasePath);
-  return normalizedCandidate === normalizedDatabase ||
-    normalizedCandidate === normalizedDatabase + "-wal" ||
-    normalizedCandidate === normalizedDatabase + "-shm" ||
-    normalizedCandidate === normalizedDatabase + "-journal";
-}
-
 function schemaFingerprint(snapshot: SchemaSnapshot): string {
   return sha256(Buffer.from(JSON.stringify(snapshot), "utf8"));
 }
 
-function assertExpectedSchema(sqlite: Database.Database, expected: SchemaSnapshot, manifest: BackupManifest): SchemaSnapshot {
+function assertExpectedSchema(sqlite: Database.Database, expected: SchemaSnapshot, manifest: BackupManifest, legacyFingerprint?: string): SchemaSnapshot {
   const integrity = sqlite.prepare("PRAGMA integrity_check").get() as { integrity_check?: unknown };
   if (integrity.integrity_check !== "ok") throw new BackupError("backup database integrity check failed", "backup_database_integrity");
   const foreignKeys = sqlite.prepare("PRAGMA foreign_key_check").all();
   if (foreignKeys.length > 0) throw new BackupError("backup database foreign-key check failed", "backup_database_foreign_keys");
   const actual = inspectSchema(sqlite);
-  const required = new Set<string>(REQUIRED_TABLES);
+  const federationExpected = expected.tables.some((table) => FEDERATION_TABLES.includes(table.name as typeof FEDERATION_TABLES[number]));
+  const required = new Set<string>(federationExpected ? [...REQUIRED_TABLES, ...FEDERATION_TABLES] : REQUIRED_TABLES);
   if (actual.tables.some((table) => !required.has(table.name)) || REQUIRED_TABLES.some((name) => !actual.tables.some((table) => table.name === name))) {
     throw new BackupError("backup database schema is incompatible", "backup_database_schema_incompatible");
   }
-  if (manifest.abi === BACKUP_V2_ABI && manifest.schema.fingerprint !== schemaFingerprint(actual)) {
+  if (manifest.abi === BACKUP_V2_ABI && manifest.schema.fingerprint !== schemaFingerprint(actual) && manifest.schema.fingerprint !== legacyFingerprint) {
     throw new BackupError("backup database schema fingerprint is invalid", "backup_database_schema_incompatible");
   }
   if (compareSchemaSnapshots(expected, actual).length > 0) {
     throw new BackupError("backup database schema is incompatible with this installation", "backup_database_schema_incompatible");
   }
   return actual;
-}
-
-function assertRegularFile(filePath: string, code = "backup_file_invalid"): fs.Stats {
-  const stats = fs.lstatSync(filePath);
-  if (stats.isSymbolicLink() || !stats.isFile()) throw new BackupError("backup contains an invalid file", code);
-  return stats;
-}
-
-function collectFiles(root: string, databasePath: string, config: BackendConfig): LiveFile[] {
-  const files: LiveFile[] = [];
-  const walk = (directory: string): void => {
-    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-      const candidate = path.join(directory, entry.name);
-      const relative = path.relative(root, candidate).replaceAll(path.sep, "/");
-      if (entry.isDirectory()) {
-        if (isDerivedRelativePath(relative)) continue;
-        if (entry.isSymbolicLink()) throw new BackupError("backup data contains a symlink", "backup_symlink_rejected");
-        walk(candidate);
-        continue;
-      }
-      if (entry.isSymbolicLink()) throw new BackupError("backup data contains a symlink", "backup_symlink_rejected");
-      if (!entry.isFile()) throw new BackupError("backup data contains an unsupported file", "backup_unsupported_file_type");
-      if (isDerivedRelativePath(relative) || isDatabaseArtifact(candidate, databasePath)) continue;
-      validateArchiveEntryPath("data/" + relative, config);
-      const stats = assertRegularFile(candidate);
-      if (stats.size > config.backupMaxEntryBytes) throw new BackupError("backup data entry is too large", "backup_entry_too_large");
-      const bytes = fs.readFileSync(candidate);
-      files.push({
-        relative,
-        archivePath: "data/" + relative,
-        path: candidate,
-        size: bytes.byteLength,
-        sha256: sha256(bytes)
-      });
-    }
-  };
-  walk(root);
-  return files.sort((left, right) => left.archivePath.localeCompare(right.archivePath));
-}
-
-function copyDataTree(sourceRoot: string, targetRoot: string, databasePath: string): void {
-  if (!fs.existsSync(sourceRoot)) return;
-  const sourceStats = fs.lstatSync(sourceRoot);
-  if (sourceStats.isSymbolicLink() || !sourceStats.isDirectory()) throw new BackupError("backup data root is invalid", "backup_data_root_invalid");
-  const walk = (directory: string): void => {
-    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-      const source = path.join(directory, entry.name);
-      const relative = path.relative(sourceRoot, source).replaceAll(path.sep, "/");
-      if (isDerivedRelativePath(relative)) continue;
-      const target = assertInside(targetRoot, path.join(targetRoot, relative));
-      if (entry.isDirectory()) {
-        if (entry.isSymbolicLink()) throw new BackupError("backup data contains a symlink", "backup_symlink_rejected");
-        fs.mkdirSync(target, { recursive: true, mode: 0o700 });
-        walk(source);
-        continue;
-      }
-      if (entry.isSymbolicLink() || !entry.isFile()) throw new BackupError("backup data contains an unsupported file", "backup_unsupported_file_type");
-      if (isDatabaseArtifact(target, databasePath)) continue;
-      fs.mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
-      fs.copyFileSync(source, target);
-      fs.chmodSync(target, 0o600);
-    }
-  };
-  walk(sourceRoot);
-}
-
-function clearManagedData(root: string, databasePath: string): void {
-  for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-    const candidate = path.join(root, entry.name);
-    if (BACKUP_DERIVED_DIRECTORIES.has(entry.name) || BACKUP_DERIVED_FILES.has(entry.name) || isDatabaseArtifact(candidate, databasePath)) continue;
-    fs.rmSync(candidate, { recursive: true, force: true });
-  }
 }
 
 function databaseTableNames(snapshot: SchemaSnapshot): string[] {
@@ -282,6 +201,7 @@ function restoreDatabase(live: Database.Database, sourcePath: string, expectedSc
     }
     live.exec("COMMIT");
     live.pragma("foreign_keys = ON");
+    if (hasFederationTable(live, "auth_sessions")) live.exec("DELETE FROM auth_sessions; DELETE FROM federation_transactions;");
     live.exec("DETACH DATABASE restored_backup");
     attached = false;
   } catch (error) {
@@ -295,72 +215,6 @@ function restoreDatabase(live: Database.Database, sourcePath: string, expectedSc
   } finally {
     source?.close();
   }
-}
-
-function validateFilesystemReferences(root: string, database: Database.Database): void {
-  try {
-    const catalog = new ReadonlyCatalog(root);
-    const games = catalog.listGames();
-    for (const game of games) {
-      const id = typeof game.id === "string" ? game.id : "";
-      const versions = Array.isArray(game.versions) ? game.versions : [];
-      for (const version of versions) {
-        const selected = catalog.publicGame(id, String(version));
-        const variants = selected.variants;
-        if (variants === null || typeof variants !== "object" || Array.isArray(variants)) {
-          throw new BackupError("backup catalog variants are invalid", "backup_catalog_invalid");
-        }
-        for (const architecture of Object.keys(variants)) {
-          catalog.resolveVariant(id, String(version), architecture);
-        }
-      }
-    }
-    const rows = database.prepare("SELECT id, status, pending_dir, architectures_json FROM cartridge_submissions WHERE status = 'pending'").all() as Array<{ id: number; status: string; pending_dir: string; architectures_json: string }>;
-    for (const row of rows) {
-      if (!/^pending\/[1-9][0-9]*$/.test(row.pending_dir)) throw new BackupError("backup pending path is invalid", "backup_pending_reference_invalid");
-      let architectures: unknown;
-      try { architectures = JSON.parse(row.architectures_json) as unknown; } catch (error) {
-        throw new BackupError("backup pending metadata is invalid", "backup_pending_reference_invalid", 400, { cause: error });
-      }
-      if (!Array.isArray(architectures)) throw new BackupError("backup pending metadata is invalid", "backup_pending_reference_invalid");
-      for (const item of architectures) {
-        if (item === null || typeof item !== "object" || Array.isArray(item) || typeof (item as Record<string, unknown>).stored !== "string") {
-          throw new BackupError("backup pending metadata is invalid", "backup_pending_reference_invalid");
-        }
-        const stored = (item as Record<string, unknown>).stored as string;
-        const target = assertInside(root, path.join(root, stored));
-        const stats = assertRegularFile(target, "backup_pending_file_missing");
-        if (stats.size <= 0) throw new BackupError("backup pending file is empty", "backup_pending_file_missing");
-      }
-    }
-  } catch (error) {
-    if (error instanceof BackupError) throw error;
-    throw new BackupError("backup filesystem references are invalid", "backup_filesystem_invalid", 400, { cause: error });
-  }
-}
-
-function availableBytes(root: string): number {
-  try {
-    const stats = fs.statfsSync(root);
-    return Number(stats.bavail) * Number(stats.bsize);
-  } catch {
-    return Number.MAX_SAFE_INTEGER;
-  }
-}
-
-function directoryBytes(root: string): number {
-  if (!fs.existsSync(root)) return 0;
-  let total = 0;
-  const walk = (directory: string): void => {
-    for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
-      const candidate = path.join(directory, entry.name);
-      if (entry.isDirectory()) {
-        if (!entry.isSymbolicLink() && !isDerivedRelativePath(path.relative(root, candidate).replaceAll(path.sep, "/"))) walk(candidate);
-      } else if (entry.isFile() && !entry.isSymbolicLink()) total += fs.statSync(candidate).size;
-    }
-  };
-  walk(root);
-  return total;
 }
 
 function acquireLock(root: string): { readonly token: string; readonly path: string } {
@@ -578,10 +432,29 @@ export class BackupService {
 
   private validateStaged(extracted: ReturnType<typeof extractZipArchive>, manifest: BackupManifest): { readonly schema: SchemaSnapshot; readonly format: string } {
     this.validateInventory(extracted, manifest);
+    let liveSchema: SchemaSnapshot;
+    try { liveSchema = inspectSchema(this.database); } catch (error) {
+      throw new BackupError("backup validation failed", "backup_validation_failed", 400, { cause: error });
+    }
+    const liveUsesFederation = liveSchema.tables.some((table) => FEDERATION_TABLES.includes(table.name as typeof FEDERATION_TABLES[number]));
+    let legacyFingerprint: string | undefined;
+    if (liveUsesFederation) {
+      try {
+        const writableStaged = new Database(extracted.databasePath, { fileMustExist: true });
+        try {
+          legacyFingerprint = schemaFingerprint(inspectSchema(writableStaged));
+          applyFederationMigrations(writableStaged);
+        } finally {
+          writableStaged.close();
+        }
+      } catch (error) {
+        if (error instanceof BackupError) throw error;
+        throw new BackupError("backup validation failed", "backup_validation_failed", 400, { cause: error });
+      }
+    }
     const staged = new Database(extracted.databasePath, { readonly: true, fileMustExist: true });
     try {
-      const liveSchema = inspectSchema(this.database);
-      const schema = assertExpectedSchema(staged, liveSchema, manifest);
+      const schema = assertExpectedSchema(staged, liveSchema, manifest, legacyFingerprint);
       if (this.secrets) {
         let secretMetadata;
         try { secretMetadata = this.secrets.preflight(staged); } catch (error) {
