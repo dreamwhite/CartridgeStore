@@ -37,7 +37,9 @@ export const PERMISSIONS = [
   "runs:export:self",
   "runs:export:any",
   "backup:export",
-  "backup:restore"
+  "backup:restore",
+  "federation:read",
+  "federation:manage"
 ] as const;
 
 export type Permission = typeof PERMISSIONS[number];
@@ -62,7 +64,9 @@ const ADMIN_PERMISSIONS: readonly Permission[] = [
   "runs:read:any",
   "runs:export:any",
   "backup:export",
-  "backup:restore"
+  "backup:restore",
+  "federation:read",
+  "federation:manage"
 ];
 
 const AUTHENTICATED_PERMISSIONS: readonly Permission[] = [

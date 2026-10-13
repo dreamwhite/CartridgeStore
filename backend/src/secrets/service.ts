@@ -6,6 +6,14 @@ import Database from "better-sqlite3";
 
 import { decryptSecret, encryptSecret, isEncryptedSecret, parseEnvelope } from "./envelope.js";
 import { KeyRegistry, SecretKeyError } from "./registry.js";
+import { hasFederationTable } from "../db/federation-migrations.js";
+
+export const FEDERATION_SECRET_PURPOSES = [
+  "oidc-client-secret",
+  "saml-sp-signing-private-key",
+  "saml-sp-decryption-private-key"
+] as const;
+export type FederationSecretPurpose = typeof FEDERATION_SECRET_PURPOSES[number];
 
 export const SECRET_SETTING_DEFINITIONS = {
   smtp_password: { purpose: "store-setting:smtp-password", classification: "secret" },
@@ -68,6 +76,18 @@ function isSecretKey(key: string): key is SecretSettingKey {
 }
 
 function purpose(key: SecretSettingKey): string { return SECRET_SETTING_DEFINITIONS[key].purpose; }
+
+function federationPurpose(providerId: string, secretPurpose: FederationSecretPurpose): string {
+  return `federated-provider:${providerId}:${secretPurpose}`;
+}
+
+function providerSettingKey(providerId: string, secretPurpose: FederationSecretPurpose): string {
+  return `federated_${crypto.createHash("sha256").update(providerId).digest("hex").slice(0, 24)}_${secretPurpose.replaceAll("-", "_")}`;
+}
+
+function isFederationPurpose(value: string): value is FederationSecretPurpose {
+  return (FEDERATION_SECRET_PURPOSES as readonly string[]).includes(value);
+}
 
 function stableDatabaseIdentity(databasePath: string): string {
   try {
@@ -164,6 +184,7 @@ export class SecretStore {
     if (inventory.encrypted.length > 0) {
       for (const item of inventory.encrypted) this.decrypt(database, item.key);
     }
+    this.validateProviderSecrets(database);
     return inventory;
   }
 
@@ -191,7 +212,63 @@ export class SecretStore {
     const inventory = this.inventory(database);
     const ids = [...new Set(inventory.encrypted.map((item) => item.keyId))].sort();
     for (const item of inventory.encrypted) this.decrypt(database, item.key);
-    return { keyIds: ids, encryptedSettings: inventory.encrypted.length };
+    const providerSecrets = this.providerSecretRows(database);
+    for (const row of providerSecrets) {
+      const envelope = parseEnvelope(row.encrypted_value);
+      const settingKey = providerSettingKey(row.provider_id, row.purpose);
+      decryptSecret(this.keys(), settingKey, federationPurpose(row.provider_id, row.purpose), row.encrypted_value);
+      ids.push(envelope.key_id);
+    }
+    return { keyIds: [...new Set(ids)].sort(), encryptedSettings: inventory.encrypted.length + providerSecrets.length };
+  }
+
+  providerReference(providerId: string, secretPurpose: FederationSecretPurpose): string {
+    if (!/^[a-z][a-z0-9._-]{0,63}$/.test(providerId) || !isFederationPurpose(secretPurpose)) {
+      throw new SecretStorageError("federation_secret_invalid", "federation secret reference is invalid");
+    }
+    return `federated-provider:${providerId}:${secretPurpose}`;
+  }
+
+  encryptProviderSecret(providerId: string, secretPurpose: FederationSecretPurpose, plaintext: string): string {
+    const reference = this.providerReference(providerId, secretPurpose);
+    if (typeof plaintext !== "string" || plaintext.length === 0 || plaintext.length > 16384) {
+      throw new SecretStorageError("federation_secret_invalid", "federation secret value is invalid");
+    }
+    return encryptSecret(this.keys(), providerSettingKey(providerId, secretPurpose), reference, plaintext);
+  }
+
+  setProviderSecret(database: Database.Database, providerId: string, secretPurpose: FederationSecretPurpose, plaintext: string): string {
+    const reference = this.providerReference(providerId, secretPurpose);
+    const encrypted = this.encryptProviderSecret(providerId, secretPurpose, plaintext);
+    database.prepare(
+      "INSERT INTO federation_provider_secrets(provider_id, purpose, encrypted_value, updated_at) VALUES (?, ?, ?, datetime('now')) ON CONFLICT(provider_id, purpose) DO UPDATE SET encrypted_value = excluded.encrypted_value, updated_at = datetime('now')"
+    ).run(providerId, secretPurpose, encrypted);
+    return reference;
+  }
+
+  decryptProviderSecret(database: Database.Database, providerId: string, secretPurpose: FederationSecretPurpose): string {
+    const reference = this.providerReference(providerId, secretPurpose);
+    const row = database.prepare("SELECT encrypted_value FROM federation_provider_secrets WHERE provider_id = ? AND purpose = ?").get(providerId, secretPurpose) as { encrypted_value?: unknown } | undefined;
+    if (!row || typeof row.encrypted_value !== "string") throw new SecretStorageError("federation_secret_missing", "federation secret is not configured");
+    try { return decryptSecret(this.keys(), providerSettingKey(providerId, secretPurpose), reference, row.encrypted_value); }
+    catch (error) {
+      if (error instanceof SecretKeyError) throw new SecretStorageError(error.code, error.message, { cause: error });
+      throw error;
+    }
+  }
+
+  private providerSecretRows(database: Database.Database): Array<{ provider_id: string; purpose: FederationSecretPurpose; encrypted_value: string }> {
+    if (!hasFederationTable(database, "federation_provider_secrets")) return [];
+    const rows = database.prepare("SELECT provider_id, purpose, encrypted_value FROM federation_provider_secrets ORDER BY provider_id, purpose").all() as Array<{ provider_id: string; purpose: string; encrypted_value: string }>;
+    if (rows.length > this.maxRows) throw new SecretStorageError("secret_too_many_rows", "too many encrypted federation secrets");
+    return rows.map((row) => {
+      if (!isFederationPurpose(row.purpose) || typeof row.provider_id !== "string" || typeof row.encrypted_value !== "string" || row.encrypted_value.length > 20000) throw new SecretStorageError("secret_inventory_invalid", "encrypted federation secret inventory is invalid");
+      return { provider_id: row.provider_id, purpose: row.purpose, encrypted_value: row.encrypted_value };
+    });
+  }
+
+  private validateProviderSecrets(database: Database.Database): void {
+    for (const row of this.providerSecretRows(database)) this.decryptProviderSecret(database, row.provider_id, row.purpose);
   }
 
   migrate(database: Database.Database, databasePath: string, options: { readonly confirm: boolean; readonly snapshotPath?: string; readonly fault?: SecretMigrationFault }): SecretMigrationResult {
@@ -271,6 +348,17 @@ export class SecretStore {
         if (!current) throw new SecretStorageError("secret_rotation_conflict", "secret setting changed during rotation");
         const encrypted = this.encrypt(item.key, plaintext);
         if (write.run(encrypted, item.key, current).changes !== 1 || this.decrypt(database, item.key) !== plaintext) throw new SecretStorageError("secret_rotation_failed", "secret rotation verification failed");
+        rotated += 1;
+        options.fault?.("after-write");
+      }
+      const providerRows = this.providerSecretRows(database);
+      for (const row of providerRows) {
+        const envelope = parseEnvelope(row.encrypted_value);
+        from[envelope.key_id] = (from[envelope.key_id] ?? 0) + 1;
+        if (envelope.key_id === target) continue;
+        const plaintext = this.decryptProviderSecret(database, row.provider_id, row.purpose);
+        const encrypted = this.encryptProviderSecret(row.provider_id, row.purpose, plaintext);
+        if (database.prepare("UPDATE federation_provider_secrets SET encrypted_value = ?, updated_at = datetime('now') WHERE provider_id = ? AND purpose = ? AND encrypted_value = ?").run(encrypted, row.provider_id, row.purpose, row.encrypted_value).changes !== 1 || this.decryptProviderSecret(database, row.provider_id, row.purpose) !== plaintext) throw new SecretStorageError("secret_rotation_failed", "secret rotation verification failed");
         rotated += 1;
         options.fault?.("after-write");
       }

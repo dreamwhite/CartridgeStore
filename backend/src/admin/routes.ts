@@ -305,6 +305,18 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRouteOpt
     catch (error) { return operationFailure(reply, request, error); }
   });
 
+  app.patch<{ Params: UserParams }>("/api/admin/users/:userId/state", async (request, reply) => {
+    if (!options.auth.isWriteEnabled()) return json(reply, { ok: false, error: "administrative writes are unavailable", code: "admin_write_unavailable" }, 503);
+    const current = requireAdmin(request, reply, options, "users:update", true);
+    if (!current) return reply;
+    try {
+      const body = object(request.body);
+      assertFields(body, ["disabled"]);
+      if (!Object.hasOwn(body, "disabled")) throw new AdminError("invalid_account_state", 400, "disabled is required");
+      return json(reply, { ok: true, user: options.identity.setDisabled(userId(request.params), body.disabled, mutationContext(current, request)) });
+    } catch (error) { return operationFailure(reply, request, error); }
+  });
+
   app.put<{ Params: UserParams }>("/api/admin/users/:userId/groups", async (request, reply) => {
     if (!options.auth.isWriteEnabled()) return json(reply, { ok: false, error: "administrative writes are unavailable", code: "admin_write_unavailable" }, 503);
     const current = requireAdmin(request, reply, options, "users:groups:manage", true);

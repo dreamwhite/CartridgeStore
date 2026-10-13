@@ -11,7 +11,7 @@ const KDF = "hkdf-sha256";
 const NONCE_BYTES = 12;
 const TAG_BYTES = 16;
 const KEY_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
-const PURPOSE_RE = /^store-setting:[a-z0-9-]{1,96}$/;
+const PURPOSE_RE = /^(store-setting:[a-z0-9-]{1,96}|federated-provider:[a-z][a-z0-9._-]{0,63}:(oidc-client-secret|saml-sp-signing-private-key|saml-sp-decryption-private-key))$/;
 
 export class SecretEnvelopeError extends Error {
   constructor(readonly code: string, message: string, options?: ErrorOptions) {

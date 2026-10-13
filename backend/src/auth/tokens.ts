@@ -2,6 +2,8 @@ import crypto from "node:crypto";
 
 import type Database from "better-sqlite3";
 
+import { hasAccountStateColumn } from "./account-state.js";
+
 export interface TokenOwner {
   readonly id: number;
   readonly username: string;
@@ -30,14 +32,13 @@ export function hashApiToken(token: string): string {
 
 export function lookupApiToken(sqlite: Database.Database, token: string): ApiTokenLookup | null {
   const tokenHash = hashApiToken(token);
-  const row = sqlite
-    .prepare(
-      `SELECT api_tokens.token_hash, api_tokens.label, api_tokens.created_at, api_tokens.last_used,
-              users.id, users.username, users.email, users.role
-       FROM api_tokens JOIN users ON users.id = api_tokens.user_id
-       WHERE api_tokens.token_hash = ?`
-    )
-    .get(tokenHash) as
+  const disabledColumn = hasAccountStateColumn(sqlite) ? ", users.disabled_at" : "";
+  const row = sqlite.prepare(
+    "SELECT api_tokens.token_hash, api_tokens.label, api_tokens.created_at, api_tokens.last_used," +
+    " users.id, users.username, users.email, users.role" + disabledColumn +
+    " FROM api_tokens JOIN users ON users.id = api_tokens.user_id" +
+    " WHERE api_tokens.token_hash = ?"
+  ).get(tokenHash) as
     | {
         token_hash: string;
         label: string | null;
@@ -47,16 +48,15 @@ export function lookupApiToken(sqlite: Database.Database, token: string): ApiTok
         username: string;
         email: string;
         role: string;
+        disabled_at?: string | null;
       }
     | undefined;
-  if (!row) {
-    return null;
-  }
+  if (!row || (row.disabled_at !== undefined && row.disabled_at !== null)) return null;
   const groups = sqlite
     .prepare(
-      `SELECT groups.name FROM user_groups
-       JOIN groups ON groups.id = user_groups.group_id
-       WHERE user_groups.user_id = ? ORDER BY groups.name`
+      "SELECT groups.name FROM user_groups " +
+      "JOIN groups ON groups.id = user_groups.group_id " +
+      "WHERE user_groups.user_id = ? ORDER BY groups.name"
     )
     .all(row.id) as Array<{ name: string }>;
   return {
@@ -77,7 +77,7 @@ export function lookupApiToken(sqlite: Database.Database, token: string): ApiTok
 function normalizeRole(value: unknown): string {
   const role = scalarString(value, "").trim().toLowerCase();
   if (!["reader", "user", "player", "publisher", "admin"].includes(role)) {
-    throw new Error(`unsupported configured role: ${role}`);
+    throw new Error("unsupported configured role: " + role);
   }
   return role;
 }

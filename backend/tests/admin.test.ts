@@ -328,4 +328,31 @@ describe("M6.3d.2c user, role, and group administration", () => {
     const stillValid = await test.app.inject({ method: "GET", url: "/api/me", headers: { authorization: `Bearer ${tokenB}` } });
     expect(stillValid.statusCode).toBe(200);
   });
+
+  it("disables accounts, revokes durable access, and preserves last-admin protection", async () => {
+    const test = fixture();
+    const admin = await adminSession(test.app);
+    const created = await test.app.inject({ method: "POST", url: "/api/admin/users", headers: { cookie: admin.cookie, "x-csrftoken": admin.csrf }, payload: { username: "disable-me", email: "disable-me@example.test", password: "disable-password-123" } });
+    const userId = created.json<{ user: { id: number } }>().user.id;
+    const anonymous = await test.app.inject({ method: "GET", url: "/auth/csrf" });
+    const cookie = header(anonymous, "set-cookie").split(";", 1)[0] ?? "";
+    const login = await test.app.inject({ method: "POST", url: "/auth/login", headers: { cookie, "x-csrftoken": anonymous.json<{ csrf_token: string }>().csrf_token }, payload: { username: "disable-me", password: "disable-password-123" } });
+    const oldCookie = header(login, "set-cookie").split(";", 1)[0] ?? "";
+    const token = "prg32-disable-me-token";
+    addToken(test.databasePath, userId, token);
+    expect((await test.app.inject({ method: "GET", url: "/api/me", headers: { cookie: oldCookie } })).statusCode).toBe(200);
+    expect((await test.app.inject({ method: "GET", url: "/api/me", headers: { authorization: `Bearer ${token}` } })).statusCode).toBe(200);
+    const disabled = await test.app.inject({ method: "PATCH", url: `/api/admin/users/${userId}/state`, headers: { cookie: admin.cookie, "x-csrftoken": admin.csrf }, payload: { disabled: true } });
+    expect(disabled.statusCode).toBe(200);
+    expect(disabled.json<{ user: { disabled_at: string | null } }>().user.disabled_at).toBeTypeOf("string");
+    expect((await test.app.inject({ method: "GET", url: "/api/me", headers: { cookie: oldCookie } })).statusCode).toBe(401);
+    expect((await test.app.inject({ method: "GET", url: "/api/me", headers: { authorization: `Bearer ${token}` } })).statusCode).toBe(401);
+    const enabled = await test.app.inject({ method: "PATCH", url: `/api/admin/users/${userId}/state`, headers: { cookie: admin.cookie, "x-csrftoken": admin.csrf }, payload: { disabled: false } });
+    expect(enabled.statusCode).toBe(200);
+    expect(enabled.json<{ user: { disabled_at: string | null } }>().user.disabled_at).toBeNull();
+    expect((await test.app.inject({ method: "GET", url: "/api/me", headers: { authorization: `Bearer ${token}` } })).statusCode).toBe(401);
+    const selfDisable = await test.app.inject({ method: "PATCH", url: `/api/admin/users/${admin.userId}/state`, headers: { cookie: admin.cookie, "x-csrftoken": admin.csrf }, payload: { disabled: true } });
+    expect(selfDisable.statusCode).toBe(409);
+    expect(responseCode(selfDisable)).toBe("self_disable_forbidden");
+  });
 });

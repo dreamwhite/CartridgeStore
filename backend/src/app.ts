@@ -30,6 +30,11 @@ import { AdminTokenService } from "./admin/token-service.js";
 import { CatalogAdminService } from "./admin/catalog-service.js";
 import { PublicationConsistencyService } from "./consistency/publication.js";
 import { SecretStore, SecretStorageError } from "./secrets/service.js";
+import { registerOidcRoutes } from "./oidc/routes.js";
+import { registerSamlRoutes } from "./saml/routes.js";
+import { registerFederationLifecycleTestRoutes } from "./federation/lifecycle-test-routes.js";
+import { registerFederationAdminRoutes } from "./federation/admin-routes.js";
+import { createFederationRuntime } from "./federation/runtime.js";
 
 export interface AppOptions {
   readonly config: BackendConfig;
@@ -57,6 +62,7 @@ export function buildApp(options: AppOptions): FastifyInstance {
     database: () => auth.database(),
     writableDatabase: options.config.authWriteEnabled ? auth.writableDatabase() : null
   });
+  const federation = createFederationRuntime({ config: options.config, auth, secrets });
   const adminTokens = new AdminTokenService({
     config: options.config,
     database: () => auth.database(),
@@ -106,8 +112,50 @@ export function buildApp(options: AppOptions): FastifyInstance {
     logger: options.logger ?? { level: options.config.logLevel }
   });
 
+  // Credentialed browser access is opt-in and exact-origin only. The default
+  // empty allowlist preserves the existing same-origin behaviour.
+  const corsOrigins = new Set(options.config.corsAllowedOrigins);
+  if (corsOrigins.size > 0) {
+    app.addHook("onRequest", async (request, reply) => {
+      const origin = request.headers.origin;
+      if (typeof origin !== "string" || origin.length === 0) return;
+      if (!corsOrigins.has(origin)) {
+        return reply.code(403).header("content-type", "application/json").send(Buffer.from(`${encodePythonJson({ ok: false, error: "origin is not allowed", code: "cors_origin_denied" })}\n`, "utf8"));
+      }
+      reply
+        .header("access-control-allow-origin", origin)
+        .header("access-control-allow-credentials", "true")
+        .header("access-control-allow-methods", "GET,POST,PATCH,PUT,DELETE,OPTIONS")
+        .header("access-control-allow-headers", "Accept,Content-Type,X-CSRFToken,X-CSRF-Token")
+        .header("access-control-max-age", "300")
+        .header("vary", "Origin");
+      if (request.method === "OPTIONS") return reply.code(204).send();
+    });
+  }
+
+  app.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string", bodyLimit: options.config.samlMaxPostBytes }, (_request, body, done) => {
+    try { done(null, new URLSearchParams(String(body))); }
+    catch { done(new Error("invalid form body")); }
+  });
+
   registerCatalogRoutes(app, { config: options.config, database });
   registerAuthRoutes(app, { config: options.config, auth, authorization });
+  if (federation) {
+    registerOidcRoutes(app, { config: options.config, oidc: federation.oidc });
+    registerSamlRoutes(app, { config: options.config, saml: federation.saml });
+    registerFederationAdminRoutes(app, {
+      config: options.config,
+      auth,
+      authorization,
+      providers: federation.providers,
+      identities: federation.identities,
+      operations: federation.operations,
+      audit: federation.audit
+    });
+    if (options.config.federationLifecycleTestEnabled) {
+      registerFederationLifecycleTestRoutes(app, { token: options.config.federationLifecycleTestToken, operations: federation.operations });
+    }
+  }
   app.register(multipart, {
     limits: {
       fileSize: Math.max(options.config.submissionMaxArchiveBytes, options.config.backupMaxArchiveBytes),
@@ -159,6 +207,13 @@ export function buildApp(options: AppOptions): FastifyInstance {
     request.log.error({ err: error, requestId: request.id }, "request failed");
     const metricsRequest = request.url.startsWith("/api/metrics/batch") || request.url.startsWith("/api/runs");
     const scoreRequest = request.url.split("?", 1)[0] === "/api/scores" && request.method === "POST";
+    const samlRequest = request.url.startsWith("/api/auth/saml/");
+    if (error instanceof Error && (error as Error & { code?: string }).code === "FST_ERR_CTP_BODY_TOO_LARGE" && samlRequest) {
+      return reply
+        .code(413)
+        .header("content-type", "application/json")
+        .send(Buffer.from(`${encodePythonJson({ ok: false, error: "SAML response is too large", code: "saml_response_too_large" })}\n`, "utf8"));
+    }
     if (error instanceof Error && (error as Error & { code?: string }).code === "FST_ERR_CTP_BODY_TOO_LARGE" && metricsRequest) {
       return reply
         .code(413)

@@ -4,6 +4,7 @@ import type Database from "better-sqlite3";
 
 import type { BackendConfig } from "../config/env.js";
 import { openAuthWriteDatabase, type ReadonlyDatabase, type ReadonlyDatabaseManager } from "../db/readonly.js";
+import { isAccountEnabled } from "./account-state.js";
 import { verifyWerkzeugPasswordHash } from "./password.js";
 import { revokedBefore } from "./revocation.js";
 import {
@@ -50,10 +51,10 @@ export class AuthService {
   private readonly writeDatabase: ReadonlyDatabase | null;
 
   constructor(private readonly options: AuthServiceOptions) {
-    this.sessions = options.config.authWriteEnabled && options.config.authSessionSecret
-      ? new SessionStore(options.config.authSessionSecret, options.config.authSessionLifetimeSeconds)
-      : null;
     this.writeDatabase = options.config.authWriteEnabled ? openAuthWriteDatabase(options.config) : null;
+    this.sessions = this.writeDatabase && options.config.authSessionSecret
+      ? new SessionStore(options.config.authSessionSecret, options.config.authSessionLifetimeSeconds, this.writeDatabase.sqlite)
+      : null;
   }
 
   close(): void {
@@ -82,7 +83,7 @@ export class AuthService {
     try {
       const database = this.database();
       if (session?.userId !== null && session?.userId !== undefined) {
-        if (session.createdAt > revokedBefore(database, session.userId)) {
+        if (session.createdAt > revokedBefore(database, session.userId) && isAccountEnabled(database, session.userId)) {
           const principal = loadPrincipalById(database, session.userId, "session");
           if (principal.authenticated) return { principal, session, bearerOnly: false };
         }
@@ -109,18 +110,31 @@ export class AuthService {
 
   rotateSession(old: SessionRecord | null, userId: number): { readonly record: SessionRecord; readonly cookieValue: string } | null {
     if (!this.sessions) return null;
+    if (!isAccountEnabled(this.database(), userId)) return null;
     const minimum = revokedBefore(this.database(), userId) + 1;
     return this.sessions.rotate(old, userId, Math.max(Date.now(), minimum));
+  }
+
+  recentAdminReauthenticate(session: SessionRecord, password: string): boolean {
+    if (session.userId === null) return false;
+    const row = this.database().prepare("SELECT password_hash, role, disabled_at FROM users WHERE id = ?").get(session.userId) as {
+      password_hash: string | null; role: string; disabled_at: string | null
+    } | undefined;
+    if (!row || row.role !== "admin" || row.disabled_at !== null || !row.password_hash) return false;
+    const result = verifyWerkzeugPasswordHash(row.password_hash, password);
+    if (result.status !== "valid") return false;
+    this.sessions?.recordRecentReauthentication(session);
+    return true;
   }
 
   login(username: string, password: string): Principal {
     const db = this.writableDatabase();
     const row = db.prepare(
-      "SELECT id, username, email, password_hash, role, external_provider FROM users WHERE username = ? OR email = ?"
+      "SELECT id, username, email, password_hash, role, external_provider, disabled_at FROM users WHERE username = ? OR email = ?"
     ).get(username.trim(), username.trim().toLowerCase()) as {
-      id: number; username: string; email: string; password_hash: string | null; role: string; external_provider: string | null
+      id: number; username: string; email: string; password_hash: string | null; role: string; external_provider: string | null; disabled_at: string | null
     } | undefined;
-    if (!row?.password_hash) return ANONYMOUS;
+    if (!row?.password_hash || row.disabled_at !== null) return ANONYMOUS;
     const result = verifyWerkzeugPasswordHash(row.password_hash, password);
     if (result.status !== "valid") return ANONYMOUS;
     db.prepare("UPDATE users SET last_login = datetime('now') WHERE id = ?").run(row.id);

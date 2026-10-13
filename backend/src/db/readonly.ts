@@ -5,6 +5,7 @@ import Database from "better-sqlite3";
 import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3";
 
 import type { BackendConfig } from "../config/env.js";
+import { applyFederationMigrations, FederationMigrationError } from "./federation-migrations.js";
 import { schema } from "./schema.js";
 
 export type ReadonlyDrizzleDatabase = BetterSQLite3Database<typeof schema>;
@@ -182,6 +183,9 @@ export function openAuthWriteDatabase(config: BackendConfig): ReadonlyDatabase {
     sqlite.pragma("foreign_keys = ON");
     sqlite.pragma(`busy_timeout = ${config.busyTimeoutMs}`);
     sqlite.prepare("SELECT 1").get();
+    // Only the explicitly isolated test writer is migrated. The operational
+    // database remains read-only and is never changed by startup.
+    applyFederationMigrations(sqlite);
     const requiredTables = ["users", "api_tokens", "groups", "user_groups", "registration_tokens", "store_settings"];
     const present = new Set(
       (sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map((row) => row.name)
@@ -192,6 +196,7 @@ export function openAuthWriteDatabase(config: BackendConfig): ReadonlyDatabase {
   } catch (error) {
     sqlite?.close();
     if (error instanceof ReadonlyDatabaseError) throw error;
+    if (error instanceof FederationMigrationError) throw new ReadonlyDatabaseError("auth write database does not contain the compatible schema", { cause: error });
     throw new ReadonlyDatabaseError("configured auth write database could not be opened", { cause: error });
   }
   const db = drizzle(sqlite, { schema });

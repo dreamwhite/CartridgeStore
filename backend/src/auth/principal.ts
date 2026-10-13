@@ -1,5 +1,6 @@
 import type Database from "better-sqlite3";
 
+import { hasAccountStateColumn } from "./account-state.js";
 import { lookupApiToken, type ApiTokenLookup, hashApiToken } from "./tokens.js";
 
 export const ROLE_LEVELS = {
@@ -69,10 +70,11 @@ function groupsForUser(sqlite: Database.Database, userId: number): string[] {
 
 export function principalFromUserRow(
   sqlite: Database.Database,
-  row: { id: number; username: string; email: string; role: string; external_provider?: string | null },
+  row: { id: number; username: string; email: string; role: string; external_provider?: string | null; disabled_at?: string | null },
   authMethod: Principal["authMethod"],
   tokenHash?: string
 ): Principal {
+  if (row.disabled_at !== undefined && row.disabled_at !== null) return ANONYMOUS;
   const role = normalizeRole(row.role);
   return {
     authenticated: true,
@@ -88,9 +90,10 @@ export function principalFromUserRow(
 }
 
 export function loadPrincipalById(sqlite: Database.Database, userId: number, authMethod: Principal["authMethod"]): Principal {
+  const state = hasAccountStateColumn(sqlite) ? ", disabled_at" : "";
   const row = sqlite.prepare(
-    "SELECT id, username, email, role, external_provider FROM users WHERE id = ?"
-  ).get(userId) as { id: number; username: string; email: string; role: string; external_provider?: string | null } | undefined;
+    "SELECT id, username, email, role, external_provider" + state + " FROM users WHERE id = ?"
+  ).get(userId) as { id: number; username: string; email: string; role: string; external_provider?: string | null; disabled_at?: string | null } | undefined;
   return row ? principalFromUserRow(sqlite, row, authMethod) : ANONYMOUS;
 }
 

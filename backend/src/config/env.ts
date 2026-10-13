@@ -19,8 +19,18 @@ export interface BackendConfig {
   readonly authCookieSameSite: "lax" | "strict" | "none";
   readonly authSessionLifetimeSeconds: number;
   readonly authBootstrapToken: string | undefined;
+  readonly federationLifecycleTestToken: string | undefined;
+  readonly federationLifecycleTestEnabled: boolean;
+  readonly authRecentReauthSeconds: number;
   readonly authRateLimitMax: number;
   readonly authRateLimitWindowSeconds: number;
+  readonly oidcPublicOrigin: string | undefined;
+  readonly federationPublicOrigin: string | undefined;
+  readonly frontendPublicOrigin: string | undefined;
+  readonly corsAllowedOrigins: readonly string[];
+  readonly samlMaxPostBytes: number;
+  readonly samlMaxResponseBytes: number;
+  readonly samlMaxRelayStateBytes: number;
   readonly secretEncryptionEnabled: boolean;
   readonly secretKeyRegistryPath: string | undefined;
   readonly secretMaxRows: number;
@@ -125,6 +135,19 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
   const authDisposableRoot = optionalNonEmpty(environment.PRG32_BACKEND_AUTH_DISPOSABLE_ROOT);
   const authSessionSecret = optionalNonEmpty(environment.PRG32_BACKEND_SESSION_SECRET);
   const authBootstrapToken = optionalNonEmpty(environment.PRG32_BACKEND_BOOTSTRAP_TOKEN);
+  const federationLifecycleTestToken = optionalNonEmpty(environment.PRG32_BACKEND_FEDERATION_LIFECYCLE_TEST_TOKEN);
+  const federationLifecycleTestEnabled = booleanValue(
+    "PRG32_BACKEND_FEDERATION_LIFECYCLE_TEST_ENABLED",
+    environment.PRG32_BACKEND_FEDERATION_LIFECYCLE_TEST_ENABLED,
+    false
+  );
+  const oidcPublicOrigin = optionalNonEmpty(environment.PRG32_BACKEND_OIDC_PUBLIC_ORIGIN);
+  const federationPublicOrigin = optionalNonEmpty(environment.PRG32_BACKEND_FEDERATION_PUBLIC_ORIGIN ?? oidcPublicOrigin);
+  const frontendPublicOrigin = optionalNonEmpty(environment.PRG32_BACKEND_FRONTEND_PUBLIC_ORIGIN);
+  const corsAllowedOrigins = (environment.PRG32_BACKEND_CORS_ORIGINS ?? "")
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
   const secretEncryptionEnabled = booleanValue(
     "PRG32_BACKEND_SECRET_ENCRYPTION_ENABLED",
     environment.PRG32_BACKEND_SECRET_ENCRYPTION_ENABLED,
@@ -170,12 +193,20 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
     }
     requiredSecret("PRG32_BACKEND_SESSION_SECRET", authSessionSecret);
     if (authBootstrapToken) requiredSecret("PRG32_BACKEND_BOOTSTRAP_TOKEN", authBootstrapToken);
+    if (federationLifecycleTestToken && federationLifecycleTestToken.length < 32) throw new Error("PRG32_BACKEND_FEDERATION_LIFECYCLE_TEST_TOKEN must contain at least 32 characters");
+    if (federationLifecycleTestEnabled && !federationLifecycleTestToken) throw new Error("PRG32_BACKEND_FEDERATION_LIFECYCLE_TEST_TOKEN is required when lifecycle test routes are enabled");
     if (looksLikeSqliteUri(authWriteDatabasePath)) {
       throw new Error("SQLite URI syntax is not allowed for the auth write database");
     }
     if (path.resolve(authWriteDatabasePath) === path.resolve(configuredDatabase)) {
       throw new Error("auth write database must be separate from the shadow database");
     }
+  }
+  if (federationLifecycleTestEnabled && (authWriteMode !== "test" || !authWriteEnabled || !authDisposableRoot || !authWriteDatabasePath)) {
+    throw new Error("federation lifecycle test routes require the isolated auth writer configuration");
+  }
+  if ((environment.NODE_ENV ?? "").trim().toLowerCase() === "production" && federationLifecycleTestEnabled) {
+    throw new Error("federation lifecycle test routes cannot be enabled in production");
   }
   if (secretEncryptionEnabled && !secretKeyRegistryPath) {
     throw new Error("PRG32_BACKEND_SECRET_KEY_REGISTRY is required when secret encryption is enabled");
@@ -234,6 +265,31 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
   if (authCookieSameSite !== "lax" && authCookieSameSite !== "strict" && authCookieSameSite !== "none") {
     throw new Error("PRG32_BACKEND_SESSION_SAMESITE must be lax, strict, or none");
   }
+  if (oidcPublicOrigin) {
+    let parsed: URL;
+    try { parsed = new URL(oidcPublicOrigin); } catch { throw new Error("PRG32_BACKEND_OIDC_PUBLIC_ORIGIN must be a valid origin"); }
+    if (parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== "/" || (parsed.protocol !== "https:" && authWriteMode !== "test")) {
+      throw new Error("PRG32_BACKEND_OIDC_PUBLIC_ORIGIN must be a trusted HTTPS origin");
+    }
+  }
+  if (federationPublicOrigin) {
+    let parsed: URL;
+    try { parsed = new URL(federationPublicOrigin); } catch { throw new Error("PRG32_BACKEND_FEDERATION_PUBLIC_ORIGIN must be a valid origin"); }
+    if (parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== "/" || (parsed.protocol !== "https:" && authWriteMode !== "test")) {
+      throw new Error("PRG32_BACKEND_FEDERATION_PUBLIC_ORIGIN must be a trusted HTTPS origin");
+    }
+  }
+  for (const origin of [frontendPublicOrigin, ...corsAllowedOrigins]) {
+    if (!origin) continue;
+    let parsed: URL;
+    try { parsed = new URL(origin); } catch { throw new Error("PRG32_BACKEND_FRONTEND_PUBLIC_ORIGIN and PRG32_BACKEND_CORS_ORIGINS must contain valid origins"); }
+    if (parsed.username || parsed.password || parsed.pathname !== "/" || parsed.search || parsed.hash || (parsed.protocol !== "https:" && authWriteMode !== "test")) {
+      throw new Error("PRG32_BACKEND_FRONTEND_PUBLIC_ORIGIN and PRG32_BACKEND_CORS_ORIGINS must contain trusted HTTPS origins");
+    }
+  }
+  if ((environment.NODE_ENV ?? "").trim().toLowerCase() === "production" && corsAllowedOrigins.length > 0) {
+    throw new Error("PRG32_BACKEND_CORS_ORIGINS is disabled for production builds until a deployment-specific allowlist is reviewed");
+  }
 
   return {
     host: nonEmpty("PRG32_BACKEND_HOST", environment.PRG32_BACKEND_HOST, "127.0.0.1"),
@@ -266,6 +322,13 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
       8 * 60 * 60
     ),
     authBootstrapToken,
+    federationLifecycleTestToken: authWriteMode === "test" ? federationLifecycleTestToken : undefined,
+    federationLifecycleTestEnabled,
+    authRecentReauthSeconds: positiveInteger(
+      "PRG32_BACKEND_AUTH_RECENT_REAUTH_SECONDS",
+      environment.PRG32_BACKEND_AUTH_RECENT_REAUTH_SECONDS,
+      5 * 60
+    ),
     authRateLimitMax: positiveInteger(
       "PRG32_BACKEND_AUTH_RATE_LIMIT_MAX",
       environment.PRG32_BACKEND_AUTH_RATE_LIMIT_MAX,
@@ -275,6 +338,25 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
       "PRG32_BACKEND_AUTH_RATE_LIMIT_WINDOW_SECONDS",
       environment.PRG32_BACKEND_AUTH_RATE_LIMIT_WINDOW_SECONDS,
       60
+    ),
+    oidcPublicOrigin,
+    federationPublicOrigin,
+    frontendPublicOrigin,
+    corsAllowedOrigins,
+    samlMaxPostBytes: positiveInteger(
+      "PRG32_BACKEND_SAML_MAX_POST_BYTES",
+      environment.PRG32_BACKEND_SAML_MAX_POST_BYTES,
+      2 * 1024 * 1024
+    ),
+    samlMaxResponseBytes: positiveInteger(
+      "PRG32_BACKEND_SAML_MAX_RESPONSE_BYTES",
+      environment.PRG32_BACKEND_SAML_MAX_RESPONSE_BYTES,
+      1024 * 1024
+    ),
+    samlMaxRelayStateBytes: positiveInteger(
+      "PRG32_BACKEND_SAML_MAX_RELAY_STATE_BYTES",
+      environment.PRG32_BACKEND_SAML_MAX_RELAY_STATE_BYTES,
+      1024
     ),
     secretEncryptionEnabled,
     secretKeyRegistryPath: secretKeyRegistryPath ? path.resolve(secretKeyRegistryPath) : undefined,
