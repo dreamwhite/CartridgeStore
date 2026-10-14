@@ -1,0 +1,36 @@
+{
+  "milestone": "M5.2g.9",
+  "status": "GO_ISOLATED_CANDIDATE__NO_GO_OPERATIONAL_CUTOVER",
+  "commands": {
+    "candidate_compose_config": "passed",
+    "candidate_image_build": "passed",
+    "candidate_disposable_init": "passed",
+    "candidate_runtime_test": "passed: 1 file, 6 tests",
+    "candidate_compose_smoke": "passed with retry: Fastify /ready, Next /health and Next /ready",
+    "backend_typecheck": "passed",
+    "backend_lint": "passed",
+    "backend_test": "passed: 45 files, 225 tests",
+    "backend_build": "passed",
+    "frontend_typecheck": "passed",
+    "frontend_lint": "passed",
+    "frontend_test": "passed: 21 files, 59 tests",
+    "frontend_build": "passed with FLASK_PROXY_TARGET=http://flask:5080 for the unchanged operational baseline",
+    "python_pycompile": "passed",
+    "python_pytest": "passed: 64 tests",
+    "operational_compose_profile_dev_config": "passed",
+    "git_diff_check": "passed",
+    "operational_compose": "not executed by safety boundary",
+    "operational_deploy": "not executed by safety boundary"
+  },
+  "smoke": {
+    "database": "synthetic canonical storage-v2 root",
+    "fastify": "ready with database, canonical_storage and writer_lease",
+    "next": "HTTP /health liveness and proxied /ready responded after startup retry",
+    "network": "private candidate bridge only",
+    "host_ports": [5097, 3305],
+    "cleanup": "candidate containers and network removed; no volumes"
+  },
+  "negative_configuration_cases": ["missing candidate authorization", "production NODE_ENV", "legacy fallback variable", "mDNS enabled", "database path mismatch"],
+  "operational_readiness": "NO-GO",
+  "flask_retirement": "NO-GO"
+}

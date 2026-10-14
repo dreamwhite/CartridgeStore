@@ -2569,3 +2569,526 @@ Final M5.2d verification evidence: backend Node 24 typecheck, lint, build and
 55-test suite passed; Python compile and 64-test suite passed; Compose profile
 configuration and `git diff --check` passed. The Vite native-config loader
 warning and expected Flask fixture rejection warnings were non-fatal.
+
+## M5.2e — canonical storage-v2 backup, restore and rollback rehearsal — 2026-10-14
+
+Implementation evidence is recorded in
+`docs/modernization/84-storage-backup-restore-m5-2e-implementation.md`.
+
+Completed for disposable roots only:
+
+- added versioned `prg32-cartridge-store-backup-3.0` archives for the approved
+  schema/layout/journal/backup tuple 2/2/1/3;
+- created SQLite snapshots with `better-sqlite3` backup rather than ordinary
+  database-file copying;
+- derived immutable-object and private-submission inventories from the
+  snapshot, streamed bytes with size/hash checks, retained recovery material,
+  and wrote a bounded secret-free manifest plus sidecar hash;
+- added an independent verifier for archive safety, manifest/inventory/hash,
+  SQLite integrity/foreign keys/schema, object identity, and canonical audit;
+- added fresh-root restore with persistent non-ready interruption state and
+  deterministic backup/restore fault injection;
+- added adversarial disposable tests and a machine-readable single-writer
+  rollback rehearsal;
+- completed a read-only Compose topology inventory and future simplification
+  plan in `docs/modernization/85-docker-compose-simplification-plan.md`.
+
+The canonical backup/restore and rollback rehearsal are **GO** for disposable
+verification. Operational migration, public Fastify storage ownership, Compose
+simplification, Flask removal, deployment, and M5.2f remain **NO-GO**. The
+next milestone requires approved cutover ownership, final backup retention and
+authenticity policy, writer quiescence, telemetry reconciliation, routing and
+session continuity, monitoring, and an explicit rollback data-loss decision.
+
+## M5.2f — operational handover readiness and Flask retirement execution plan — 2026-10-14
+
+Readiness evidence is recorded in:
+
+- `docs/modernization/86-operational-handover-m5-2f-readiness.md`;
+- `docs/modernization/86-flask-retirement-dependency-matrix.md`;
+- `docs/modernization/86-post-m5-2f-execution-plan.md`.
+
+Completed for planning only:
+
+- rebuilt the grouped route/ownership inventory from current Flask/Fastify
+  source, including current isolated Fastify WebSocket registration and the
+  absence of public storage-v2 route registration;
+- classified discovery, catalog/download, auth/session, generic OIDC/SAML,
+  publication, review, metrics, scores, statistics, administration,
+  backup/restore, multiplayer, mDNS and legacy HTML responsibilities;
+- documented canonical storage integration gaps, one-writer handover order,
+  authentication/session continuity decision, publication/review blockers,
+  firmware telemetry ownership, backup-v3 operationalization gates and Flask
+  retirement dependencies;
+- added developer-only `prg32-operational-handover-readiness-1.0` report
+  generation and source-backed readiness tests;
+- revalidated the current seven-service/six-profile Compose topology and
+  preserved the future two-application target without modifying Compose.
+
+Evidence boundary:
+
+- no operational data, public routing, Docker service, volume, image, external
+  Traefik/Auth provider, Flask runtime, or `../PRG32` state was modified;
+- no canonical storage-v2 public ownership, cutover, deployment, Flask removal,
+  M5.2g implementation or M6.3d.2h.12 work was started;
+- no commit or push was performed.
+
+Milestone result: **GO for M5.2f readiness planning and evidence; NO-GO for
+operational cutover, public Fastify ownership, Compose simplification or Flask
+retirement.**
+
+Next implementation milestone: **M5.2g — operational canonical target
+integration and pre-cutover rehearsal**, separately authorized, with the
+explicit requirement to close writer, session, publication, telemetry, score,
+metrics, WebSocket, mDNS, backup and rollback gates before routing changes.
+
+## Current architecture correction — generic federation remains required — 2026-10-14
+
+Some early roadmap sections record a superseded proposal to remove OIDC/SAML
+from the TypeScript target. That wording is historical and is not the current
+architecture decision. The final Fastify backend must retain generic OIDC and
+SAML support for external providers, with provider-neutral configuration and
+without Authentik-specific coupling. The local infrastructure provider origin
+is `sso.dream.test`; this repository must not contain provider credentials.
+
+The current status remains isolated implementation/evidence only: no public
+federation cutover, no session-cookie translation, no provider mutation, and
+no Flask retirement is authorized by this correction. Future cutover gates
+must include callback, identity mapping, session creation, logout, negative
+cases, external-provider acceptance and rollback behavior. Historical milestone
+reports are intentionally unchanged.
+
+## M5.2g.1 — Fastify canonical disposable read integration — 2026-10-14
+
+Implementation evidence is recorded in
+`docs/modernization/87-fastify-canonical-read-m5-2g-1-implementation.md`.
+
+Completed in an opt-in disposable profile only:
+
+- added explicit legacy/canonical-disposable catalog read modes, with legacy
+  remaining the default and no fallback after canonical initialization;
+- connected the actual Fastify catalog, detail, architecture, media,
+  colophon and download routes to a verified canonical storage-v2 read source;
+- enforced explicit root, marker, version tuple, repository/legacy-root
+  separation, read-only SQLite and exact disposable authorization checks;
+- added a read-only object capability that verifies object kind, path, size and
+  SHA-256 before media or cartridge streaming;
+- preserved the standalone differential projection through the shared source
+  and added actual HTTP integration tests for public visibility, errors,
+  architecture selection, exact media/download bytes and telemetry non-write;
+- preserved generic OIDC/SAML as a required final Fastify capability and
+  clarified the current readiness documents without changing historical
+  reports.
+
+Evidence boundary:
+
+- Flask remains the public operational owner and legacy mode is unchanged;
+- no write, publication/review, download telemetry, Compose, Traefik,
+  Authentik/provider, Next.js rewrite, Docker volume, deployment, operational
+  database or `../PRG32` state was changed;
+- canonical mode is not enabled by default, is rejected in production, and
+  accepts only explicitly authorized disposable roots;
+- live operational routing, write ownership, telemetry parity, WebSocket/mDNS,
+  session continuity and Flask retirement remain open gates.
+
+Verification: backend Node 24 typecheck, lint, build and 36-file/187-test
+suite passed; the focused M5.2g.1 HTTP suite passed 3/3; frontend typecheck,
+lint, build with `FLASK_PROXY_TARGET=http://flask:5080` and 20-file/55-test
+suite passed; Python compile and 64-test suite passed; Compose profile config
+and `git diff --check` passed. The bare frontend build was intentionally
+rejected because its required proxy target was absent, then passed with that
+target configured.
+
+Milestone result: **GO for isolated disposable Fastify canonical reads; NO-GO
+for operational cutover, public Fastify ownership, writer activation, Compose
+simplification, deployment or Flask retirement.**
+
+Next milestone: **M5.2g.2 only after separate authorization**, with the
+remaining operational ownership and cutover gates still closed.
+
+## M5.2g.2 — Fastify canonical disposable submission, review and publication — 2026-10-14
+
+Implementation evidence is recorded in
+`docs/modernization/88-fastify-canonical-workflow-m5-2g-2-implementation.md`.
+
+Completed for disposable roots only:
+
+- connected the existing submission, review and publication HTTP contracts to
+  canonical storage-v2 tables in an explicit Fastify workflow mode;
+- preserved ZIP/cartridge validation, private staging, owner identity,
+  permission guards, CSRF checks and generic OIDC/SAML boundaries;
+- added durable canonical publication intent, immutable object promotion,
+  post-promotion verification, publication visibility ordering and recovery;
+- added a persistent filesystem writer lease so a second canonical writer is
+  rejected while the first process is active;
+- verified the actual HTTP path from authenticated upload through review,
+  publication, canonical catalog reads and exact media/download bytes;
+- added deterministic interruption/reopen coverage for pre-promotion
+  publication recovery.
+
+Evidence boundary:
+
+- legacy mode remains the default and Flask remains the operational owner;
+- no operational database, cartridge store, Docker service/volume, public
+  route, Traefik/Auth provider, Next.js rewrite or `../PRG32` state was
+  modified;
+- canonical write mode is non-production, explicitly authorized and root
+  isolated; it is not a cutover or dual-writer mode;
+- scores, metrics, multiplayer, mDNS, telemetry ownership, session
+  continuity, public routing and rollback reconciliation remain open gates.
+
+Verification: backend Node 24 typecheck, lint, build and 37-file/190-test
+suite passed; the focused canonical workflow HTTP suite passed 3/3; frontend
+typecheck, lint and 20-file/55-test suite passed; the configured Next.js
+production build passed; Python compile and 64-test suite passed; Compose
+profile configuration and `git diff --check` passed.
+
+Milestone result: **GO for isolated disposable Fastify canonical workflow;
+NO-GO for operational cutover, public Fastify ownership, Compose changes,
+deployment or Flask retirement.**
+
+Next milestone: **M5.2g.3 only after separate authorization and closure of
+the operational ownership, telemetry, session, routing and rollback gates.**
+
+## M5.2g.3 — Fastify canonical telemetry, scores, runs, metrics and statistics — 2026-10-14
+
+Implementation evidence is recorded in
+`docs/modernization/89-fastify-canonical-telemetry-m5-2g-3-implementation.md`.
+
+Completed for disposable roots only:
+
+- connected canonical Fastify download, score, run, metric and statistics
+  HTTP paths to the same storage-v2 SQLite runtime and existing writer lease;
+- preserved anonymous firmware ingestion, authentication/CSRF/RBAC boundaries,
+  rate limits, response envelopes and stable identifiers;
+- matched legacy download-event timing for full, partial, conditional and
+  concurrent valid downloads, while rejecting invalid/missing resolutions
+  without telemetry;
+- added idempotent run retries, stable conflict responses and transactional
+  metric batches without changing the firmware contracts;
+- reconciled historical download/score/run/sample counts and migration
+  exceptions through the existing disposable M5.2b–M5.2d evidence path;
+- added bounded fail-closed private staging audit for orphaned directories,
+  missing bytes, symlinks, unexpected entries and hash/size mismatches;
+- verified source/index immutability and absence of legacy writes in canonical
+  HTTP integration tests.
+
+Evidence boundary:
+
+- legacy mode remains the default and Flask remains the operational owner;
+- no operational database, public route, Compose service/volume, Traefik,
+  external authentication provider, Next.js rewrite or `../PRG32` state was
+  changed;
+- canonical telemetry mode is disposable-only and does not authorize public
+  Fastify ownership, dual-writer operation or deployment;
+- no operational cutover, Flask removal, M5.2g.4 or M6.3d.2h.12 was started.
+
+Verification: Node 24 backend typecheck, lint, build and 38-file/193-test
+suite passed; focused canonical telemetry HTTP coverage passed 3/3; backup
+coverage passed 8/8 and the existing differential gate passed 1/1; frontend
+typecheck, lint, build with `FLASK_PROXY_TARGET=http://flask:5080` and
+20-file/55-test suite passed; Python compile and 64-test suite passed; Compose
+profile configuration and `git diff --check` passed.
+
+Milestone result: **GO for isolated disposable canonical telemetry and
+statistics integration; NO-GO for operational cutover, public Fastify
+ownership, Compose changes, deployment or Flask retirement.**
+
+Next milestone: **M5.2g.4 only after explicit closure of writer ownership,
+session continuity, publication/review, telemetry reconciliation,
+WebSocket/mDNS, routing, monitoring, backup authenticity and rollback-data
+loss gates.**
+
+## M5.2g.4 — Fastify multiplayer WebSocket and mDNS discovery parity — 2026-10-14
+
+Implementation evidence is recorded in
+`docs/modernization/90-fastify-networking-m5-2g-4-implementation.md`.
+
+Completed for isolated loopback/disposable verification:
+
+- verified the existing Fastify multiplayer route against Flask and the
+  read-only `../PRG32` firmware/host contracts;
+- preserved join/state/leave messages, room isolation, anonymous firmware
+  behavior, Bearer/query/header token compatibility, eight-peer capacity,
+  malformed-message handling, disconnect cleanup and single-process state;
+- added actual TCP WebSocket tests, shutdown/failure coverage and a Flask /
+  Fastify differential scenario on ephemeral loopback ports;
+- implemented a deterministic mDNS contract builder with the exact
+  `_prg32store._tcp.local.` service type and
+  `prg32-store-discovery-1.0` TXT ABI;
+- added an injectable discovery transport and a pinned Node 24-compatible
+  `multicast-dns` transport with PTR/SRV/TXT/A announcements and TTL-zero
+  shutdown records;
+- integrated discovery into Fastify readiness/close lifecycle, disabled by
+  default, explicitly non-production and interface-scoped, with duplicate
+  advertiser protection and logged degraded behavior;
+- verified that discovery does not open SQLite, acquire another writer lease,
+  change canonical state or fall back to Flask.
+
+Evidence boundary:
+
+- no real LAN mDNS announcement, public WebSocket binding, WSS/Traefik test,
+  operational data access, Docker/Compose/provider change, Flask behavior
+  change or `../PRG32` modification occurred;
+- physical firmware/Wi-Fi/multicast and public routing remain NOT_VERIFIED;
+- generic OIDC/SAML remain mandatory final capabilities and were not changed;
+- no M5.2g.5, M6.3d.2h.12, deployment, commit or push was started.
+
+Verification: Node 24 backend typecheck, lint, build and 40-file/201-test
+suite passed; real TCP multiplayer coverage passed 2/2; Flask/Fastify
+differential coverage passed 1/1; discovery contract/lifecycle coverage passed
+7/7; frontend and Python baseline checks remain green at 20 files/55 tests and
+64 tests; Compose profile configuration and `git diff --check` passed.
+
+Milestone result: **GO for isolated WebSocket and mDNS implementation and
+loopback verification; NO-GO for physical LAN discovery, public WSS,
+operational networking, deployment or Flask retirement.**
+
+Next milestone: operational networking readiness and cutover gates only after
+explicit endpoint, Traefik, mDNS port, session continuity, monitoring and
+rollback authorization.
+
+## M5.2g.5 — Fastify authentication, identity and session parity — 2026-10-14
+
+Implementation evidence is recorded in
+`docs/modernization/91-fastify-authentication-m5-2g-5-implementation.md`.
+
+Completed for isolated disposable verification:
+
+- connected Fastify local login, durable sessions, logout/revocation, CSRF,
+  bearer/API tokens and centralized RBAC to the canonical storage-v2 identity
+  database;
+- enforced canonical workflow authentication to the same
+  `<canonical-root>/store.sqlite` used by the storage-v2 workflow, with the
+  existing writer lease established before federation runtime composition;
+- added fail-closed canonical readiness evidence when the legacy shadow
+  SQLite file is unavailable;
+- preserved historical users, groups, permissions, password hashes and token
+  hashes through the existing migration path and added an idempotent,
+  unambiguous bridge for legacy external identity rows;
+- added opt-in disposable-only new-user federation provisioning for generic
+  OIDC and SAML, with explicit email-collision refusal and no email auto-link;
+- verified actual synthetic loopback OIDC discovery/PKCE/JWKS/callback and
+  signed SAML login/ACS flows, including negative and replay cases;
+- tightened cookie configuration invariants and malformed-cookie handling;
+- kept the Next.js auth client contract and firmware/API-token contracts
+  unchanged.
+
+Evidence boundary:
+
+- Flask remains public and authoritative; Fastify remains disposable and
+  non-public;
+- the external generic provider remains outside the repository; no real IdP,
+  credential, account, Authentik state, `sso.dream.test` request, Traefik,
+  Compose, deployment or public callback was changed;
+- the Flask signed session cookie is intentionally not translated; controlled
+  browser re-login remains the handover decision;
+- no M5.2g.6, M6.3d.2h.12, Flask removal, commit or push was started.
+
+Verification: Node 24 backend typecheck, lint, build and 40-file/206-test
+suite passed; focused authentication/federation/canonical coverage passed
+31/31; frontend, Python and Compose checks are executed for the final report.
+
+Milestone result: **GO for isolated disposable Fastify authentication parity;
+NO-GO for operational cutover, public Fastify ownership, deployment or Flask
+retirement.**
+
+Next milestone: an explicitly authorized operational authentication readiness
+review covering real provider callback configuration, session transition,
+canonical account snapshot, secret custody, public Traefik origins and the
+single-writer handover protocol.
+
+## M5.2g.6 — Full functional parity audit and canonical runtime consolidation — 2026-10-14
+
+Implementation evidence is recorded in
+`docs/modernization/92-fastify-functional-parity-m5-2g-6-audit.md`.
+
+Completed for the isolated/disposable scope:
+
+- parsed and classified all 77 explicitly registered Flask route paths;
+- recorded a source-backed A–F-equivalent disposition for catalog/discovery,
+  legacy HTML, local auth, generic OIDC/SAML, publishing/review, metrics,
+  scores, statistics, administration, backup/restore, multiplayer, optional
+  LDAP and security/error boundaries;
+- corrected canonical discovery settings so the canonical target, not the
+  legacy shadow database, supplies the store name;
+- corrected canonical administrative catalog reads to use `CanonicalCatalog`;
+- rooted canonical site assets and secret-storage path validation in the
+  canonical root when configured;
+- added tests proving canonical discovery and admin catalog reads continue
+  while the legacy shadow database is unavailable;
+- added read-only firmware contract tests against `../PRG32` for mDNS,
+  discovery ABI, port, catalog paths and architecture identifiers;
+- completed a read-only Compose topology inventory without modifying Compose,
+  containers, networks, volumes, Traefik or provider configuration.
+
+Verification:
+
+- backend: 42 files, 213 tests passed;
+- focused storage migration/backup/differential/recovery and audit evidence:
+  6 files, 26 tests passed;
+- frontend: 20 files, 55 tests passed; typecheck, lint and production build
+  passed;
+- Python: 64 tests passed; bytecode compilation passed;
+- Compose profile configuration and `git diff --check` passed;
+- Node.js 24.20.0 was selected with `nvm use 24`.
+
+The first concurrent frontend test invocation exposed a timing-sensitive
+Scoreboard test timeout; the isolated test and the complete rerun both passed
+without a source change. The Vite config-loader warning remains a non-blocking
+tooling warning.
+
+Evidence boundary:
+
+- Flask remains operational and authoritative;
+- no operational data, public routing, Compose, Traefik, Authentik/generic
+  provider, LAN mDNS, firmware repository, deployment, commit or push was
+  changed;
+- legacy HTML, operational write ownership, external federation/WebSocket
+  acceptance, backup operations and rollback/cutover gates remain open;
+- no M5.2g.7 or M6.3d.2h.12 work was started.
+
+Milestone result: **GO for the disposable functional-parity audit and
+canonical-runtime consolidation; NO-GO for operational cutover and Flask
+retirement.**
+
+Next milestone: separate authorization for operational cutover preparation
+after the remaining route, write-ownership, external-runtime, backup and
+rollback gates are closed.
+
+## M5.2g.7 — Next.js HTML, URL and functional parity — 2026-10-14
+
+Implementation evidence is recorded in
+`docs/modernization/93-nextjs-html-parity-m5-2g-7-implementation.md` with
+machine-readable route/API evidence under
+`docs/modernization/evidence/m5-2g-7-*.json`.
+
+Completed for the isolated/disposable scope:
+
+- implemented Next.js registration request/completion and legacy auth URL
+  compatibility;
+- implemented account token list/create/rename/revoke using the Fastify auth
+  contract, CSRF and one-shot token display;
+- implemented Fastify/Next public profiles and owner/admin-protected run list
+  and detail pages;
+- added Next-owned PWA manifest, icons, service worker and registration;
+- added same-origin URL compatibility and open-redirect regression tests;
+- accounted for all 77 explicitly registered Flask paths in a route disposition
+  manifest and audited frontend API consumers;
+- preserved the existing Flask, Compose, Traefik, provider and operational
+  data boundaries.
+
+Evidence boundary:
+
+- existing transitional Next rewrites and Flask remain unchanged and public;
+- no real browser E2E, external OIDC/SAML, Traefik/WebSocket, operational
+  snapshot, deployment, Compose change, `../PRG32` change, commit or push was
+  performed;
+- the Flask `/api` informational index remains explicitly legacy-only, while
+  API paths are never redirected to HTML;
+- operational one-writer handover, session continuity, telemetry/review
+  reconciliation, rollback and Flask retirement remain open.
+
+Verification for this milestone is recorded in the implementation report.
+
+Milestone result: **GO for isolated Next.js/Fastify HTML, URL and functional
+parity implementation; NO-GO for operational cutover and Flask retirement.**
+
+Next milestone: separately authorize operational route/data/session ownership
+readiness using the M5.2g.7 route and API evidence; do not begin later
+milestones automatically.
+
+## M5.2g.8 — Operational backup, encryption, authenticity and restore readiness — 2026-10-14
+
+Implementation evidence is recorded in
+`docs/modernization/94-operational-backup-m5-2g-8-implementation.md`.
+
+Completed for the isolated/disposable scope:
+
+- added encrypted backup-v4 around the existing canonical storage-v2 v3
+  payload, using AES-256-GCM, random per-backup data keys/nonces and
+  authenticated canonical metadata;
+- added a provider-neutral key boundary, protected-registry adapter,
+  historical-key restore, explicit rotation and retired-key refusal;
+- added streaming envelope verification/decryption, bounded size/header
+  handling, completion markers, atomic output promotion and fail-closed
+  corruption/truncation/wrong-key handling;
+- coordinated backup creation with the existing canonical writer lease and
+  retained the v3 SQLite snapshot, object inventory, staging and journal
+  consistency authorities;
+- added isolated maintenance commands for backup, verify, inspect, restore
+  and dry-run/authorized retention;
+- corrected stale M5.2g.7 URL evidence so implemented Next profile routes are
+  represented as Next-owned, while `/api` and legacy token form aliases remain
+  explicitly legacy-only;
+- completed a read-only Compose inventory and preserved the future two-app
+  Fastify/Next topology hypothesis without changing Compose, Traefik, images,
+  volumes or external generic OIDC/SAML infrastructure.
+
+Evidence boundary:
+
+- all backup/restore and key lifecycle tests use synthetic disposable roots;
+- Flask remains operational and authoritative; Fastify remains disposable and
+  non-public;
+- no operational database, storage root, backup, key, provider, container,
+  Docker volume, route, deployment or `../PRG32` file was changed;
+- hot backup, KMS/HSM custody, scheduled retention, public maintenance routes,
+  operational cutover, M5.2f execution and Flask removal remain open;
+- no later milestone was started, and no commit or push was performed.
+
+Verification: Node.js 24 was selected through `nvm use 24`; the dedicated v4
+suite passed its rotation, historical restore, adversarial, interruption,
+writer-lease and retention cases; the final backend, frontend, Python and
+Compose checks are recorded in the M5.2g.8 report.
+
+Milestone result: **GO for isolated disposable encrypted backup/restore
+readiness; NO-GO for operational activation, Fastify cutover or Flask
+retirement.**
+
+Next milestone: obtain a separately authorized operational ownership decision
+covering key custody, maintenance windows, session continuity, write-domain
+reconciliation, public routing, monitoring and rollback data-loss policy.
+
+## M5.2g.9 — Final two-service runtime and deployment preparation — 2026-10-14
+
+Implemented an isolated candidate topology in `deploy/candidate/compose.yaml`
+with exactly two application services: Fastify and Next.js. The candidate uses
+Node.js 24 multi-stage images, an explicit disposable canonical root, one
+SQLite writer lease, canonical readiness checks, graceful shutdown, candidate
+initialization and a candidate-only Next-to-Fastify proxy configuration.
+
+Evidence is recorded in `docs/modernization/95-two-service-runtime-m5-2g-9-implementation.md`
+and `docs/modernization/evidence/m5-2g-9-*.json`. Candidate image builds,
+Compose validation, negative configuration tests and a synthetic two-service
+smoke test passed. The operational Compose file, Traefik, external generic
+OIDC/SAML provider, Flask, operational data and public routing were unchanged.
+
+Milestone result: **GO for isolated candidate runtime preparation; NO-GO for
+operational cutover and Flask retirement.**
+
+Next milestone: separately authorize operational ownership, edge routing,
+session continuity, production secret custody and rollback readiness. Do not
+remove Flask or change operational Compose before those gates close.
+
+## M5.2g.10 — Integrated pre-cutover validation — 2026-10-14
+
+Evidence is recorded in
+`docs/modernization/96-integrated-precutover-m5-2g-10.md`.
+
+The isolated two-service Fastify/Next candidate was exercised with real
+containers and synthetic canonical data. Catalog/media/download, auth/CSRF,
+RBAC/groups, publishing/review, scores, metrics, statistics, direct
+WebSocket, discovery, restart/recovery, and encrypted backup-v4 round trips
+were verified. Candidate-only defects in auth proxy routing, staging audit,
+backup inventory, health checks, and public discovery URL construction were
+corrected and retested.
+
+The milestone remains **PARTIAL GO** because live external OIDC/SAML callback
+interoperability and the Dream Traefik edge were not exercised. Operational
+cutover and Flask retirement remain **NO-GO**. Flask, operational Compose,
+Traefik, external generic authentication, persistent data, and `../PRG32`
+remain unchanged.
+
+Next milestone: separately authorize external-edge/provider interoperability
+and operational ownership gates. Do not remove Flask or modify operational
+Compose before those gates close.

@@ -1,0 +1,12 @@
+{
+  "milestone": "M5.2g.9",
+  "compose_file": "deploy/candidate/compose.yaml",
+  "exact_application_service_count": 2,
+  "services": [
+    {"name": "fastify", "classification": "KEEP_CANDIDATE", "port": "127.0.0.1:${PRG32_CANDIDATE_FASTIFY_PORT:-5092}:5090", "data": "explicit disposable canonical bind mount", "health": "/ready"},
+    {"name": "next", "classification": "KEEP_CANDIDATE", "port": "127.0.0.1:${PRG32_CANDIDATE_NEXT_PORT:-3300}:3000", "data": "no persistent data", "health": "GET /"}
+  ],
+  "network": {"name": "prg32-candidate_candidate", "external": false, "purpose": "private Fastify/Next candidate network"},
+  "forbidden_in_candidate": ["flask", "cartridge-store", "auth-writer", "auth-writer-init", "auth-writer-edge-proxy", "nginx", "dream_edge", "Traefik labels", "mDNS advertisement"],
+  "future_hosts": {"store.prg32.dream.test": "next", "api.prg32.dream.test": "fastify"}
+}
