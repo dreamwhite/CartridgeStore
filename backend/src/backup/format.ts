@@ -102,7 +102,7 @@ export function normalizeArchivePath(raw: string, config: BackendConfig): { read
 export function validateArchiveEntryPath(raw: string, config: BackendConfig): string {
   const normalized = normalizeArchivePath(raw, config);
   if (normalized.directory) return normalized.path;
-  if (normalized.path !== "manifest.json" && normalized.path !== "database.sqlite" && !normalized.path.startsWith("data/")) {
+  if (normalized.path !== "manifest.json" && normalized.path !== "manifest.sha256" && normalized.path !== "database.sqlite" && !normalized.path.startsWith("data/")) {
     throw new BackupError("backup contains an unexpected root entry", "backup_unexpected_entry");
   }
   return normalized.path;

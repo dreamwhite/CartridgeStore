@@ -16,6 +16,7 @@ import {
   type StorageDatabase,
   type StoragePaths
 } from "./types.js";
+import { applyApplicationMigrations } from "../db/application-migrations.js";
 
 const TARGET_ROOT_MARKER = ".prg32-storage-v2";
 const MIGRATION_ID = "storage-v2-schema-foundation";
@@ -208,9 +209,9 @@ function openSqlite(databasePath: string, readOnly: boolean): Database.Database 
   return sqlite;
 }
 
-export function initializeDisposableStorage(rootValue: string): StorageDatabase {
+function initializeStorage(rootValue: string, assertRoot: (root: string) => void): StorageDatabase {
   const root = requirePath(rootValue);
-  assertDisposableRoot(root);
+  assertRoot(root);
   const paths = layout(root);
   initializeLayout(paths);
   let sqlite: Database.Database | undefined;
@@ -223,6 +224,7 @@ export function initializeDisposableStorage(rootValue: string): StorageDatabase 
     try {
       sqlite.exec(COMPATIBLE_SCHEMA_SQL);
       sqlite.exec(TARGET_SCHEMA_SQL);
+      applyApplicationMigrations(sqlite);
       const timestamp = now();
       sqlite.prepare(
         `INSERT INTO storage_metadata(singleton_id, application, schema_version, storage_layout_version,
@@ -257,6 +259,32 @@ export function initializeDisposableStorage(rootValue: string): StorageDatabase 
   }
 }
 
+export function initializeDisposableStorage(rootValue: string): StorageDatabase {
+  return initializeStorage(rootValue, assertDisposableRoot);
+}
+
+/** Explicit operator-authorized bootstrap for a new canonical operational root. */
+export function initializeOperationalStorage(rootValue: string, authorization: string): StorageDatabase {
+  if (authorization.trim().length < 32) {
+    throw new StorageDatabaseError("operational bootstrap authorization is invalid", "storage_bootstrap_unauthorized");
+  }
+  const root = requirePath(rootValue);
+  if (fs.existsSync(root) && fs.readdirSync(root).length > 0) {
+    throw new StorageDatabaseError("operational storage bootstrap requires an empty root", "storage_root_not_empty");
+  }
+  return initializeStorage(root, (candidate) => {
+    if (fs.existsSync(candidate)) {
+      const stats = fs.lstatSync(candidate);
+      if (stats.isSymbolicLink() || !stats.isDirectory()) throw new StorageDatabaseError("operational storage root is unsafe", "storage_root_unsafe");
+      fs.chmodSync(candidate, 0o700);
+    } else {
+      const parent = path.dirname(candidate);
+      if (!fs.existsSync(parent) || !fs.statSync(parent).isDirectory()) throw new StorageDatabaseError("storage root parent directory is unavailable", "storage_root_parent_invalid");
+      fs.mkdirSync(candidate, { mode: 0o700 });
+    }
+  });
+}
+
 export function openTargetStorage(rootValue: string, mode: "read-only" | "read-write" = "read-only"): StorageDatabase {
   const root = requirePath(rootValue);
   if (!fs.existsSync(root)) throw new StorageDatabaseError("target storage root does not exist", "storage_root_missing");
@@ -273,6 +301,7 @@ export function openTargetStorage(rootValue: string, mode: "read-only" | "read-w
   }
   const sqlite = openSqlite(paths.databasePath, mode === "read-only");
   try {
+    if (mode === "read-write") applyApplicationMigrations(sqlite);
     assertCompatibleStorage(sqlite);
   } catch (error) {
     sqlite.close();

@@ -351,6 +351,62 @@ export class ObjectStore {
   }
 }
 
+/**
+ * Read-only capability used by public canonical catalog reads. It deliberately
+ * does not expose the promotion methods on ObjectStore, so route integration
+ * cannot accidentally acquire a writable object-store handle.
+ */
+export class ReadonlyObjectStore {
+  constructor(
+    private readonly sqlite: Database.Database,
+    private readonly paths: StoragePaths
+  ) {}
+
+  resolve(objectId: string, expectedKind?: ObjectKind): ResolvedStorageObject {
+    const record = readStorageObjectRow(this.sqlite, objectId);
+    if (!record) throw new StorageObjectError("storage object was not found", "object_not_found");
+    if (expectedKind && record.objectKind !== expectedKind) throw new StorageObjectError("storage object kind does not match relationship", "object_kind_mismatch");
+    if (record.state !== "available") throw new StorageObjectError("storage object is not available", "object_not_available");
+    const expectedKey = expectedStorageKey(record.objectKind, record.objectId, record.mediaType);
+    if (record.storageKey !== expectedKey || !SAFE_STORAGE_KEY.test(record.storageKey)) throw new StorageObjectError("storage object key is invalid", "object_storage_key_invalid");
+    const filePath = path.resolve(this.paths.root, record.storageKey);
+    assertNoSymlinkComponents(this.paths.objectRoot, filePath);
+    let stats: fs.Stats;
+    try { stats = fs.lstatSync(filePath); } catch (error) { throw new StorageObjectError("storage object file is missing", "object_file_missing", { cause: error }); }
+    if (stats.isSymbolicLink()) throw new StorageObjectError("storage object file is a symlink", "object_symlink_rejected");
+    if (!stats.isFile()) throw new StorageObjectError("storage object is not a regular file", "object_not_regular_file");
+    if (stats.size !== record.sizeBytes) throw new StorageObjectError("storage object size does not match metadata", "object_size_mismatch");
+    let fileDescriptor: number;
+    try { fileDescriptor = fs.openSync(filePath, fs.constants.O_RDONLY); } catch (error) { throw new StorageObjectError("storage object could not be opened", "object_open_failed", { cause: error }); }
+    return { record, filePath, fileDescriptor };
+  }
+
+  verify(objectId: string): ObjectVerification {
+    let resolved: ResolvedStorageObject;
+    try { resolved = this.resolve(objectId); } catch (error) {
+      const code = error instanceof StorageObjectError ? error.code : "object_invalid";
+      const verificationCode: ObjectVerification["code"] = code === "object_file_missing" ? "missing" : code === "object_symlink_rejected" ? "symlink" : code === "object_not_regular_file" ? "not_regular_file" : code === "object_size_mismatch" ? "size_mismatch" : code === "object_storage_key_invalid" ? "invalid_storage_key" : "missing";
+      return { ok: false, code: verificationCode, message: error instanceof Error ? error.message : "storage object is invalid" };
+    }
+    const record = resolved.record;
+    const hash = crypto.createHash("sha256");
+    let total = 0;
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    try {
+      while (true) {
+        const count = fs.readSync(resolved.fileDescriptor, buffer, 0, buffer.byteLength, null);
+        if (count === 0) break;
+        total += count;
+        hash.update(buffer.subarray(0, count));
+      }
+    } finally { fs.closeSync(resolved.fileDescriptor); }
+    const actualSha256 = hash.digest("hex");
+    if (total !== record.sizeBytes) return { ok: false, code: "size_mismatch", message: "storage object size does not match metadata", actualSizeBytes: total, actualSha256 };
+    if (actualSha256 !== record.sha256) return { ok: false, code: "hash_mismatch", message: "storage object hash does not match metadata", actualSizeBytes: total, actualSha256 };
+    return { ok: true, code: "ok", message: "storage object is intact", actualSizeBytes: total, actualSha256 };
+  }
+}
+
 export function readStorageObjectRow(sqlite: Database.Database, objectId: string): StorageObjectRecord | null {
   assertObjectId(objectId);
   const row = sqlite.prepare("SELECT * FROM storage_objects WHERE object_id = ?").get(objectId) as Record<string, unknown> | undefined;

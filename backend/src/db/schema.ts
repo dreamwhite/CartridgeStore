@@ -12,7 +12,8 @@ export const users = sqliteTable(
     externalId: text("external_id"),
     externalProvider: text("external_provider"),
     createdAt: text("created_at").notNull().default(sql`(datetime('now'))`),
-    lastLogin: text("last_login")
+    lastLogin: text("last_login"),
+    disabledAt: text("disabled_at")
   },
   (table) => ({
     externalIndex: index("users_external_idx").on(table.externalProvider, table.externalId)

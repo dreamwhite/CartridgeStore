@@ -53,8 +53,14 @@ function createSnapshot(): { root: string; config: LegacySnapshotConfig } {
   }));
   fs.mkdirSync(path.join(root, "cartridges/org.example.m52c/1.0.0"), { recursive: true });
   fs.mkdirSync(path.join(root, "pending/4"), { recursive: true });
+  fs.mkdirSync(path.join(root, "pending/6"), { recursive: true });
+  fs.mkdirSync(path.join(root, "pending/7"), { recursive: true });
+  fs.mkdirSync(path.join(root, "site-assets"), { recursive: true });
   fs.writeFileSync(path.join(root, "cartridges/org.example.m52c/1.0.0/qemu.prg32"), cartridge);
   fs.writeFileSync(path.join(root, "pending/4/qemu.prg32"), cartridge);
+  fs.writeFileSync(path.join(root, "pending/6/qemu.prg32"), cartridge);
+  fs.writeFileSync(path.join(root, "pending/7/qemu.prg32"), cartridge);
+  fs.writeFileSync(path.join(root, "site-assets/logo.svg"), "<svg xmlns=\"http://www.w3.org/2000/svg\"><text>Κατάστημα</text></svg>");
   const sha256 = crypto.createHash("sha256").update(cartridge).digest("hex");
   fs.writeFileSync(path.join(root, "index.json"), JSON.stringify({
     abi: "prg32-cartridge-store-index-1.0",
@@ -82,17 +88,32 @@ function createSnapshot(): { root: string; config: LegacySnapshotConfig } {
     CREATE TABLE download_events (id INTEGER PRIMARY KEY AUTOINCREMENT, game_id TEXT NOT NULL, version TEXT NOT NULL, architecture TEXT NOT NULL, user_id INTEGER, ip_hash TEXT, user_agent TEXT, downloaded_at TEXT NOT NULL);
     CREATE TABLE cartridge_submissions (id INTEGER PRIMARY KEY AUTOINCREMENT, game_id TEXT NOT NULL, version TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'pending', submitted_by_user_id INTEGER REFERENCES users(id), submitted_by TEXT NOT NULL DEFAULT '', reviewed_by_user_id INTEGER REFERENCES users(id), reviewed_by TEXT NOT NULL DEFAULT '', pending_dir TEXT NOT NULL DEFAULT '', metadata_json TEXT NOT NULL, architectures_json TEXT NOT NULL, created_at TEXT NOT NULL, reviewed_at TEXT);
   `);
-  database.prepare("INSERT INTO users(id, username, email, password_hash, role) VALUES (4, 'm52c-user', 'm52c@example.test', 'hash-only-in-db', 'publisher')").run();
+  database.prepare("INSERT INTO users(id, username, email, password_hash, role, external_id, external_provider, disabled_at) VALUES (4, 'm52c-user', 'm52c@example.test', 'hash-only-in-db', 'publisher', 'legacy-subject', 'legacy-oidc', NULL)").run();
+  database.prepare("INSERT INTO users(id, username, email, role, disabled_at) VALUES (5, 'm52c-disabled', 'disabled@example.test', 'user', '2026-01-03T00:00:00Z')").run();
+  database.prepare("INSERT INTO groups(id, name) VALUES (2, 'editors')").run();
+  database.prepare("INSERT INTO user_groups(user_id, group_id) VALUES (4, 2)").run();
+  database.prepare("INSERT INTO api_tokens(id, user_id, token_hash, label) VALUES (4, 4, 'token-hash-fixture', 'fixture token')").run();
+  database.prepare("INSERT INTO store_settings(key, value) VALUES ('store_name', 'M5.2c Unicode Κατάστημα')").run();
   database.prepare("INSERT INTO cartridge_submissions(id, game_id, version, status, submitted_by_user_id, pending_dir, metadata_json, architectures_json, created_at) VALUES (4, 'org.example.m52c', '1.0.0', 'pending', 4, 'pending/4', ?, ?, '2026-01-01T00:00:00Z')").run(
     JSON.stringify({ abi: "prg32-metadata-1.0", id: "org.example.m52c", version: "1.0.0" }),
     JSON.stringify([{ architecture: "qemu", stored: "pending/4/qemu.prg32", file: "qemu.prg32" }])
   );
+  for (const [id, status, directory, reviewedAt] of [[6, "rejected", "pending/6", "2026-01-03T00:00:00Z"], [7, "approved", "pending/7", "2026-01-04T00:00:00Z"]] as const) {
+    database.prepare("INSERT INTO cartridge_submissions(id, game_id, version, status, submitted_by_user_id, reviewed_by_user_id, reviewed_by, pending_dir, metadata_json, architectures_json, created_at, reviewed_at) VALUES (?, 'org.example.m52c', '1.0.0', ?, 4, 4, 'm52c-user', ?, ?, ?, '2026-01-01T00:00:00Z', ?)").run(
+      id,
+      status,
+      directory,
+      JSON.stringify({ abi: "prg32-metadata-1.0", id: "org.example.m52c", version: "1.0.0", title: `Unicode Κατάστημα ${status}` }),
+      JSON.stringify([{ architecture: "qemu", stored: `${directory}/qemu.prg32`, file: "qemu.prg32" }]),
+      reviewedAt
+    );
+  }
   database.prepare("INSERT INTO download_events(game_id, version, architecture, user_id, ip_hash, user_agent, downloaded_at) VALUES ('org.example.m52c', '1.0.0', 'qemu', 4, 'sensitive-hash', 'sensitive-agent', '2026-01-02T00:00:00Z')").run();
   database.close();
   fs.writeFileSync(path.join(root, ".snapshot.json"), JSON.stringify({ abi: "prg32-legacy-snapshot-1.0", state: "ready", database: "cartridge_store.sqlite", catalog: "index.json", dataRoot: ".", cartridgeRoot: "cartridges" }));
   return {
     root,
-    config: { root, databasePath: "cartridge_store.sqlite", catalogPath: "index.json", dataRoot: ".", cartridgeRoot: "cartridges", preparedMarkerPath: ".snapshot.json", submissionRoot: "pending" }
+    config: { root, databasePath: "cartridge_store.sqlite", catalogPath: "index.json", dataRoot: ".", cartridgeRoot: "cartridges", preparedMarkerPath: ".snapshot.json", submissionRoot: "pending", mediaRoot: "site-assets" }
   };
 }
 
@@ -116,9 +137,14 @@ describe("M5.2c disposable legacy-to-canonical migration", () => {
     const sqlite = new Database(path.join(target, "canonical/store.sqlite"), { readonly: true });
     expect(sqlite.prepare("SELECT cartridge_id FROM cartridges").pluck().all()).toEqual(["org.example.m52c"]);
     expect(sqlite.prepare("SELECT state FROM releases").pluck().all()).toEqual(["published"]);
-    expect(sqlite.prepare("SELECT status FROM submissions").pluck().all()).toEqual(["pending_review"]);
+    expect(sqlite.prepare("SELECT status FROM submissions ORDER BY submission_id").pluck().all()).toEqual(["pending_review", "rejected", "approved"]);
     expect(sqlite.prepare("SELECT COUNT(*) AS count FROM storage_objects WHERE object_kind = 'media'").get()).toEqual({ count: 2 });
+    expect(sqlite.prepare("SELECT COUNT(*) AS count FROM site_assets").get()).toEqual({ count: 1 });
     expect(sqlite.prepare("SELECT password_hash FROM users WHERE id = 4").get()).toEqual({ password_hash: "hash-only-in-db" });
+    expect(sqlite.prepare("SELECT disabled_at FROM users WHERE id = 5").get()).toEqual({ disabled_at: "2026-01-03T00:00:00Z" });
+    expect(sqlite.prepare("SELECT name FROM groups WHERE id = 2").get()).toEqual({ name: "editors" });
+    expect(sqlite.prepare("SELECT label FROM api_tokens WHERE id = 4").get()).toEqual({ label: "fixture token" });
+    expect(sqlite.prepare("SELECT value FROM store_settings WHERE key = 'store_name'").get()).toEqual({ value: "M5.2c Unicode Κατάστημα" });
     sqlite.close();
     const rerun = migrateLegacySnapshot(migrationConfig(source, path.join(target, "canonical"), { manifest }));
     expect(rerun).toMatchObject({ ok: true, alreadyCompleted: true });
@@ -180,5 +206,20 @@ describe("M5.2c disposable legacy-to-canonical migration", () => {
     fs.appendFileSync(path.join(source.root, "cartridges/org.example.m52c/1.0.0/qemu.prg32"), "changed");
     expect(() => migrateLegacySnapshot(migrationConfig(source, target, { manifest }))).toThrow("verification");
     expect(fs.existsSync(target)).toBe(false);
+  });
+
+  it.each(["after-artifact", "after-media", "after-submission", "after-telemetry", "before-finalization", "after-finalization", "before-verification"] as const)("resumes safely after the %s migration boundary", (faultAt) => {
+    const source = createSnapshot();
+    const parent = fs.mkdtempSync(path.join(os.tmpdir(), `prg32-m52g28-${faultAt}-`));
+    roots.push(parent);
+    const manifest = inventoryLegacySnapshot(source.config).manifest;
+    const target = path.join(parent, "canonical");
+    expect(() => migrateLegacySnapshot(migrationConfig(source, target, { manifest, faultAt }))).toThrow("fault injected");
+    expect(fs.existsSync(path.join(target, "store.sqlite"))).toBe(true);
+    const resumed = migrateLegacySnapshot(migrationConfig(source, target, { manifest }));
+    expect(resumed.ok).toBe(true);
+    expect(resumed.verification).toMatchObject({ ok: true });
+    const journalPath = path.join(target, "journal/migrations", `migration_${manifest.manifestSha256.slice(0, 32)}.json`);
+    expect(JSON.parse(fs.readFileSync(journalPath, "utf8"))).toMatchObject({ completionState: "completed", recoveryState: "none" });
   });
 });

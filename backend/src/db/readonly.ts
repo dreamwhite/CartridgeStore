@@ -6,6 +6,7 @@ import { drizzle, type BetterSQLite3Database } from "drizzle-orm/better-sqlite3"
 
 import type { BackendConfig } from "../config/env.js";
 import { applyFederationMigrations, FederationMigrationError } from "./federation-migrations.js";
+import { applyApplicationMigrations } from "./application-migrations.js";
 import { schema } from "./schema.js";
 
 export type ReadonlyDrizzleDatabase = BetterSQLite3Database<typeof schema>;
@@ -97,7 +98,7 @@ function validateAuthWriterTarget(config: BackendConfig): { writerStats: fs.Stat
   }
   const operationalReal = fs.realpathSync(config.databasePath);
   const operationalIdentity = identity(fs.statSync(config.databasePath), "operational database");
-  if (isContained(rootReal, operationalReal)) {
+  if (isContained(rootReal, operationalReal) && config.candidateRuntimeMode === undefined) {
     throw new ReadonlyDatabaseError("auth disposable root may not contain the operational database");
   }
 
@@ -111,7 +112,7 @@ function validateAuthWriterTarget(config: BackendConfig): { writerStats: fs.Stat
     throw new ReadonlyDatabaseError("auth write database must reside inside the auth disposable root");
   }
   const writerStats = fs.statSync(config.authWriteDatabasePath);
-  if (identity(writerStats, "auth write database") === operationalIdentity) {
+  if (identity(writerStats, "auth write database") === operationalIdentity && config.candidateRuntimeMode === undefined) {
     throw new ReadonlyDatabaseError("auth write database must not identify the operational database");
   }
 
@@ -168,24 +169,34 @@ export function openReadonlyDatabase(config: BackendConfig): ReadonlyDatabase {
 }
 
 export function openAuthWriteDatabase(config: BackendConfig): ReadonlyDatabase {
-  if (!config.authWriteEnabled || !config.authWriteDatabasePath || config.authWriteMode !== "test") {
+  if (!config.authWriteEnabled || !config.authWriteDatabasePath || (config.authWriteMode !== "test" && config.authWriteMode !== "operational")) {
     throw new ReadonlyDatabaseError("authentication write isolation is not enabled");
   }
-  const before = validateAuthWriterTarget(config);
+  const operational = config.authWriteMode === "operational";
+  if (operational) {
+    if (config.catalogReadMode !== "canonical-operational" || !config.canonicalStorageRoot || path.resolve(config.authWriteDatabasePath) !== path.join(path.resolve(config.canonicalStorageRoot), "store.sqlite")) {
+      throw new ReadonlyDatabaseError("operational auth writer must use the canonical storage-v2 database");
+    }
+    const stats = lstatPath(config.authWriteDatabasePath, "canonical operational database");
+    if (stats.isSymbolicLink() || !stats.isFile()) throw new ReadonlyDatabaseError("canonical operational database must be a regular file");
+  }
+  const before = operational ? undefined : validateAuthWriterTarget(config);
   let sqlite: Database.Database | undefined;
   try {
     sqlite = new Database(config.authWriteDatabasePath, { timeout: config.busyTimeoutMs });
-    const after = validateAuthWriterTarget(config);
-    if (identity(after.writerStats, "auth write database") !== identity(before.writerStats, "auth write database") ||
-        identity(after.operationalStats, "operational database") !== identity(before.operationalStats, "operational database")) {
+    const after = operational ? undefined : validateAuthWriterTarget(config);
+    if (before && after && (identity(after.writerStats, "auth write database") !== identity(before.writerStats, "auth write database") ||
+        identity(after.operationalStats, "operational database") !== identity(before.operationalStats, "operational database"))) {
       throw new ReadonlyDatabaseError("database identity changed during auth writer validation");
     }
     sqlite.pragma("foreign_keys = ON");
     sqlite.pragma(`busy_timeout = ${config.busyTimeoutMs}`);
     sqlite.prepare("SELECT 1").get();
-    // Only the explicitly isolated test writer is migrated. The operational
-    // database remains read-only and is never changed by startup.
+    // Test mode migrates only its isolated writer. Operational mode opens the
+    // already-bootstrapped canonical database and only applies idempotent
+    // compatibility migrations.
     applyFederationMigrations(sqlite);
+    applyApplicationMigrations(sqlite);
     const requiredTables = ["users", "api_tokens", "groups", "user_groups", "registration_tokens", "store_settings"];
     const present = new Set(
       (sqlite.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as Array<{ name: string }>).map((row) => row.name)

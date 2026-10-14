@@ -31,6 +31,13 @@ interface Fixture {
   readonly repositoryRoot: string;
 }
 
+export interface DisposableCanonicalReadFixture {
+  readonly sourceRoot: string;
+  readonly targetRoot: string;
+  readonly sourceConfig: LegacySnapshotConfig;
+  readonly requests: readonly DifferentialRequest[];
+}
+
 interface FixtureVariant {
   readonly architecture: "esp32c6" | "qemu";
   readonly filename: string;
@@ -239,6 +246,20 @@ function createFixture(): Fixture {
 
 function migrationConfig(fixture: Fixture, targetRoot: string, extra: Partial<MigrationConfig> = {}): MigrationConfig {
   return { snapshot: fixture.sourceConfig, targetRoot, authorization: DISPOSABLE_MIGRATION_AUTHORIZATION, manifest: fixture.manifest, ...extra };
+}
+
+export function createDisposableCanonicalReadFixture(): DisposableCanonicalReadFixture {
+  const fixture = createFixture();
+  const inventory = inventoryLegacySnapshot(fixture.sourceConfig);
+  if (!inventory.manifest.readiness.migrationReady || !verifyLegacyManifest(fixture.sourceConfig, fixture.manifest).ok) {
+    throw new Error("disposable canonical read fixture source verification failed");
+  }
+  const parent = fs.mkdtempSync(path.join(os.tmpdir(), "prg32-m52g1-http-"));
+  roots.push(parent);
+  const targetRoot = path.join(parent, "canonical");
+  const migrated = migrateLegacySnapshot(migrationConfig(fixture, targetRoot));
+  if (!migrated.ok || !migrated.verification?.ok) throw new Error("disposable canonical read fixture migration failed");
+  return { sourceRoot: fixture.sourceRoot, targetRoot, sourceConfig: fixture.sourceConfig, requests: fixture.requests };
 }
 
 function legacyResponses(fixture: Fixture): Map<string, NormalizedResponse> {

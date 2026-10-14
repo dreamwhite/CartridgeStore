@@ -18,9 +18,23 @@ function normalize(value: unknown): unknown {
   return value;
 }
 
-function tableFingerprint(sqlite: Database.Database, table: string): string {
+function tableColumns(sqlite: Database.Database, table: string): string[] {
+  return (sqlite.prepare(`PRAGMA table_info("${table}")`).all() as Array<{ name: string; cid: number }>)
+    .sort((left, right) => left.cid - right.cid)
+    .map((row) => row.name);
+}
+
+function tableFingerprint(source: Database.Database, target: Database.Database, table: string): string {
   const digest = crypto.createHash("sha256");
-  for (const row of sqlite.prepare(`SELECT * FROM "${table}" ORDER BY rowid`).iterate() as Iterable<Record<string, unknown>>) {
+  const targetColumns = new Set(tableColumns(target, table));
+  // Administrative status columns are additive to the Fastify target and are
+  // intentionally excluded from the legacy compatibility fingerprint. Their
+  // defaults must not make an otherwise identical Flask snapshot fail parity.
+  const compatibilityOnly = new Set(["account_status", "status_reason", "status_actor_user_id", "status_changed_at", "status_expires_at"]);
+  const columns = tableColumns(source, table).filter((column) => targetColumns.has(column) && !compatibilityOnly.has(column));
+  if (columns.length === 0) return digest.digest("hex");
+  const projection = columns.map((column) => `"${column.replaceAll('"', '""')}"`).join(", ");
+  for (const row of source.prepare(`SELECT ${projection} FROM "${table}" ORDER BY rowid`).iterate() as Iterable<Record<string, unknown>>) {
     digest.update(canonicalJson(normalize(row)), "utf8");
     digest.update("\n", "utf8");
   }
@@ -112,7 +126,7 @@ export function verifyMigratedTarget(snapshotConfig: LegacySnapshotConfig, manif
     const audit = auditStorage(target.sqlite, target.paths);
     source = openLegacySnapshot(snapshotConfig);
     for (const table of COMPATIBLE_TABLES) {
-      if (tableFingerprint(source.sqlite, table) !== tableFingerprint(target.sqlite, table)) mismatch(mismatches, `compatible table fingerprint mismatch ${table}`);
+      if (tableFingerprint(source.sqlite, target.sqlite, table) !== tableFingerprint(target.sqlite, target.sqlite, table)) mismatch(mismatches, `compatible table fingerprint mismatch ${table}`);
     }
     verifyLogicalContent(target.sqlite, manifest, mismatches);
     const operation = target.sqlite.prepare("SELECT state FROM publication_operations WHERE operation_id = ?").get(migrationIdValue) as { state: string } | undefined;

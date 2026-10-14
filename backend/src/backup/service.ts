@@ -8,6 +8,7 @@ import type { BackendConfig } from "../config/env.js";
 import { compareSchemaSnapshots } from "../compatibility/schema.js";
 import { inspectSchema, REQUIRED_TABLES, type SchemaSnapshot } from "../db/schema-inspection.js";
 import { applyFederationMigrations, FEDERATION_TABLES, hasFederationTable } from "../db/federation-migrations.js";
+import { applyApplicationMigrations } from "../db/application-migrations.js";
 import {
   assertInside,
   BACKUP_ENCRYPTION_MAGIC,
@@ -156,14 +157,16 @@ function assertExpectedSchema(sqlite: Database.Database, expected: SchemaSnapsho
   if (foreignKeys.length > 0) throw new BackupError("backup database foreign-key check failed", "backup_database_foreign_keys");
   const actual = inspectSchema(sqlite);
   const federationExpected = expected.tables.some((table) => FEDERATION_TABLES.includes(table.name as typeof FEDERATION_TABLES[number]));
-  const required = new Set<string>(federationExpected ? [...REQUIRED_TABLES, ...FEDERATION_TABLES] : REQUIRED_TABLES);
+  const applicationExpected = ["application_settings", "admin_audit_events", "catalog_moderation", "setup_state"] as const;
+  const required = new Set<string>([...(federationExpected ? [...REQUIRED_TABLES, ...FEDERATION_TABLES] : REQUIRED_TABLES), ...applicationExpected.filter((name) => actual.tables.some((table) => table.name === name))]);
   if (actual.tables.some((table) => !required.has(table.name)) || REQUIRED_TABLES.some((name) => !actual.tables.some((table) => table.name === name))) {
     throw new BackupError("backup database schema is incompatible", "backup_database_schema_incompatible");
   }
   if (manifest.abi === BACKUP_V2_ABI && manifest.schema.fingerprint !== schemaFingerprint(actual) && manifest.schema.fingerprint !== legacyFingerprint) {
     throw new BackupError("backup database schema fingerprint is invalid", "backup_database_schema_incompatible");
   }
-  if (compareSchemaSnapshots(expected, actual).length > 0) {
+  const differences = compareSchemaSnapshots(expected, actual);
+  if (differences.length > 0) {
     throw new BackupError("backup database schema is incompatible with this installation", "backup_database_schema_incompatible");
   }
   return actual;
@@ -447,6 +450,21 @@ export class BackupService {
         } finally {
           writableStaged.close();
         }
+      } catch (error) {
+        if (error instanceof BackupError) throw error;
+        throw new BackupError("backup validation failed", "backup_validation_failed", 400, { cause: error });
+      }
+    }
+    // Older v1/v2 archives predate the additive typed-settings and account
+    // status tables. Migrate only the extracted disposable copy so the live
+    // writer schema remains the compatibility target without weakening the
+    // archive gate.
+    const liveHasApplicationExtensions = liveSchema.tables.some((table) => ["application_settings", "admin_audit_events", "catalog_moderation"].includes(table.name));
+    if (liveHasApplicationExtensions) {
+      try {
+        const writableStaged = new Database(extracted.databasePath, { fileMustExist: true });
+        try { applyApplicationMigrations(writableStaged); }
+        finally { writableStaged.close(); }
       } catch (error) {
         if (error instanceof BackupError) throw error;
         throw new BackupError("backup validation failed", "backup_validation_failed", 400, { cause: error });

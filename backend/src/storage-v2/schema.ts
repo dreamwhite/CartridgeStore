@@ -22,7 +22,8 @@ CREATE TABLE users (
   external_id TEXT,
   external_provider TEXT,
   created_at TEXT NOT NULL DEFAULT (datetime('now')),
-  last_login TEXT
+  last_login TEXT,
+  disabled_at TEXT
 );
 CREATE INDEX users_external_idx ON users(external_provider, external_id);
 
