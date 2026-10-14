@@ -1,0 +1,28 @@
+FROM node:24-bookworm-slim AS dependencies
+
+WORKDIR /app
+COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
+RUN corepack enable && pnpm install --frozen-lockfile
+
+FROM node:24-bookworm-slim AS builder
+ENV NEXT_TELEMETRY_DISABLED=1 \
+    NODE_ENV=production \
+    PRG32_API_UPSTREAM=http://fastify:5090
+WORKDIR /app
+COPY --from=dependencies /app/node_modules ./node_modules
+COPY . .
+RUN mkdir -p ./src/app/health
+COPY candidate-health-route.ts ./src/app/health/route.ts
+COPY next.config.candidate.mjs ./next.config.mjs
+RUN corepack enable && pnpm run build
+
+FROM node:24-bookworm-slim AS runtime
+ENV NODE_ENV=production \
+    NEXT_TELEMETRY_DISABLED=1 \
+    PRG32_API_UPSTREAM=http://fastify:5090
+WORKDIR /app
+COPY --from=builder --chown=node:node /app/.next/standalone ./
+COPY --from=builder --chown=node:node /app/.next/static ./.next/static
+USER node
+EXPOSE 3000
+CMD ["node", "server.js"]
