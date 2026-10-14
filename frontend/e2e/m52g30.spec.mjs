@@ -10,7 +10,7 @@ async function login(page, username, password) {
   await page.getByLabel("Username or email").fill(username);
   await page.getByLabel("Password").fill(password);
   const response = page.waitForResponse((candidate) => new URL(candidate.url()).pathname.endsWith("/auth/login") && candidate.request().method() === "POST");
-  await Promise.all([response, page.getByRole("button", { name: "Sign in" }).click()]);
+  await Promise.all([response, page.getByRole("button", { name: "Sign in", exact: true }).click()]);
   expect((await response).status()).toBe(200);
 }
 

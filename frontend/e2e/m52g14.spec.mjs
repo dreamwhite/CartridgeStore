@@ -13,7 +13,7 @@ async function loginLocal(page) {
     const pathname = new URL(response.url()).pathname;
     return (pathname.endsWith("/auth/login") || pathname.endsWith("/api/auth/login")) && response.request().method() === "POST";
   });
-  await Promise.all([loginResponse, page.getByRole("button", { name: "Sign in" }).click()]);
+  await Promise.all([loginResponse, page.getByRole("button", { name: "Sign in", exact: true }).click()]);
   const loginResult = await loginResponse;
   expect(loginResult.status()).toBe(200);
   await page.goto(`${storeOrigin()}/account`);

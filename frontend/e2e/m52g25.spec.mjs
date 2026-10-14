@@ -43,7 +43,7 @@ async function loginLocal(page) {
     const pathname = new URL(candidate.url()).pathname;
     return (pathname.endsWith("/auth/login") || pathname.endsWith("/api/auth/login")) && candidate.request().method() === "POST";
   });
-  await Promise.all([response, page.getByRole("button", { name: "Sign in" }).click()]);
+  await Promise.all([response, page.getByRole("button", { name: "Sign in", exact: true }).click()]);
   expect((await response).status()).toBe(200);
 }
 

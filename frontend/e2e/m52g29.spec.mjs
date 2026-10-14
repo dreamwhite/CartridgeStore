@@ -12,7 +12,7 @@ async function login(page, username, password) {
     const pathname = new URL(candidate.url()).pathname;
     return (pathname.endsWith("/auth/login") || pathname.endsWith("/api/auth/login")) && candidate.request().method() === "POST";
   });
-  await Promise.all([response, page.getByRole("button", { name: "Sign in" }).click()]);
+  await Promise.all([response, page.getByRole("button", { name: "Sign in", exact: true }).click()]);
   const result = await response;
   expect(result.status()).toBe(200);
   return { response: result, headers: await result.allHeaders() };

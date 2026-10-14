@@ -358,6 +358,9 @@ async function operationalGlobalSetup({ freshSetup = false } = {}) {
     PRG32_M534_STORE_ORIGIN: storeOrigin,
     PRG32_M534_API_ORIGIN: apiOrigin,
     PRG32_M534_CORS_ORIGIN: storeOrigin,
+    PRG32_M534_WEBAUTHN_ENABLED: "true",
+    PRG32_M534_WEBAUTHN_RP_ID: STORE_HOST,
+    PRG32_M534_WEBAUTHN_ORIGINS: storeOrigin,
     PRG32_M534_SMTP_HOST: "host.docker.internal",
     PRG32_M534_SMTP_PORT: String(smtp.port),
     PRG32_M534_PROVIDER_CA: providerCaPath
@@ -400,7 +403,11 @@ async function operationalGlobalSetup({ freshSetup = false } = {}) {
     saml.entryPoint = saml.entryPoint.replace("127.0.0.1", "host.docker.internal");
     if (!freshSetup) await seedCanonical(root, storeOrigin, apiOrigin, oidc, saml, apiOrigin);
     execFileSync(process.execPath, [path.join(backend, "dist/secrets/keygen.js"), "--output", keyRegistry, "--id", "m535-disposable-key-1"], { stdio: "ignore" });
-    if (freshSetup) compose(["build", "--no-cache", "fastify", "next"]);
+    // Build from the current source while retaining verified dependency
+    // layers. A forced APT refresh makes a disposable browser fixture
+    // depend on transient package-signature availability rather than on the
+    // application under test.
+    if (freshSetup || process.env.PRG32_M535_OPERATIONAL_E2E === "1") compose(["build", "fastify", "next"]);
     compose(["up", "-d"]);
     await waitFor(`http://127.0.0.1:${backendPort}/health`, 60_000);
     await waitFor(`http://127.0.0.1:${nextPort}/health`, 60_000);
@@ -492,6 +499,10 @@ export default async function globalSetup() {
       PRG32_BACKEND_AUTH_WRITE_DB: path.join(root, "store.sqlite"),
       PRG32_BACKEND_AUTH_DISPOSABLE_ROOT: root,
       PRG32_BACKEND_EMAIL_TRANSPORT: "memory",
+      // The disposable providers and SMTP capture run on the host. This is
+      // an explicit test-only exception; production keeps the allowlist
+      // operator-configured and exact-match only.
+      PRG32_BACKEND_SETUP_NETWORK_TEST_ALLOWLIST: "host.docker.internal,127.0.0.1,localhost",
       PRG32_M52G14_SMTP_PORT: String(smtp.port),
       PRG32_BACKEND_SUBMISSION_WRITE_ENABLED: "true",
       PRG32_BACKEND_SUBMISSION_WRITE_MODE: "test",
@@ -501,12 +512,19 @@ export default async function globalSetup() {
       PRG32_BACKEND_SESSION_SECURE: "true",
       PRG32_BACKEND_SESSION_SAMESITE: "lax",
       PRG32_BACKEND_SESSION_COOKIE_DOMAIN: ".m52g14.test",
-      PRG32_BACKEND_AUTH_RATE_LIMIT_MAX: "20",
+      // The browser suite intentionally reuses one disposable backend across
+      // independent journeys. Keep the synthetic client from exhausting the
+      // production-shaped limiter before a later login ceremony.
+      PRG32_BACKEND_AUTH_RATE_LIMIT_MAX: "200",
       PRG32_BACKEND_AUTH_RATE_LIMIT_WINDOW_SECONDS: "60",
       PRG32_BACKEND_FEDERATION_PUBLIC_ORIGIN: apiOrigin,
       PRG32_BACKEND_OIDC_PUBLIC_ORIGIN: apiOrigin,
       PRG32_BACKEND_FRONTEND_PUBLIC_ORIGIN: storeOrigin,
       PRG32_BACKEND_CORS_ORIGINS: storeOrigin,
+      PRG32_BACKEND_WEBAUTHN_ENABLED: "true",
+      PRG32_BACKEND_WEBAUTHN_RP_ID: STORE_HOST,
+      PRG32_BACKEND_WEBAUTHN_RP_NAME: "PRG32 Disposable Store",
+      PRG32_BACKEND_WEBAUTHN_ORIGINS: storeOrigin,
       PRG32_BACKEND_MDNS_ENABLED: "false",
       PRG32_MP_MAX_PEERS: "2",
       PRG32_BACKEND_LOG_LEVEL: "error"
