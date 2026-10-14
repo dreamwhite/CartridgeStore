@@ -157,7 +157,7 @@ function assertExpectedSchema(sqlite: Database.Database, expected: SchemaSnapsho
   if (foreignKeys.length > 0) throw new BackupError("backup database foreign-key check failed", "backup_database_foreign_keys");
   const actual = inspectSchema(sqlite);
   const federationExpected = expected.tables.some((table) => FEDERATION_TABLES.includes(table.name as typeof FEDERATION_TABLES[number]));
-  const applicationExpected = ["application_settings", "admin_audit_events", "catalog_moderation", "setup_state"] as const;
+  const applicationExpected = ["application_settings", "admin_audit_events", "catalog_moderation", "setup_state", "webauthn_credentials", "webauthn_challenges"] as const;
   const required = new Set<string>([...(federationExpected ? [...REQUIRED_TABLES, ...FEDERATION_TABLES] : REQUIRED_TABLES), ...applicationExpected.filter((name) => actual.tables.some((table) => table.name === name))]);
   if (actual.tables.some((table) => !required.has(table.name)) || REQUIRED_TABLES.some((name) => !actual.tables.some((table) => table.name === name))) {
     throw new BackupError("backup database schema is incompatible", "backup_database_schema_incompatible");
@@ -459,7 +459,7 @@ export class BackupService {
     // status tables. Migrate only the extracted disposable copy so the live
     // writer schema remains the compatibility target without weakening the
     // archive gate.
-    const liveHasApplicationExtensions = liveSchema.tables.some((table) => ["application_settings", "admin_audit_events", "catalog_moderation"].includes(table.name));
+    const liveHasApplicationExtensions = liveSchema.tables.some((table) => ["application_settings", "admin_audit_events", "catalog_moderation", "setup_state", "webauthn_credentials", "webauthn_challenges"].includes(table.name));
     if (liveHasApplicationExtensions) {
       try {
         const writableStaged = new Database(extracted.databasePath, { fileMustExist: true });

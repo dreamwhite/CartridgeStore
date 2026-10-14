@@ -11,6 +11,9 @@ import {
   authUserResponseSchema,
   csrfResponseSchema,
   registrationRequestedResponseSchema,
+  passkeyOptionsResponseSchema,
+  passkeyMutationResponseSchema,
+  passkeysResponseSchema,
 } from "./schemas";
 import { safeReturnPath } from "../auth/return-path";
 
@@ -117,6 +120,45 @@ export async function completeRegistration(token: string, password = "", passwor
 export async function changePassword(currentPassword: string, password: string, passwordConfirm: string): Promise<AuthOperationResponse> {
   const csrf = await getAuthCsrf();
   return requestApiJson(authPath("/auth/password/change"), { method: "POST", headers: withCsrfToken(csrf.csrf_token, { "content-type": "application/json" }), body: JSON.stringify({ current_password: currentPassword, password, password_confirm: passwordConfirm }) }, authOperationResponseSchema);
+}
+
+export async function reauthenticate(password: string): Promise<AuthOperationResponse> {
+  const csrf = await getAuthCsrf();
+  return requestApiJson(authPath("/auth/reauthenticate"), { method: "POST", headers: withCsrfToken(csrf.csrf_token, { "content-type": "application/json" }), body: JSON.stringify({ password }) }, authOperationResponseSchema);
+}
+
+export function getPasskeys() {
+  return requestApiJson(authPath("/auth/passkeys"), undefined, passkeysResponseSchema);
+}
+
+export async function beginPasskeyRegistration() {
+  const csrf = await getAuthCsrf();
+  return requestApiJson(authPath("/auth/passkeys/register/options"), { method: "POST", headers: withCsrfToken(csrf.csrf_token, { "content-type": "application/json" }), body: "{}" }, passkeyOptionsResponseSchema);
+}
+
+export async function finishPasskeyRegistration(response: unknown, displayName: string) {
+  const csrf = await getAuthCsrf();
+  return requestApiJson(authPath("/auth/passkeys/register"), { method: "POST", headers: withCsrfToken(csrf.csrf_token, { "content-type": "application/json" }), body: JSON.stringify({ response, display_name: displayName }) }, passkeyMutationResponseSchema);
+}
+
+export async function beginPasskeyLogin(username = "") {
+  const csrf = await getAuthCsrf();
+  return requestApiJson(authPath("/auth/passkeys/login/options"), { method: "POST", headers: withCsrfToken(csrf.csrf_token, { "content-type": "application/json" }), body: JSON.stringify(username.trim() ? { username: username.trim() } : {}) }, passkeyOptionsResponseSchema);
+}
+
+export async function finishPasskeyLogin(response: unknown) {
+  const csrf = await getAuthCsrf();
+  return requestApiJson(authPath("/auth/passkeys/login"), { method: "POST", headers: withCsrfToken(csrf.csrf_token, { "content-type": "application/json" }), body: JSON.stringify({ response }) }, authUserResponseSchema);
+}
+
+export async function renamePasskey(id: string, displayName: string) {
+  const csrf = await getAuthCsrf();
+  return requestApiJson(authPath(`/auth/passkeys/${encodeURIComponent(id)}`), { method: "PATCH", headers: withCsrfToken(csrf.csrf_token, { "content-type": "application/json" }), body: JSON.stringify({ display_name: displayName }) }, passkeyMutationResponseSchema);
+}
+
+export async function revokePasskey(id: string) {
+  const csrf = await getAuthCsrf();
+  return requestApiJson(authPath(`/auth/passkeys/${encodeURIComponent(id)}`), { method: "DELETE", headers: withCsrfToken(csrf.csrf_token) }, passkeyMutationResponseSchema);
 }
 
 export async function requestPasswordReset(identifier: string): Promise<AuthOperationResponse> {

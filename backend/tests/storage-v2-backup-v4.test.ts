@@ -58,6 +58,8 @@ function seed(rootPath: string): void {
   identities.link(ValidatedExternalIdentity.fromProtocolAdapter({ protocol: "oidc", providerId: "backup-oidc", issuer: "https://backup-id.example.test/", subject: "backup-subject", authenticatedAt: new Date().toISOString() }), 1, { actorUserId: 1, actorRole: "user", reauthenticatedAt: Date.now(), requestId: "backup-fixture" });
   resource.sqlite.prepare("UPDATE users SET disabled_at = ? WHERE id = 1").run("2026-01-02T00:00:00.000Z");
   resource.sqlite.prepare("INSERT INTO auth_sessions(id_hash, user_id, csrf_token_ciphertext, created_at, expires_at) VALUES (?, ?, ?, ?, ?)").run("a".repeat(64), 1, "fixture-csrf-ciphertext", 1767225600000, 1767312000000);
+  resource.sqlite.prepare("INSERT INTO webauthn_credentials(credential_id, user_id, public_key, signature_counter, device_type, backed_up, transports_json, display_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)").run("backup-credential", 1, Buffer.from("synthetic-public-key"), 7, "multiDevice", 1, '["internal"]', "Backup passkey", "2026-01-01T00:00:00.000Z");
+  resource.sqlite.prepare("INSERT INTO webauthn_challenges(challenge_id, ceremony, challenge, user_id, session_hash, expires_at) VALUES (?, 'authentication', ?, ?, ?, ?)").run("expired-challenge", "expired-challenge-value", 1, "a".repeat(64), Date.now() - 1000);
   resource.close();
 }
 
@@ -111,6 +113,8 @@ describe("M5.2g.8 encrypted backup-v4", () => {
     expect(restoredDb.prepare("SELECT action FROM catalog_moderation WHERE cartridge_id = 'fixture'").get()).toEqual({ action: "hidden" });
     expect(restoredDb.prepare("SELECT action FROM admin_audit_events WHERE event_id = 'audit-fixture'").get()).toEqual({ action: "settings.update" });
     expect(restoredDb.prepare("SELECT id_hash, user_id FROM auth_sessions").get()).toEqual({ id_hash: "a".repeat(64), user_id: 1 });
+    expect(restoredDb.prepare("SELECT credential_id, user_id, public_key, signature_counter, device_type, backed_up, transports_json, display_name FROM webauthn_credentials").get()).toEqual({ credential_id: "backup-credential", user_id: 1, public_key: Buffer.from("synthetic-public-key"), signature_counter: 7, device_type: "multiDevice", backed_up: 1, transports_json: '["internal"]', display_name: "Backup passkey" });
+    expect(restoredDb.prepare("SELECT challenge_id, ceremony, challenge, user_id, expires_at FROM webauthn_challenges").get()).toMatchObject({ challenge_id: "expired-challenge", ceremony: "authentication", challenge: "expired-challenge-value", user_id: 1 });
     restoredDb.close();
     keys.retire("backup-a");
     expect(() => verifyEncryptedBackup(backupA, { keyProvider: keys })).toThrowError(/not usable|authentication|unavailable/);

@@ -75,6 +75,13 @@ export const registrationRequestedResponseSchema = z
   .object({ ok: z.literal(true), email: z.string(), message: z.string() })
   .passthrough();
 
+export const passkeySchema = z.object({
+  id: z.string(), display_name: z.string(), device_type: z.string(), backed_up: z.boolean(), transports: z.array(z.string()), created_at: z.string(), last_used_at: z.string().nullable(), revoked: z.boolean()
+}).passthrough();
+export const passkeysResponseSchema = z.object({ ok: z.literal(true), credentials: z.array(passkeySchema) }).passthrough();
+export const passkeyOptionsResponseSchema = z.object({ ok: z.literal(true), options: z.record(z.string(), z.unknown()) }).passthrough();
+export const passkeyMutationResponseSchema = z.object({ ok: z.literal(true) }).passthrough();
+
 export const workflowSubmissionSchema = z
   .object({
     id: z.number().int().positive(),

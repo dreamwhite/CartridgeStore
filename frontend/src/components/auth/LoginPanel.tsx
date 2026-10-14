@@ -1,5 +1,6 @@
 "use client";
 
+import { startAuthentication } from "@simplewebauthn/browser";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -10,6 +11,8 @@ import {
   CURRENT_USER_QUERY_KEY,
   federatedLoginUrl,
   getAuthProviders,
+  beginPasskeyLogin,
+  finishPasskeyLogin,
   loginWithPassword,
 } from "../../lib/api/auth";
 import { authIntegrationEnabled } from "../../lib/auth/config";
@@ -27,6 +30,8 @@ export function LoginPanel({ enabled = authIntegrationEnabled }: LoginPanelProps
   const queryClient = useQueryClient();
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [passkeyBusy, setPasskeyBusy] = useState(false);
+  const [passkeyError, setPasskeyError] = useState("");
   const returnTo = useMemo(() => safeReturnPath(searchParams.get("return_to")), [searchParams]);
   const reason = searchParams.get("reason");
   const current = useCurrentUser(enabled);
@@ -50,6 +55,19 @@ export function LoginPanel({ enabled = authIntegrationEnabled }: LoginPanelProps
     event.preventDefault();
     if (!username.trim() || !password || login.isPending) return;
     login.mutate();
+  }
+
+  async function signInWithPasskey(username = "") {
+    setPasskeyBusy(true); setPasskeyError("");
+    try {
+      const options = await beginPasskeyLogin(username);
+      const response = await startAuthentication({ optionsJSON: options.options as unknown as Parameters<typeof startAuthentication>[0]["optionsJSON"] });
+      await finishPasskeyLogin(response);
+      await queryClient.invalidateQueries({ queryKey: CURRENT_USER_QUERY_KEY });
+      router.replace(returnTo);
+    } catch (error) {
+      setPasskeyError(error instanceof Error ? "Passkey sign-in could not be completed. Use password sign-in or try again." : "Passkey sign-in is unavailable.");
+    } finally { setPasskeyBusy(false); }
   }
 
   if (!enabled) {
@@ -108,6 +126,11 @@ export function LoginPanel({ enabled = authIntegrationEnabled }: LoginPanelProps
               {login.isPending ? "Signing in…" : "Sign in"}
             </Button>
           </form>
+          <div className="mt-4 grid gap-2">
+            <Button type="button" variant="secondary" disabled={passkeyBusy} onClick={() => void signInWithPasskey(username)}>{passkeyBusy ? "Waiting for passkey…" : "Sign in with a passkey"}</Button>
+            <Button type="button" variant="secondary" disabled={passkeyBusy} onClick={() => void signInWithPasskey("")}>Use a discoverable passkey</Button>
+          </div>
+          {passkeyError && <p className="mt-3 text-sm text-rose-700" role="alert">{passkeyError}</p>}
         </div>
 
         <div className="border-t border-[var(--color-border)] pt-8 md:border-l md:border-t-0 md:pl-8 md:pt-0">

@@ -36,6 +36,11 @@ export interface BackendConfig {
   readonly federationLifecycleTestToken: string | undefined;
   readonly federationLifecycleTestEnabled: boolean;
   readonly authRecentReauthSeconds: number;
+  readonly webauthnEnabled: boolean;
+  readonly webauthnRpId: string | undefined;
+  readonly webauthnRpName: string;
+  readonly webauthnOrigins: readonly string[];
+  readonly setupNetworkTestAllowlist: readonly string[];
   readonly authRateLimitMax: number;
   readonly authRateLimitWindowSeconds: number;
   readonly emailTransport: "disabled" | "memory" | "smtp";
@@ -232,6 +237,25 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
     .split(",")
     .map((value) => value.trim())
     .filter(Boolean);
+  const webauthnEnabled = booleanValue("PRG32_BACKEND_WEBAUTHN_ENABLED", environment.PRG32_BACKEND_WEBAUTHN_ENABLED, false);
+  const webauthnRpId = optionalNonEmpty(environment.PRG32_BACKEND_WEBAUTHN_RP_ID);
+  const webauthnRpName = nonEmpty("PRG32_BACKEND_WEBAUTHN_RP_NAME", environment.PRG32_BACKEND_WEBAUTHN_RP_NAME, "PRG32 Cartridge Store");
+  const webauthnOrigins = (environment.PRG32_BACKEND_WEBAUTHN_ORIGINS ?? "")
+    .split(",").map((value) => value.trim()).filter(Boolean);
+  const setupNetworkTestAllowlist = (environment.PRG32_BACKEND_SETUP_NETWORK_TEST_ALLOWLIST ?? "")
+    .split(",").map((value) => value.trim().toLowerCase()).filter(Boolean);
+  if (webauthnEnabled) {
+    if (!authWriteEnabled) throw new Error("WebAuthn requires the canonical authentication writer");
+    if (!webauthnRpId || webauthnOrigins.length === 0) throw new Error("WebAuthn requires an explicit RP ID and origin allowlist");
+    if (!/^[a-z0-9](?:[a-z0-9.-]*[a-z0-9])?$/iu.test(webauthnRpId) || webauthnRpId.includes("..")) throw new Error("PRG32_BACKEND_WEBAUTHN_RP_ID is invalid");
+    const allowInsecure = (environment.NODE_ENV ?? "").trim().toLowerCase() === "test";
+    for (const origin of webauthnOrigins) {
+      let parsed: URL;
+      try { parsed = new URL(origin); } catch { throw new Error("PRG32_BACKEND_WEBAUTHN_ORIGINS contains an invalid origin"); }
+      if ((!allowInsecure && parsed.protocol !== "https:") || parsed.username || parsed.password || parsed.pathname !== "/" || parsed.search || parsed.hash) throw new Error("WebAuthn origins must be trusted HTTPS origins");
+      if (parsed.hostname !== webauthnRpId && !parsed.hostname.endsWith(`.${webauthnRpId}`)) throw new Error("WebAuthn RP ID is not compatible with every configured origin");
+    }
+  }
   const secretEncryptionEnabled = booleanValue(
     "PRG32_BACKEND_SECRET_ENCRYPTION_ENABLED",
     environment.PRG32_BACKEND_SECRET_ENCRYPTION_ENABLED,
@@ -506,6 +530,11 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
       environment.PRG32_BACKEND_AUTH_RECENT_REAUTH_SECONDS,
       5 * 60
     ),
+    webauthnEnabled,
+    webauthnRpId,
+    webauthnRpName,
+    webauthnOrigins,
+    setupNetworkTestAllowlist,
     authRateLimitMax: positiveInteger(
       "PRG32_BACKEND_AUTH_RATE_LIMIT_MAX",
       environment.PRG32_BACKEND_AUTH_RATE_LIMIT_MAX,

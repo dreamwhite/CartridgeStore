@@ -139,6 +139,20 @@ export class AuthService {
     return true;
   }
 
+  reauthenticate(session: SessionRecord, password: string): boolean {
+    if (session.userId === null) return false;
+    const row = this.database().prepare("SELECT password_hash FROM users WHERE id = ?").get(session.userId) as { password_hash: string | null } | undefined;
+    if (!row?.password_hash || !isAccountEnabled(this.database(), session.userId)) return false;
+    const result = verifyWerkzeugPasswordHash(row.password_hash, password);
+    if (result.status !== "valid") return false;
+    this.sessions?.recordRecentReauthentication(session);
+    return true;
+  }
+
+  hasRecentReauthentication(session: SessionRecord): boolean {
+    return session.reauthenticatedAt !== null && session.reauthenticatedAt >= Date.now() - this.options.config.authRecentReauthSeconds * 1000;
+  }
+
   login(username: string, password: string): Principal {
     const db = this.writableDatabase();
     const row = db.prepare(

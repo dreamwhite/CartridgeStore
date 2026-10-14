@@ -75,6 +75,30 @@ export function applyApplicationMigrations(database: Database.Database): void {
         active INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1))
       );
       CREATE INDEX IF NOT EXISTS catalog_moderation_lookup_idx ON catalog_moderation(cartridge_id, version, active, created_at DESC);
+      CREATE TABLE IF NOT EXISTS webauthn_credentials (
+        credential_id TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        public_key BLOB NOT NULL,
+        signature_counter INTEGER NOT NULL DEFAULT 0 CHECK(signature_counter >= 0),
+        device_type TEXT NOT NULL CHECK(device_type IN ('singleDevice', 'multiDevice')),
+        backed_up INTEGER NOT NULL DEFAULT 0 CHECK(backed_up IN (0, 1)),
+        transports_json TEXT NOT NULL DEFAULT '[]',
+        display_name TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        last_used_at TEXT,
+        revoked_at TEXT
+      );
+      CREATE INDEX IF NOT EXISTS webauthn_credentials_user_idx ON webauthn_credentials(user_id, revoked_at, created_at);
+      CREATE TABLE IF NOT EXISTS webauthn_challenges (
+        challenge_id TEXT PRIMARY KEY,
+        ceremony TEXT NOT NULL CHECK(ceremony IN ('registration', 'authentication')),
+        challenge TEXT NOT NULL UNIQUE,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
+        session_hash TEXT NOT NULL,
+        expires_at INTEGER NOT NULL,
+        consumed_at INTEGER
+      );
+      CREATE INDEX IF NOT EXISTS webauthn_challenges_expiry_idx ON webauthn_challenges(expires_at, consumed_at);
     `);
   }
   if (hasTable(database, "submissions")) database.exec(`

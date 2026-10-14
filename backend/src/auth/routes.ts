@@ -227,6 +227,15 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptio
     } catch (error) { return authError(reply, error); }
   });
 
+  for (const path of localAuthPaths("/auth/reauthenticate")) app.post<{ Body: Body }>(path, async (request, reply) => {
+    if (!ensureWrite(auth, reply)) return reply;
+    const current = context(request, auth);
+    if (!current.principal.authenticated || !current.session) return authFailure(reply, current.principal);
+    if (!requireCsrf(request, reply, current)) return reply;
+    if (!auth.reauthenticate(current.session, value(body(request).password))) return json(reply, { ok: false, error: "recent authentication failed", code: "reauthentication_failed" }, 401);
+    return json(reply, { ok: true, message: "recent authentication recorded" });
+  });
+
   for (const path of localAuthPaths("/auth/password/reset/request")) app.post<{ Body: Body }>(path, async (request, reply) => {
     if (!ensureWrite(auth, reply)) return reply;
     const current = context(request, auth);
@@ -265,6 +274,7 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptio
     if (!principal.authenticated || principal.id === null) return authFailure(reply, principal, "invalid username or password");
     const issued = auth.rotateSession(current.session, principal.id);
     if (!issued) return unavailable(reply);
+    auth.sessions?.recordRecentReauthentication(issued.record);
       cookie(reply, config, auth, issued.cookieValue);
     return json(reply, { ok: true, user: principalJson(authorization, principal) });
   });

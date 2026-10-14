@@ -53,6 +53,8 @@ import { AdminAuditLog } from "./admin/audit.js";
 import { RuntimePolicy } from "./settings/runtime-policy.js";
 import { registerSetupRoutes } from "./setup/routes.js";
 import { SetupService } from "./setup/service.js";
+import { WebAuthnService } from "./auth/webauthn.js";
+import { registerWebAuthnRoutes } from "./auth/webauthn-routes.js";
 
 export interface AppOptions {
   readonly config: BackendConfig;
@@ -152,6 +154,9 @@ export function buildApp(options: AppOptions): FastifyInstance {
     audit,
     database: setupDatabase
   });
+  const webauthn = options.config.webauthnEnabled
+    ? new WebAuthnService(auth.writableDatabase(), auth, options.config, audit)
+    : null;
   const backup = options.config.backupEnabled
     ? new BackupService(options.config, auth.writableDatabase(), { secrets })
     : null;
@@ -240,6 +245,7 @@ export function buildApp(options: AppOptions): FastifyInstance {
     ...(canonicalWorkflow === null ? {} : { downloadTelemetry: canonicalWorkflow })
   });
   registerAuthRoutes(app, { config: options.config, auth, authorization, email, legacyBootstrapAllowed: () => setup.legacyBootstrapAllowed() });
+  registerWebAuthnRoutes(app, { config: options.config, auth, authorization, webauthn });
   registerSetupRoutes(app, { config: options.config, setup });
   if (federation) {
     registerOidcRoutes(app, { config: options.config, oidc: federation.oidc, sessionLifetimeSeconds: () => auth.sessionLifetimeSeconds() });
