@@ -56,3 +56,19 @@ export function completeSetup(csrfToken: string): Promise<{ ok: true; state: "IN
     body: "{}",
   });
 }
+
+export function testSetupSmtpConnection(csrfToken: string) {
+  return requestApiJson("/api/setup/smtp/test-connection", { method: "POST", headers: withCsrfToken(csrfToken, { "content-type": "application/json" }), body: "{}" });
+}
+
+export function testSetupSmtpMessage(csrfToken: string, to: string) {
+  return requestApiJson("/api/setup/smtp/test-message", { method: "POST", headers: withCsrfToken(csrfToken, { "content-type": "application/json" }), body: JSON.stringify({ to }) });
+}
+
+export function validateSetupOidc(csrfToken: string, issuer: string) {
+  return requestApiJson("/api/setup/federation/oidc/validate", { method: "POST", headers: withCsrfToken(csrfToken, { "content-type": "application/json" }), body: JSON.stringify({ issuer }) });
+}
+
+export function importSetupSamlMetadata(csrfToken: string, input: { url?: string; xml?: string }) {
+  return requestApiJson("/api/setup/federation/saml/metadata", { method: "POST", headers: withCsrfToken(csrfToken, { "content-type": "application/json" }), body: JSON.stringify(input) });
+}

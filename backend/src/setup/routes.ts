@@ -126,6 +126,49 @@ export function registerSetupRoutes(app: FastifyInstance, options: SetupRouteOpt
     } catch (error) { return errorResponse(reply, request, error); }
   });
 
+  app.post<{ Body: Body }>("/api/setup/smtp/test-connection", async (request, reply) => {
+    if (!sameOrigin(request, options.config)) return json(reply, { ok: false, error: "origin is not allowed", code: "setup_origin_denied" }, 403);
+    try {
+      const session = setupSession(request, options.setup);
+      options.setup.requireSession(session);
+      if (!constantTimeEqual(session.csrfToken, csrfHeader(request))) return json(reply, { ok: false, error: "csrf token missing or invalid", code: "csrf_failed" }, 403);
+      return json(reply, await options.setup.testSmtpConnection(session));
+    } catch (error) { return errorResponse(reply, request, error); }
+  });
+
+  app.post<{ Body: Body }>("/api/setup/smtp/test-message", async (request, reply) => {
+    if (!sameOrigin(request, options.config)) return json(reply, { ok: false, error: "origin is not allowed", code: "setup_origin_denied" }, 403);
+    try {
+      const session = setupSession(request, options.setup);
+      options.setup.requireSession(session);
+      if (!constantTimeEqual(session.csrfToken, csrfHeader(request))) return json(reply, { ok: false, error: "csrf token missing or invalid", code: "csrf_failed" }, 403);
+      const recipient = typeof body(request).to === "string" ? body(request).to as string : "";
+      return json(reply, await options.setup.sendSmtpTest(session, recipient));
+    } catch (error) { return errorResponse(reply, request, error); }
+  });
+
+  app.post<{ Body: Body }>("/api/setup/federation/oidc/validate", async (request, reply) => {
+    if (!sameOrigin(request, options.config)) return json(reply, { ok: false, error: "origin is not allowed", code: "setup_origin_denied" }, 403);
+    try {
+      const session = setupSession(request, options.setup);
+      options.setup.requireSession(session);
+      if (!constantTimeEqual(session.csrfToken, csrfHeader(request))) return json(reply, { ok: false, error: "csrf token missing or invalid", code: "csrf_failed" }, 403);
+      const issuer = typeof body(request).issuer === "string" ? body(request).issuer as string : "";
+      return json(reply, await options.setup.validateOidc(session, issuer));
+    } catch (error) { return errorResponse(reply, request, error); }
+  });
+
+  app.post<{ Body: Body }>("/api/setup/federation/saml/metadata", async (request, reply) => {
+    if (!sameOrigin(request, options.config)) return json(reply, { ok: false, error: "origin is not allowed", code: "setup_origin_denied" }, 403);
+    try {
+      const session = setupSession(request, options.setup);
+      options.setup.requireSession(session);
+      if (!constantTimeEqual(session.csrfToken, csrfHeader(request))) return json(reply, { ok: false, error: "csrf token missing or invalid", code: "csrf_failed" }, 403);
+      const input = body(request);
+      return json(reply, await options.setup.importSamlMetadata(session, { ...(typeof input.url === "string" ? { url: input.url } : {}), ...(typeof input.xml === "string" ? { xml: input.xml } : {}) }));
+    } catch (error) { return errorResponse(reply, request, error); }
+  });
+
   app.post("/api/setup/complete", async (request, reply) => {
     if (!sameOrigin(request, options.config)) return json(reply, { ok: false, error: "origin is not allowed", code: "setup_origin_denied" }, 403);
     try {

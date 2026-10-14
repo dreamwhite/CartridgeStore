@@ -8,6 +8,7 @@ import type { BackendConfig } from "../config/env.js";
 import type { FederationProviderOperations } from "../federation/operations.js";
 import type { FederationProviderService, ProviderInput } from "../federation/provider.js";
 import type { SettingsService } from "../settings/service.js";
+import { loadSamlMetadata, parseSamlMetadata, ProviderValidationError, validateOidcDiscovery, validateParsedSamlMetadata } from "./provider-validation.js";
 
 export const SETUP_STATES = [
   "INFRASTRUCTURE_NOT_READY",
@@ -446,6 +447,35 @@ export class SetupService {
     if (adminId !== null) this.audit(session, "setup.completed", "installation", requestId, adminId);
     this.invalidate(session);
     return { ok: true, state: "INSTALLATION_COMPLETE", redirect: "/auth/login" };
+  }
+
+  async testSmtpConnection(session: SetupSession): Promise<Record<string, unknown>> {
+    this.requireSession(session);
+    try { await this.options.settings.testSmtpConnection(); }
+    catch { throw new SetupError("setup_smtp_test_failed", 502, "SMTP connection test failed"); }
+    return { ok: true, result: "smtp_connection_ok" };
+  }
+
+  async sendSmtpTest(session: SetupSession, recipient: string): Promise<Record<string, unknown>> {
+    this.requireSession(session);
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/u.test(recipient) || recipient.length > 254) throw new SetupError("setup_smtp_recipient_invalid", 400, "test recipient is invalid");
+    try { await this.options.settings.sendSmtpTest(recipient); }
+    catch { throw new SetupError("setup_smtp_test_failed", 502, "SMTP test message could not be sent"); }
+    return { ok: true, result: "smtp_message_accepted" };
+  }
+
+  async validateOidc(session: SetupSession, issuer: string): Promise<Record<string, unknown>> {
+    this.requireSession(session);
+    try { return { ok: true, discovery: await validateOidcDiscovery(issuer, this.options.config) }; }
+    catch (error) { if (error instanceof ProviderValidationError) throw new SetupError(error.code, 400, error.message); throw new SetupError("oidc_metadata_invalid", 400, "OIDC discovery metadata is invalid"); }
+  }
+
+  async importSamlMetadata(session: SetupSession, input: { readonly url?: string; readonly xml?: string }): Promise<Record<string, unknown>> {
+    this.requireSession(session);
+    try {
+      const metadata = input.xml !== undefined ? await validateParsedSamlMetadata(parseSamlMetadata(input.xml), this.options.config) : input.url !== undefined ? await loadSamlMetadata(input.url, this.options.config) : (() => { throw new ProviderValidationError("saml_metadata_required", "SAML metadata URL or XML is required"); })();
+      return { ok: true, metadata };
+    } catch (error) { if (error instanceof ProviderValidationError) throw new SetupError(error.code, 400, error.message); throw new SetupError("saml_metadata_invalid", 400, "SAML metadata is invalid"); }
   }
 
   private audit(_session: SetupSession, action: string, targetId: string, requestId: string, actorUserId: number | null): void {

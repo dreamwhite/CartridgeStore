@@ -11,6 +11,7 @@ import { parseSettingsPatch, parseStoredValue, SettingsValidationError } from ".
 import type { SecretStore } from "../secrets/service.js";
 import type { AdminAuditLog } from "../admin/audit.js";
 import type { EmailService, SmtpRuntimeConfig } from "../email/service.js";
+import { OutboundValidationError, resolveOutboundHost } from "../setup/outbound.js";
 
 type DatabaseSource = Database.Database | (() => Database.Database);
 type AssetKind = "logo" | "favicon";
@@ -408,13 +409,27 @@ export class SettingsService {
 
   async testSmtpConnection(): Promise<void> {
     if (!this.email) throw new SettingsError("smtp_unavailable", 503, "email delivery is unavailable");
-    await this.email.testConnection();
+    const target = await this.smtpNetworkTarget();
+    await this.email.testConnection(target.lookup);
   }
 
   async sendSmtpTest(to: string): Promise<void> {
     if (!this.email) throw new SettingsError("smtp_unavailable", 503, "email delivery is unavailable");
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to) || to.length > 254) throw new SettingsError("smtp_test_recipient_invalid", 400, "test recipient is invalid");
-    await this.email.sendTest(to);
+    const target = await this.smtpNetworkTarget();
+    await this.email.sendTest(to, target.lookup);
+  }
+
+  private async smtpNetworkTarget(): Promise<{ readonly lookup: NonNullable<Parameters<EmailService["testConnection"]>[0]> }> {
+    const smtp = this.read().read_only as { smtp?: { host?: unknown; port?: unknown } };
+    const host = typeof smtp.smtp?.host === "string" ? smtp.smtp.host.trim() : "";
+    const port = typeof smtp.smtp?.port === "number" ? smtp.smtp.port : Number(smtp.smtp?.port);
+    if (!host || !Number.isSafeInteger(port) || port < 1 || port > 65535) throw new SettingsError("smtp_invalid_configuration", 400, "SMTP target is invalid");
+    try { return await resolveOutboundHost(host, port, this.config, { defaultPort: port }); }
+    catch (error) {
+      if (error instanceof OutboundValidationError) throw new SettingsError(error.code, 403, "SMTP target is not allowed");
+      throw new SettingsError("smtp_target_invalid", 400, "SMTP target is not allowed");
+    }
   }
 
   assetPath(kind: AssetKind): { readonly path: string; readonly extension: string; readonly mimeType: string } | null {

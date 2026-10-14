@@ -12,9 +12,13 @@ export interface EmailMessage {
   readonly createdAt: string;
 }
 
+export interface EmailConnectionOptions {
+  readonly lookup?: net.LookupFunction;
+}
+
 export interface EmailTransport {
-  send(message: EmailMessage): Promise<void>;
-  testConnection?(): Promise<void>;
+  send(message: EmailMessage, connection?: EmailConnectionOptions): Promise<void>;
+  testConnection?(connection?: EmailConnectionOptions): Promise<void>;
   close?(): void;
 }
 
@@ -49,16 +53,16 @@ export interface SmtpRuntimeConfig {
 export class SmtpEmailTransport implements EmailTransport {
   constructor(private readonly options: SmtpRuntimeConfig) {}
 
-  async testConnection(): Promise<void> {
+  async testConnection(connection?: EmailConnectionOptions): Promise<void> {
     let socket: net.Socket | tls.TLSSocket | undefined;
     try {
-      socket = await openSocket(this.options);
+      socket = await openSocket({ ...this.options, ...(connection?.lookup === undefined ? {} : { lookup: connection.lookup }) });
       let client = new SmtpClient(socket, this.options.deliveryTimeoutMs);
       await client.expect(220);
       await client.command("EHLO prg32-cartridge-store", 250);
       if (this.options.encryption === "starttls") {
         await client.command("STARTTLS", 220);
-        socket = await upgradeStartTls(socket, this.options.host, this.options.connectionTimeoutMs, this.options.ca);
+        socket = await upgradeStartTls(socket, this.options.host, this.options.connectionTimeoutMs, this.options.ca, connection?.lookup);
         client = new SmtpClient(socket, this.options.deliveryTimeoutMs);
         await client.command("EHLO prg32-cartridge-store", 250);
       }
@@ -68,16 +72,16 @@ export class SmtpEmailTransport implements EmailTransport {
     } finally { socket?.destroy(); }
   }
 
-  async send(message: EmailMessage): Promise<void> {
+  async send(message: EmailMessage, connection?: EmailConnectionOptions): Promise<void> {
     let socket: net.Socket | tls.TLSSocket | undefined;
     try {
-      socket = await openSocket(this.options);
+      socket = await openSocket({ ...this.options, ...(connection?.lookup === undefined ? {} : { lookup: connection.lookup }) });
       let client = new SmtpClient(socket, this.options.deliveryTimeoutMs);
       await client.expect(220);
       await client.command("EHLO prg32-cartridge-store", 250);
       if (this.options.encryption === "starttls") {
         await client.command("STARTTLS", 220);
-        socket = await upgradeStartTls(socket, this.options.host, this.options.connectionTimeoutMs, this.options.ca);
+        socket = await upgradeStartTls(socket, this.options.host, this.options.connectionTimeoutMs, this.options.ca, connection?.lookup);
         client = new SmtpClient(socket, this.options.deliveryTimeoutMs);
         await client.command("EHLO prg32-cartridge-store", 250);
       }
@@ -109,13 +113,13 @@ export class EmailService {
         : new DisabledEmailTransport();
   }
 
-  async testConnection(): Promise<void> {
+  async testConnection(lookup?: net.LookupFunction): Promise<void> {
     if (!this.transport.testConnection) throw new EmailDeliveryError("SMTP transport is not configured");
-    await this.transport.testConnection();
+    await this.transport.testConnection(lookup === undefined ? undefined : { lookup });
   }
 
-  async sendTest(to: string): Promise<void> {
-    await this.transport.send({ to, from: this.from, subject: "PRG32 Cartridge Store test message", text: "This is a PRG32 Cartridge Store SMTP test message.", html: "<p>This is a PRG32 Cartridge Store SMTP test message.</p>", createdAt: new Date().toISOString() });
+  async sendTest(to: string, lookup?: net.LookupFunction): Promise<void> {
+    await this.transport.send({ to, from: this.from, subject: "PRG32 Cartridge Store test message", text: "This is a PRG32 Cartridge Store SMTP test message.", html: "<p>This is a PRG32 Cartridge Store SMTP test message.</p>", createdAt: new Date().toISOString() }, lookup === undefined ? undefined : { lookup });
   }
 
   async sendRegistration(email: string, token: string): Promise<void> {
@@ -158,10 +162,10 @@ function formatMessage(message: EmailMessage): string {
   return [`From: ${message.from}`, `To: ${message.to}`, `Subject: ${message.subject}`, "MIME-Version: 1.0", "Content-Type: multipart/alternative; boundary=prg32-boundary", "", "--prg32-boundary", "Content-Type: text/plain; charset=utf-8", "", message.text, "", "--prg32-boundary", "Content-Type: text/html; charset=utf-8", "", message.html, "", "--prg32-boundary--", "."].join("\r\n");
 }
 
-function openSocket(options: { host: string; port: number; encryption?: SmtpRuntimeConfig["encryption"]; connectionTimeoutMs?: number; ca?: string | Buffer }): Promise<net.Socket | tls.TLSSocket> {
+function openSocket(options: { host: string; port: number; encryption?: SmtpRuntimeConfig["encryption"]; connectionTimeoutMs?: number; ca?: string | Buffer; lookup?: net.LookupFunction }): Promise<net.Socket | tls.TLSSocket> {
   return new Promise((resolve, reject) => {
     const implicitTls = options.encryption === "implicit_tls" || (options.encryption === undefined && options.port === 465);
-    const socket = implicitTls ? tls.connect({ host: options.host, port: options.port, servername: options.host, ...(options.ca === undefined ? {} : { ca: options.ca }) }) : net.connect({ host: options.host, port: options.port });
+    const socket = implicitTls ? tls.connect({ host: options.host, port: options.port, servername: options.host, ...(options.lookup === undefined ? {} : { lookup: options.lookup }), ...(options.ca === undefined ? {} : { ca: options.ca }) }) : net.connect({ host: options.host, port: options.port, ...(options.lookup === undefined ? {} : { lookup: options.lookup }) });
     socket.setTimeout(options.connectionTimeoutMs ?? 10000, () => socket.destroy(new Error("SMTP connection timed out")));
     socket.once("error", reject);
     socket.once("connect", () => resolve(socket));
@@ -169,9 +173,9 @@ function openSocket(options: { host: string; port: number; encryption?: SmtpRunt
   });
 }
 
-function upgradeStartTls(socket: net.Socket | tls.TLSSocket, host: string, timeoutMs: number, ca?: string | Buffer): Promise<tls.TLSSocket> {
+function upgradeStartTls(socket: net.Socket | tls.TLSSocket, host: string, timeoutMs: number, ca?: string | Buffer, lookup?: net.LookupFunction): Promise<tls.TLSSocket> {
   return new Promise((resolve, reject) => {
-    const secure = tls.connect({ socket, servername: host, rejectUnauthorized: true, ...(ca === undefined ? {} : { ca }) });
+    const secure = tls.connect({ socket, servername: host, rejectUnauthorized: true, ...(lookup === undefined ? {} : { lookup }), ...(ca === undefined ? {} : { ca }) });
     secure.setTimeout(timeoutMs, () => secure.destroy(new Error("SMTP TLS negotiation timed out")));
     // A timed-out TLS socket can emit an error after the promise has already
     // been rejected. Keep a listener attached for the socket lifetime so the
