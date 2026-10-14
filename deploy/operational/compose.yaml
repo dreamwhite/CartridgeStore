@@ -38,6 +38,9 @@ services:
       PRG32_BACKEND_EMAIL_TRANSPORT: smtp
       PRG32_BACKEND_EMAIL_SMTP_HOST: mailpit
       PRG32_BACKEND_EMAIL_SMTP_PORT: "1025"
+      # Exact internal SMTP host exception; override through the operator's
+      # environment when the approved mail relay is not named mailpit.
+      PRG32_BACKEND_SETUP_NETWORK_TEST_ALLOWLIST: ${PRG32_SETUP_NETWORK_TEST_ALLOWLIST:-mailpit}
       PRG32_BACKEND_EMAIL_SMTP_TLS: "false"
       PRG32_BACKEND_EMAIL_FROM: ${PRG32_OPERATIONAL_EMAIL_FROM:?set an approved sender address}
       PRG32_BACKEND_BACKUP_ENABLED: "false"
