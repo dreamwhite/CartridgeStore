@@ -32,6 +32,7 @@ export function parseCorrelation(secret: string, value: string | undefined): Oid
 
 function cookieAttributes(config: BackendConfig, maxAge: number): string[] {
   const attributes = ["Path=/", "HttpOnly", "SameSite=Lax", "Max-Age=" + maxAge];
+  if (config.authCookieDomain) attributes.push("Domain=" + config.authCookieDomain);
   if (config.authCookieSecure) attributes.push("Secure");
   return attributes;
 }

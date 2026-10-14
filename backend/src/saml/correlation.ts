@@ -30,15 +30,17 @@ export function parseSamlCorrelation(secret: string, value: string | undefined):
   return { transactionId: parts[1], binding: parts[2] };
 }
 
-function cookieAttributes(maxAge: number): string[] {
+function cookieAttributes(config: BackendConfig, maxAge: number): string[] {
   // SameSite=None is required because an IdP POST is cross-site. Secure is
   // deliberately unconditional: a browser must not accept a None cookie over
   // HTTP. Fastify inject tests can still carry this header in test mode.
-  return ["Path=/", "HttpOnly", "SameSite=None", "Secure", "Max-Age=" + maxAge];
+  const attributes = ["Path=/", "HttpOnly", "SameSite=None", "Secure", "Max-Age=" + maxAge];
+  if (config.authCookieDomain) attributes.push("Domain=" + config.authCookieDomain);
+  return attributes;
 }
 
-export function serializeSamlCorrelationCookie(_config: BackendConfig, value: string, maxAge = 300): string {
-  return SAML_CORRELATION_COOKIE + "=" + encodeURIComponent(value) + "; " + cookieAttributes(maxAge).join("; ");
+export function serializeSamlCorrelationCookie(config: BackendConfig, value: string, maxAge = 300): string {
+  return SAML_CORRELATION_COOKIE + "=" + encodeURIComponent(value) + "; " + cookieAttributes(config, maxAge).join("; ");
 }
 
 export function clearSamlCorrelationCookie(config: BackendConfig): string {

@@ -1,0 +1,631 @@
+export const READINESS_ABI = "prg32-operational-handover-readiness-1.0" as const;
+
+export const VERSION_TUPLE = {
+  schema: 2,
+  storageLayout: 2,
+  publicationJournal: 1,
+  backupFormat: 3
+} as const;
+
+export type ReadinessClassification =
+  | "READY"
+  | "ISOLATED_READY"
+  | "PARTIAL"
+  | "LEGACY_DEPENDENT"
+  | "MISSING"
+  | "NOT_VERIFIED";
+
+export type RouteOwner = "flask" | "fastify" | "next" | "external" | "none";
+
+export interface RouteInventoryEntry {
+  readonly id: string;
+  readonly family: string;
+  readonly methods: readonly string[];
+  readonly paths: readonly string[];
+  readonly currentOwner: RouteOwner;
+  readonly candidateOwner: RouteOwner;
+  readonly classification: ReadinessClassification;
+  readonly flaskSource?: string;
+  readonly fastifySource?: string;
+  readonly auth: string;
+  readonly persistence: string;
+  readonly sideEffects: string;
+  readonly firmwareRelevant: boolean;
+  readonly frontendRelevant: boolean;
+  readonly tests: readonly string[];
+  readonly blockers: readonly string[];
+}
+
+const source = {
+  flaskApp: "cartridge_store/app.py",
+  flaskAuth: "cartridge_store/auth/__init__.py",
+  flaskOidc: "cartridge_store/auth/oidc_adapter.py",
+  flaskSaml: "cartridge_store/auth/saml_adapter.py",
+  flaskMetrics: "cartridge_store/metrics.py",
+  flaskScores: "cartridge_store/scores.py",
+  flaskStats: "cartridge_store/stats.py",
+  flaskReview: "cartridge_store/review.py",
+  flaskUsers: "cartridge_store/users.py",
+  flaskMultiplayer: "cartridge_store/multiplayer.py",
+  fastifyApp: "backend/src/app.ts",
+  fastifyCatalog: "backend/src/catalog/routes.ts",
+  fastifyAuth: "backend/src/auth/routes.ts",
+  fastifyOidc: "backend/src/oidc/routes.ts",
+  fastifySaml: "backend/src/saml/routes.ts",
+  fastifyFederation: "backend/src/federation/admin-routes.ts",
+  fastifySubmission: "backend/src/submission/routes.ts",
+  fastifyReview: "backend/src/review/routes.ts",
+  fastifyMetrics: "backend/src/metrics/routes.ts",
+  fastifyScores: "backend/src/scores/routes.ts",
+  fastifyStats: "backend/src/stats/routes.ts",
+  fastifySettings: "backend/src/settings/routes.ts",
+  fastifyAdmin: "backend/src/admin/routes.ts",
+  fastifyBackup: "backend/src/backup/routes.ts",
+  fastifyMultiplayer: "backend/src/multiplayer/routes.ts",
+  fastifyStorage: "backend/src/storage-v2/"
+} as const;
+
+const readTests = [
+  "backend/tests/catalog.test.ts",
+  "backend/tests/contract.test.ts",
+  "backend/tests/storage-v2-differential.test.ts"
+] as const;
+
+export const ROUTE_INVENTORY: readonly RouteInventoryEntry[] = [
+  {
+    id: "discovery",
+    family: "discovery",
+    methods: ["GET"],
+    paths: ["/.well-known/prg32-store.json"],
+    currentOwner: "flask",
+    candidateOwner: "fastify",
+    classification: "ISOLATED_READY",
+    flaskSource: source.flaskApp,
+    fastifySource: source.fastifyCatalog,
+    auth: "public",
+    persistence: "reads store settings and filesystem/database metadata",
+    sideEffects: "none",
+    firmwareRelevant: true,
+    frontendRelevant: true,
+    tests: [...readTests],
+    blockers: ["public routing and store-name/port behavior are not cut over"]
+  },
+  {
+    id: "catalog-read",
+    family: "catalog, versions, architectures and media",
+    methods: ["GET"],
+    paths: [
+      "/api/games",
+      "/api/games/:game_id",
+      "/api/games/:game_id/icon",
+      "/api/games/:game_id/screenshot",
+      "/api/games/:game_id/colophon",
+      "/api/games/:game_id/download"
+    ],
+    currentOwner: "flask",
+    candidateOwner: "fastify",
+    classification: "ISOLATED_READY",
+    flaskSource: source.flaskApp,
+    fastifySource: source.fastifyCatalog,
+    auth: "public; optional legacy token is not required for catalog reads",
+    persistence: "Flask reads legacy index/files; Fastify reads its configured store root",
+    sideEffects: "Flask download records download_events; Fastify read-only projection does not write telemetry",
+    firmwareRelevant: true,
+    frontendRelevant: true,
+    tests: [...readTests],
+    blockers: ["canonical filesystem/database ownership and download-event write parity remain open"]
+  },
+  {
+    id: "legacy-html",
+    family: "legacy Jinja/PWA pages and static assets",
+    methods: ["GET", "POST"],
+    paths: [
+      "/",
+      "/games/:game_id",
+      "/manifest.webmanifest",
+      "/static/<path:filename>",
+      "/static/custom/:filename",
+      "/api",
+      "/stats",
+      "/scores",
+      "/users/:username",
+      "/users/:username/runs",
+      "/users/:username/runs/:run_id"
+    ],
+    currentOwner: "flask",
+    candidateOwner: "next",
+    classification: "LEGACY_DEPENDENT",
+    flaskSource: source.flaskApp,
+    auth: "mixed public/session-protected HTML",
+    persistence: "legacy Flask database and filesystem store",
+    sideEffects: "page rendering and selected user/settings reads",
+    firmwareRelevant: false,
+    frontendRelevant: true,
+    tests: ["tests/test_api.py", "tests/test_api_contracts.py", "frontend/src/components/storefront/CatalogBrowser.test.tsx"],
+    blockers: ["Next.js page parity and removal of Jinja ownership are not authorized in M5.2f"]
+  },
+  {
+    id: "local-auth",
+    family: "local authentication, sessions, CSRF and bearer tokens",
+    methods: ["GET", "POST", "PATCH", "DELETE"],
+    paths: [
+      "/auth/csrf",
+      "/auth/bootstrap",
+      "/auth/register",
+      "/auth/register/complete",
+      "/auth/login",
+      "/auth/logout",
+      "/auth/me",
+      "/api/me",
+      "/auth/tokens",
+      "/auth/tokens/:token_id",
+      "/auth/tokens/:token_id/revoke",
+      "/auth/tokens/:token_id/update"
+    ],
+    currentOwner: "flask",
+    candidateOwner: "fastify",
+    classification: "PARTIAL",
+    flaskSource: source.flaskAuth,
+    fastifySource: source.fastifyAuth,
+    auth: "Flask signed session cookie plus bearer/legacy token; Fastify prg32_ts_session plus bearer token",
+    persistence: "users, groups, sessions and token tables; write profiles use disposable databases",
+    sideEffects: "login/session/token/registration mutations when enabled",
+    firmwareRelevant: true,
+    frontendRelevant: true,
+    tests: ["backend/tests/auth.test.ts", "backend/tests/authorization.test.ts", "tests/test_api_contracts.py", "tests/test_security_m1_1.py"],
+    blockers: ["cookie formats are not portable", "production writer and re-login/session continuity decision are open"]
+  },
+  {
+    id: "federated-auth",
+    family: "generic OIDC/SAML provider login and callback",
+    methods: ["GET", "POST"],
+    paths: [
+      "/auth/oidc/login",
+      "/auth/oidc/callback",
+      "/auth/saml/login",
+      "/auth/saml/acs",
+      "/auth/saml/metadata",
+      "/api/auth/providers",
+      "/api/auth/oidc/:providerId/login",
+      "/api/auth/oidc/:providerId/callback",
+      "/api/auth/saml/:providerId/login",
+      "/api/auth/saml/:providerId/acs",
+      "/api/auth/saml/:providerId/metadata"
+    ],
+    currentOwner: "flask",
+    candidateOwner: "fastify",
+    classification: "PARTIAL",
+    flaskSource: source.flaskOidc,
+    fastifySource: `${source.fastifyOidc}; ${source.fastifySaml}`,
+    auth: "external generic provider; local callback state and resulting application session",
+    persistence: "provider configuration/secrets/identity mappings in isolated Fastify services; Flask adapter records legacy identity state",
+    sideEffects: "callback identity linking and session creation",
+    firmwareRelevant: false,
+    frontendRelevant: true,
+    tests: ["backend/tests/oidc.test.ts", "backend/tests/saml.test.ts", "backend/tests/federation-foundation.test.ts"],
+    blockers: ["browser acceptance and operational identity/session continuity are not verified", "external provider remains outside this repository"]
+  },
+  {
+    id: "publication",
+    family: "publication and submission intake",
+    methods: ["GET", "POST"],
+    paths: ["/publish", "/api/publish", "/api/publish/bundle"],
+    currentOwner: "flask",
+    candidateOwner: "fastify",
+    classification: "PARTIAL",
+    flaskSource: source.flaskApp,
+    fastifySource: source.fastifySubmission,
+    auth: "authenticated user for intake; Flask/editor/admin gates for publication",
+    persistence: "Flask pending directories and legacy DB; Fastify isolated staging and canonical publication tables",
+    sideEffects: "ZIP validation, staging files, submission rows; final publication is not operationally transferred",
+    firmwareRelevant: false,
+    frontendRelevant: true,
+    tests: ["backend/tests/submission.test.ts", "backend/tests/consistency.test.ts", "tests/test_m5_1_submission_contract.py"],
+    blockers: ["single-writer publication ownership", "live index/object promotion parity", "recovery evidence against operational data"]
+  },
+  {
+    id: "review",
+    family: "submission review and approval",
+    methods: ["GET", "POST"],
+    paths: [
+      "/api/submissions",
+      "/api/submissions/:submission_id",
+      "/api/submissions/:submission_id/verify",
+      "/api/submissions/:submission_id/reject",
+      "/editor/submissions",
+      "/editor/submissions/:submission_id",
+      "/editor/submissions/:submission_id/verify",
+      "/editor/submissions/:submission_id/reject"
+    ],
+    currentOwner: "flask",
+    candidateOwner: "fastify",
+    classification: "PARTIAL",
+    flaskSource: source.flaskReview,
+    fastifySource: source.fastifyReview,
+    auth: "authenticated owner for own submissions; editor/admin review boundary",
+    persistence: "submissions, review decisions and staged/private objects",
+    sideEffects: "review status and publication operation changes when writable",
+    firmwareRelevant: false,
+    frontendRelevant: true,
+    tests: ["backend/tests/review.test.ts", "backend/tests/consistency.test.ts", "tests/test_api_contracts.py", "tests/test_services.py"],
+    blockers: ["operational review database/filesystem ownership and crash recovery are not proven"]
+  },
+  {
+    id: "metrics",
+    family: "runs, samples, metrics exports",
+    methods: ["GET", "POST"],
+    paths: [
+      "/api/metrics",
+      "/api/metrics/batch",
+      "/api/runs",
+      "/api/runs/:run_id",
+      "/api/runs/:run_id/finish",
+      "/api/runs/:run_id/samples.csv",
+      "/api/runs/:run_id/report.md"
+    ],
+    currentOwner: "flask",
+    candidateOwner: "fastify",
+    classification: "PARTIAL",
+    flaskSource: source.flaskMetrics,
+    fastifySource: source.fastifyMetrics,
+    auth: "firmware-compatible ingestion plus owner/admin export/detail authorization",
+    persistence: "runs, samples and compatible telemetry tables; Fastify writes are isolated/config-gated",
+    sideEffects: "ingestion and run completion write SQLite; exports are read-only",
+    firmwareRelevant: true,
+    frontendRelevant: true,
+    tests: ["backend/tests/metrics.test.ts", "tests/test_api_contracts.py", "tests/test_security_m1_2a.py", "tests/test_services.py", "frontend/src/lib/api/metrics.test.ts"],
+    blockers: ["operational Fastify metrics write ownership and source/target reconciliation", "live firmware write parity is not claimed by read-only migration gates"]
+  },
+  {
+    id: "scores",
+    family: "score submission and leaderboard",
+    methods: ["GET", "POST"],
+    paths: ["/api/scores", "/scores"],
+    currentOwner: "flask",
+    candidateOwner: "fastify",
+    classification: "PARTIAL",
+    flaskSource: source.flaskScores,
+    fastifySource: source.fastifyScores,
+    auth: "firmware-compatible anonymous/authenticated submission policy plus public listing",
+    persistence: "scores table; Fastify write mode is isolated/config-gated",
+    sideEffects: "POST inserts score rows and rate-limit state",
+    firmwareRelevant: true,
+    frontendRelevant: true,
+    tests: ["backend/tests/scores.test.ts", "tests/test_api_contracts.py", "tests/test_services.py", "frontend/src/components/storefront/Scoreboard.test.tsx"],
+    blockers: ["operational write owner, rate-limit continuity and reconciliation remain open"]
+  },
+  {
+    id: "statistics",
+    family: "statistics",
+    methods: ["GET"],
+    paths: [
+      "/api/stats/downloads",
+      "/api/stats/downloads/:game_id",
+      "/api/stats/scores",
+      "/api/stats/runs",
+      "/stats"
+    ],
+    currentOwner: "flask",
+    candidateOwner: "fastify",
+    classification: "ISOLATED_READY",
+    flaskSource: source.flaskStats,
+    fastifySource: source.fastifyStats,
+    auth: "public aggregate reads; private details follow the source API policy",
+    persistence: "reads score/run/download telemetry",
+    sideEffects: "none in Fastify read-only service",
+    firmwareRelevant: false,
+    frontendRelevant: true,
+    tests: ["backend/tests/stats.test.ts", "tests/test_api_contracts.py", "tests/test_services.py", "frontend/src/components/storefront/StatisticsPage.test.tsx"],
+    blockers: ["public ownership still depends on telemetry write reconciliation"]
+  },
+  {
+    id: "administration",
+    family: "users, groups, roles, tokens, catalog, settings and assets",
+    methods: ["GET", "POST", "PATCH", "PUT", "DELETE"],
+    paths: [
+      "/admin/users",
+      "/admin/users/:user_id",
+      "/admin/users/:user_id/role",
+      "/admin/users/:user_id/groups",
+      "/admin/users/:user_id/delete",
+      "/admin/groups",
+      "/admin/groups/:group_id",
+      "/admin/groups/:group_id/delete",
+      "/admin/roles",
+      "/admin/cartridges",
+      "/admin/cartridges/:game_id/:version",
+      "/admin/cartridges/:game_id/:version/delete",
+      "/setup",
+      "/setup/logo",
+      "/setup/favicon",
+      "/api/admin/users",
+      "/api/admin/users/:userId",
+      "/api/admin/users/:userId/role",
+      "/api/admin/users/:userId/state",
+      "/api/admin/users/:userId/groups",
+      "/api/admin/users/:userId/delete",
+      "/api/admin/groups",
+      "/api/admin/groups/:groupId",
+      "/api/admin/groups/:groupId/delete",
+      "/api/admin/roles",
+      "/api/admin/tokens",
+      "/api/admin/tokens/:tokenId",
+      "/api/admin/cartridges",
+      "/api/admin/cartridges/:cartridgeId",
+      "/api/admin/settings",
+      "/api/assets/:asset",
+      "/api/assets/:asset/:filename"
+    ],
+    currentOwner: "flask",
+    candidateOwner: "fastify",
+    classification: "PARTIAL",
+    flaskSource: source.flaskApp,
+    fastifySource: `${source.fastifyAdmin}; ${source.fastifySettings}`,
+    auth: "admin/editor/group-specific authorization; CSRF/session or bearer depending on API",
+    persistence: "users/groups/settings/catalog and asset objects",
+    sideEffects: "administrative mutations and settings/assets writes",
+    firmwareRelevant: false,
+    frontendRelevant: true,
+    tests: ["backend/tests/admin.test.ts", "backend/tests/admin-catalog.test.ts", "backend/tests/settings.test.ts", "tests/test_services.py"],
+    blockers: ["shared operational database ownership", "HTML admin replacement and asset publication parity"]
+  },
+  {
+    id: "federation-admin",
+    family: "generic federation provider administration",
+    methods: ["GET", "POST", "PATCH"],
+    paths: [
+      "/api/auth/providers",
+      "/api/admin/federation/reauthenticate",
+      "/api/admin/federation/providers",
+      "/api/admin/federation/providers/:providerId",
+      "/api/admin/federation/providers/:providerId/status",
+      "/api/admin/federation/providers/:providerId/enable",
+      "/api/admin/federation/providers/:providerId/disable",
+      "/api/admin/federation/providers/:providerId/rotate-secret",
+      "/api/admin/federation/providers/:providerId/certificates",
+      "/api/admin/federation/providers/:providerId/transactions/revoke",
+      "/api/admin/federation/identities",
+      "/api/admin/federation/identities/:identityId/retire"
+    ],
+    currentOwner: "fastify",
+    candidateOwner: "fastify",
+    classification: "ISOLATED_READY",
+    fastifySource: source.fastifyFederation,
+    auth: "Fastify local session plus centralized authorization and reauthentication",
+    persistence: "provider, identity, certificate and transaction tables in isolated writer DB",
+    sideEffects: "provider/identity administration and secret rotation when writer enabled",
+    firmwareRelevant: false,
+    frontendRelevant: true,
+    tests: ["backend/tests/federation-admin.test.ts", "backend/tests/federation-lifecycle.test.ts", "frontend/src/lib/api/federation-admin.test.ts"],
+    blockers: ["not connected to operational public ownership", "external provider/browser acceptance remains separate"]
+  },
+  {
+    id: "backup-restore",
+    family: "administrative backup and restore",
+    methods: ["GET", "POST"],
+    paths: ["/admin/backup", "/admin/backup/download", "/admin/backup/restore"],
+    currentOwner: "flask",
+    candidateOwner: "fastify",
+    classification: "PARTIAL",
+    flaskSource: source.flaskApp,
+    fastifySource: source.fastifyBackup,
+    auth: "administrator only",
+    persistence: "SQLite and legacy/canonical filesystem depending on implementation",
+    sideEffects: "archive creation or restore mutation",
+    firmwareRelevant: false,
+    frontendRelevant: true,
+    tests: ["backend/tests/backup.test.ts", "backend/tests/storage-v2-backup.test.ts", "tests/test_services.py"],
+    blockers: ["v3 tooling is developer-only and disposable", "operational encryption/authenticity/retention and maintenance-window gates are open"]
+  },
+  {
+    id: "multiplayer",
+    family: "multiplayer status, discovery and WebSocket relay",
+    methods: ["GET", "WS"],
+    paths: ["/api/multiplayer/status", "/api/multiplayer"],
+    currentOwner: "flask",
+    candidateOwner: "fastify",
+    classification: "PARTIAL",
+    flaskSource: source.flaskMultiplayer,
+    fastifySource: source.fastifyMultiplayer,
+    auth: "optional bearer/token authentication with player-role gate when enabled",
+    persistence: "process-local room state; no SQLite authority",
+    sideEffects: "process-local peer/room state and broadcast messages",
+    firmwareRelevant: true,
+    frontendRelevant: false,
+    tests: ["backend/tests/multiplayer.test.ts", "tests/test_multiplayer_integration.py", "tests/test_services.py"],
+    blockers: ["Fastify relay is isolated and not public owner", "Traefik/WebSocket runtime and firmware acceptance are not verified"]
+  },
+  {
+    id: "health",
+    family: "service health and readiness",
+    methods: ["GET"],
+    paths: ["/health", "/ready"],
+    currentOwner: "fastify",
+    candidateOwner: "fastify",
+    classification: "READY",
+    fastifySource: source.fastifyApp,
+    auth: "public internal health endpoint",
+    persistence: "readiness checks configured Fastify database",
+    sideEffects: "none",
+    firmwareRelevant: false,
+    frontendRelevant: false,
+    tests: ["backend/tests/app.test.ts"],
+    blockers: []
+  },
+  {
+    id: "federation-test-routes",
+    family: "test-only federation lifecycle routes",
+    methods: ["GET", "POST"],
+    paths: [
+      "/_test/federation/providers/:providerId",
+      "/_test/federation/providers/:providerId/identity-ids",
+      "/_test/federation/providers/:providerId/state",
+      "/_test/federation/providers/:providerId/revoke-pending",
+      "/_test/federation/identities/:identityId/retire",
+      "/_test/federation/users/:userId/state"
+    ],
+    currentOwner: "fastify",
+    candidateOwner: "none",
+    classification: "READY",
+    fastifySource: "backend/src/federation/lifecycle-test-routes.ts",
+    auth: "test token and explicit feature flag only",
+    persistence: "isolated federation writer database",
+    sideEffects: "synthetic lifecycle mutations for tests",
+    firmwareRelevant: false,
+    frontendRelevant: false,
+    tests: ["backend/tests/federation-lifecycle.test.ts"],
+    blockers: ["must remain disabled in operational configuration"]
+  },
+  {
+    id: "mdns",
+    family: "mDNS registration and deregistration",
+    methods: ["SERVICE"],
+    paths: ["_prg32store._tcp.local"],
+    currentOwner: "flask",
+    candidateOwner: "fastify",
+    classification: "ISOLATED_READY",
+    flaskSource: "cartridge_store/mdns.py",
+    auth: "not applicable",
+    persistence: "process/network service advertisement",
+    sideEffects: "registers and deregisters service on process lifecycle",
+    firmwareRelevant: true,
+    frontendRelevant: false,
+    tests: ["tests/test_services.py", "backend/tests/discovery.test.ts"],
+    blockers: ["real LAN advertisement and public runtime acceptance are not verified", "preserve discovery ABI, port, instance name and failure-tolerant lifecycle"]
+  },
+  {
+    id: "storage-v2-public",
+    family: "canonical storage-v2 public API ownership",
+    methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
+    paths: ["/api/storage-v2/*"],
+    currentOwner: "none",
+    candidateOwner: "fastify",
+    classification: "MISSING",
+    fastifySource: source.fastifyStorage,
+    auth: "not registered",
+    persistence: "canonical SQLite/filesystem modules exist only as isolated tooling and services",
+    sideEffects: "none because no public route is registered",
+    firmwareRelevant: false,
+    frontendRelevant: false,
+    tests: ["backend/tests/storage-v2.test.ts", "backend/tests/storage-v2-backup.test.ts"],
+    blockers: ["public storage-v2 route activation is explicitly out of scope", "operational ownership must follow publication and parity gates"]
+  }
+];
+
+export interface ReadinessGate {
+  readonly id: string;
+  readonly classification: ReadinessClassification;
+  readonly evidence: readonly string[];
+  readonly decision: string;
+  readonly blockers: readonly string[];
+}
+
+export const READINESS_GATES: readonly ReadinessGate[] = [
+  {
+    id: "route-ownership",
+    classification: "PARTIAL",
+    evidence: ["source route registration inventory", "Fastify composition root", "Flask url_map disposable inspection"],
+    decision: "Keep Flask public owner until each contract family has a verified Fastify owner and route switch plan.",
+    blockers: ["catalog download telemetry", "publication/review", "firmware writes", "WebSocket", "mDNS"]
+  },
+  {
+    id: "canonical-storage-integration",
+    classification: "PARTIAL",
+    evidence: ["backend/src/storage-v2/", "M5.2d read-only parity", "M5.2e disposable backup/restore"],
+    decision: "Use canonical storage-v2 only after a quiesced source snapshot and one-writer operational gate.",
+    blockers: ["live Flask-to-canonical data reconciliation", "object/index ownership", "public route activation"]
+  },
+  {
+    id: "authentication-continuity",
+    classification: "PARTIAL",
+    evidence: ["Flask signed session cookie", "Fastify prg32_ts_session", "isolated auth/federation tests"],
+    decision: "Use controlled re-login for browser sessions; preserve bearer/API-token compatibility; do not translate Flask cookies.",
+    blockers: ["maintenance-window communication", "external identity mapping decision", "operational callback verification"]
+  },
+  {
+    id: "publication-review",
+    classification: "PARTIAL",
+    evidence: ["Fastify submission/review services", "storage-v2 publication tables", "M5.2e recovery checks"],
+    decision: "Fastify becomes writer only after publication operation recovery and review history are verified against the final snapshot.",
+    blockers: ["live promotion parity", "review ownership", "crash recovery rehearsal against final data"]
+  },
+  {
+    id: "firmware-writes",
+    classification: "PARTIAL",
+    evidence: ["Fastify score/metrics route modules", "M5.2d read-only parity report", "Python contract tests"],
+    decision: "Cut over score and metrics writes separately after firmware-compatible live write and reconciliation evidence.",
+    blockers: ["single writer", "telemetry/score reconciliation", "firmware endpoint verification"]
+  },
+  {
+    id: "multiplayer",
+    classification: "PARTIAL",
+    evidence: ["Fastify @fastify/websocket route", "Flask Flask-Sock route", "protocol unit tests"],
+    decision: "Switch WebSocket ownership only after external Traefik upgrade/runtime and reconnect behavior are verified.",
+    blockers: ["public routing", "firmware/live client acceptance", "ownership switch without dual relay"]
+  },
+  {
+    id: "mdns",
+    classification: "ISOLATED_READY",
+    evidence: ["cartridge_store/mdns.py", "backend/src/discovery/", "AGENTS.md canonical constants", "backend/tests/discovery.test.ts"],
+    decision: "Keep the Fastify failure-tolerant mDNS lifecycle disabled by default until a controlled runtime network test and ownership switch are approved.",
+    blockers: ["real LAN advertisement and deregistration", "public endpoint and network-interface acceptance"]
+  },
+  {
+    id: "backup-v3",
+    classification: "PARTIAL",
+    evidence: ["M5.2e storage-v2 backup writer/verifier", "disposable fault/adversarial suite"],
+    decision: "Keep v3 developer-only until encryption, key custody, authenticity, retention, monitoring and maintenance-window procedures are approved.",
+    blockers: ["encrypted operational archive policy", "key custody/authenticity", "retention and restore drill"]
+  },
+  {
+    id: "compose-routing",
+    classification: "ISOLATED_READY",
+    evidence: ["docker-compose.yml", "M5.2e read-only Compose inventory"],
+    decision: "Target one Fastify and one Next runtime on external Dream Traefik while preserving both hostnames and WebSocket paths.",
+    blockers: ["do not simplify until application ownership gates pass", "no Compose change in M5.2f"]
+  },
+  {
+    id: "flask-retirement",
+    classification: "LEGACY_DEPENDENT",
+    evidence: ["current Flask route map", "current Compose profiles", "M5.2d/e reports"],
+    decision: "Retire Flask only after all public routes, writes, mDNS and rollback gates are closed.",
+    blockers: ["all legacy-dependent route families", "rollback window", "operational approval"]
+  }
+];
+
+export const FLASK_RETIREMENT_MATRIX = [
+  { component: "cartridge_store/app.py", action: "REMOVE", dependency: "all HTML/catalog/admin/backup route ownership moved and rollback window closed" },
+  { component: "cartridge_store/auth/", action: "ARCHIVE", dependency: "local and generic federation identity continuity accepted" },
+  { component: "cartridge_store/metrics.py", action: "REMOVE", dependency: "Fastify firmware metrics writes reconciled" },
+  { component: "cartridge_store/scores.py", action: "REMOVE", dependency: "Fastify score writes reconciled" },
+  { component: "cartridge_store/multiplayer.py", action: "REMOVE", dependency: "Fastify WebSocket public ownership and mDNS/runtime acceptance" },
+  { component: "cartridge_store/mdns.py", action: "ARCHIVE", dependency: "Fastify mDNS lifecycle verified" },
+  { component: "templates/ and static/", action: "ARCHIVE", dependency: "Next.js storefront and admin UI parity accepted" },
+  { component: "Dockerfile and prod cartridge-store service", action: "REMOVE", dependency: "Fastify/Next production topology and rollback window" },
+  { component: "legacy SQLite/filesystem data", action: "RETAIN", dependency: "retained through rollback window and source integrity recheck" },
+  { component: "external Traefik and generic provider", action: "RETAIN", dependency: "external infrastructure remains managed outside this repository" },
+  { component: "legacy backup/restore behavior", action: "UNDECIDED", dependency: "operational backup-v3 encryption/authenticity and restore runbook" }
+] as const;
+
+export const HANDOVER_PROTOCOL = [
+  "freeze public writes and establish a maintenance window",
+  "verify the unchanged Flask source snapshot and complete legacy inventory",
+  "create and independently verify canonical migration target",
+  "create and verify backup-v3 before any ownership switch",
+  "start exactly one canonical writer on the verified target",
+  "verify read, publication, auth, telemetry, score, WebSocket and mDNS gates",
+  "switch routing and record canonical ownership",
+  "monitor the rollback window without starting a second writer",
+  "on abort, stop/quiesce canonical writer before restoring legacy ownership",
+  "reconcile post-switch writes before any post-cutover rollback decision"
+] as const;
+
+export const OPERATIONAL_BLOCKERS = [
+  "Fastify is not the proven operational owner of every public route family.",
+  "Flask and Fastify session cookies are incompatible; controlled browser re-login is required.",
+  "Publication/review and catalog download telemetry still have legacy operational side effects.",
+  "Firmware score/metrics writes have not completed an operational single-writer gate.",
+  "Fastify WebSocket and mDNS implementations are isolated/not verified through external runtime routing.",
+  "Backup-v3 has no approved operational encryption, authenticity, key custody or retention policy.",
+  "Compose simplification is a future action and remains intentionally unimplemented."
+] as const;

@@ -98,7 +98,17 @@ function operationFailure(reply: FastifyReply, request: FastifyRequest, error: u
     return json(reply, { ok: false, error: "invalid settings request", code: error.code }, error.statusCode);
   }
   if (error instanceof SettingsError) {
-    return json(reply, { ok: false, error: error.message, code: error.code }, error.statusCode);
+    const publicErrors: Record<string, string> = {
+      settings_conflict: "settings update conflicted with a newer version",
+      settings_invalid_value: "invalid settings request",
+      smtp_invalid_configuration: "SMTP configuration is invalid",
+      secret_storage_unavailable: "secret storage is unavailable",
+      smtp_unavailable: "SMTP delivery is unavailable",
+      smtp_test_recipient_invalid: "test recipient is invalid",
+      asset_not_found: "asset not found",
+      asset_unavailable: "asset unavailable"
+    };
+    return json(reply, { ok: false, error: publicErrors[error.code] ?? "settings operation failed", code: error.code }, error.statusCode);
   }
   return json(reply, { ok: false, error: "settings operation failed", code: "settings_operation_failed" }, 500);
 }
@@ -181,12 +191,36 @@ export function registerSettingsRoutes(app: FastifyInstance, options: SettingsRo
 
   app.patch("/api/admin/settings", async (request, reply) => {
     if (!options.auth.isWriteEnabled()) return json(reply, { ok: false, error: "settings write isolation is unavailable", code: "settings_unavailable" }, 503);
-    if (!requireAdmin(request, reply, options, true)) return reply;
     try {
-      return json(reply, options.settings.update(request.body));
+      const current = requireAdmin(request, reply, options, true);
+      if (!current) return reply;
+      if (current.principal.id === null) return adminFailure(reply, 401);
+      return json(reply, options.settings.update(request.body, { actorUserId: current.principal.id, requestId: request.id }));
     } catch (error) {
       return operationFailure(reply, request, error);
     }
+  });
+
+  app.post("/api/admin/settings/smtp/test-connection", async (request, reply) => {
+    const current = requireAdmin(request, reply, options, true);
+    if (!current) return reply;
+    try {
+      await options.settings.testSmtpConnection();
+      return json(reply, { ok: true, result: "smtp_connection_ok" });
+    } catch (error) { return operationFailure(reply, request, error); }
+  });
+
+  app.post("/api/admin/settings/smtp/test-message", async (request, reply) => {
+    const current = requireAdmin(request, reply, options, true);
+    if (!current) return reply;
+    try {
+      const body = request.body;
+      if (body === null || typeof body !== "object" || Array.isArray(body) || typeof (body as Record<string, unknown>).to !== "string") {
+        throw new SettingsError("smtp_test_recipient_invalid", 400, "test recipient is invalid");
+      }
+      await options.settings.sendSmtpTest((body as Record<string, unknown>).to as string);
+      return json(reply, { ok: true, result: "smtp_message_accepted" });
+    } catch (error) { return operationFailure(reply, request, error); }
   });
 
   for (const kind of ["logo", "favicon"] as const) {

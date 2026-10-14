@@ -1,5 +1,7 @@
 import type { BackendConfig } from "../config/env.js";
+import type Database from "better-sqlite3";
 import { CatalogError, fileSha256, normalizeArchitecture, ReadonlyCatalog, safeGameId, safeVersion } from "../catalog/catalog.js";
+import type { ResolvedVariant } from "../catalog/catalog.js";
 import { REVIEW_EDITABLE_METADATA_FIELDS } from "../consistency/publication.js";
 import type { PublicationConsistencyService } from "../consistency/publication.js";
 import { PublicationConsistencyError } from "../consistency/errors.js";
@@ -54,6 +56,18 @@ export interface AdminCartridgeView {
   readonly updated_at: unknown;
   readonly publication_state: "published";
   readonly artifact_state: "available" | "inconsistent" | "unavailable";
+  readonly moderation_action?: "visible" | "hidden" | "unpublished";
+  readonly moderation_reason?: string;
+  readonly moderation_updated_at?: unknown;
+}
+
+interface AdminCatalogRead {
+  listGames(query?: string): Record<string, unknown>[];
+  moderationGames?(): Record<string, unknown>[];
+  publicGame(gameId: string, version?: string): Record<string, unknown>;
+  moderationGame?(gameId: string, version?: string): Record<string, unknown>;
+  resolveVariant(gameId: string, version?: string, architecture?: string): ResolvedVariant;
+  resolveVariantForAdmin?(gameId: string, version?: string, architecture?: string): ResolvedVariant;
 }
 
 function object(value: unknown, message: string): Record<string, unknown> {
@@ -132,7 +146,7 @@ function catalogReadFailure(error: unknown): AdminError {
   return new AdminError("catalog_operation_failed", 500, "catalog operation failed");
 }
 
-function projection(catalog: ReadonlyCatalog, game: Record<string, unknown>): AdminCartridgeView {
+function projection(catalog: AdminCatalogRead, game: Record<string, unknown>): AdminCartridgeView {
   const id = typeof game.id === "string" ? game.id : "";
   const selectedVersion = typeof game.selected_version === "string" ? game.selected_version : "";
   const rawVariants = game.variants;
@@ -146,7 +160,7 @@ function projection(catalog: ReadonlyCatalog, game: Record<string, unknown>): Ad
     const size = typeof variant.size === "number" ? variant.size : 0;
     const sha256 = typeof variant.sha256 === "string" ? variant.sha256 : "";
     try {
-      const resolved = catalog.resolveVariant(id, selectedVersion, architecture);
+      const resolved = (catalog.resolveVariantForAdmin ?? catalog.resolveVariant).call(catalog, id, selectedVersion, architecture);
       if (!sha256 || fileSha256(resolved.filePath) !== sha256) artifactState = "inconsistent";
     } catch {
       artifactState = "unavailable";
@@ -162,6 +176,7 @@ function projection(catalog: ReadonlyCatalog, game: Record<string, unknown>): Ad
       updated_at: variant.updated_at ?? null
     };
   }
+  const moderationAction = game.moderation_action === "hidden" || game.moderation_action === "unpublished" ? game.moderation_action : "visible";
   return {
     id,
     title: typeof game.title === "string" ? game.title : id,
@@ -178,19 +193,24 @@ function projection(catalog: ReadonlyCatalog, game: Record<string, unknown>): Ad
     publisher: typeof game.publisher === "string" ? game.publisher : "",
     updated_at: game.updated_at ?? null,
     publication_state: "published",
-    artifact_state: artifactState
+    artifact_state: artifactState,
+    moderation_action: moderationAction,
+    moderation_reason: typeof game.moderation_reason === "string" ? game.moderation_reason : "",
+    moderation_updated_at: game.moderation_updated_at ?? null
   };
 }
 
 export class CatalogAdminService {
-  private readonly catalog: ReadonlyCatalog;
+  private readonly catalog: AdminCatalogRead;
   private readonly publication: PublicationConsistencyService | null;
   private readonly audit: AdminAuditLog;
+  private readonly moderationDatabase: Database.Database | null;
 
-  constructor(options: { readonly config: BackendConfig; readonly publication: PublicationConsistencyService | null; readonly audit?: AdminAuditLog }) {
-    this.catalog = new ReadonlyCatalog(options.config.storeDataDirectory);
+  constructor(options: { readonly config: BackendConfig; readonly publication: PublicationConsistencyService | null; readonly audit?: AdminAuditLog; readonly catalog?: AdminCatalogRead; readonly moderationDatabase?: Database.Database | null }) {
+    this.catalog = options.catalog ?? new ReadonlyCatalog(options.config.storeDataDirectory);
     this.publication = options.publication;
     this.audit = options.audit ?? new AdminAuditLog(options.config);
+    this.moderationDatabase = options.moderationDatabase ?? null;
   }
 
   recordRejected(actorUserId: number, targetIdValue: string, action: string, requestId: string): void {
@@ -230,6 +250,34 @@ export class CatalogAdminService {
     catch (error) { throw catalogReadFailure(error); }
   }
 
+  moderationList(options: CatalogListOptions): { readonly cartridges: readonly AdminCartridgeView[]; readonly page: number; readonly limit: number; readonly total: number } {
+    const limit = Math.min(Math.max(options.limit, 1), 100);
+    const page = Math.max(options.page, 1);
+    const query = options.query?.trim().toLowerCase();
+    if (query !== undefined && query.length > MAX_QUERY_LENGTH) throw new AdminError("invalid_filter", 400, "q is invalid");
+    const source = this.catalog.moderationGames?.bind(this.catalog) ?? this.catalog.listGames.bind(this.catalog);
+    const all = source().filter((game) => {
+      const values = [game.id, game.title, game.summary, ...(Array.isArray(game.tags) ? game.tags.map(String) : [])].map(String).join(" ").toLowerCase();
+      if (query && !values.includes(query)) return false;
+      if (options.version !== undefined && !(Array.isArray(game.versions) && game.versions.includes(adminVersion(options.version)))) return false;
+      if (options.architecture !== undefined && !(Array.isArray(game.architectures) && game.architectures.includes(adminArchitecture(options.architecture)))) return false;
+      return true;
+    }).sort((left, right) => `${String(left.title).toLowerCase()}\u0000${String(left.id)}`.localeCompare(`${String(right.title).toLowerCase()}\u0000${String(right.id)}`));
+    const total = all.length;
+    const start = (page - 1) * limit;
+    try { return { cartridges: all.slice(start, start + limit).map((game) => projection(this.catalog, game)), page, limit, total }; }
+    catch (error) { throw catalogReadFailure(error); }
+  }
+
+  moderationDetail(gameId: string, version?: string): AdminCartridgeView {
+    const safeId = adminGameId(gameId);
+    const safeSelectedVersion = version === undefined ? undefined : adminVersion(version);
+    try {
+      const game = this.catalog.moderationGame?.(safeId, safeSelectedVersion) ?? this.catalog.publicGame(safeId, safeSelectedVersion);
+      return projection(this.catalog, game);
+    } catch (error) { throw catalogReadFailure(error); }
+  }
+
   update(options: CatalogMutationOptions, context: AdminMutationContext): AdminCartridgeView {
     return this.mutate("catalog.metadata.update", options, context, () => {
       if (!this.publication) throw new AdminError("catalog_write_unavailable", 503, "catalog writes are unavailable");
@@ -248,6 +296,20 @@ export class CatalogAdminService {
       const architecture = options.architecture === undefined ? undefined : adminArchitecture(options.architecture);
       this.publication.mutateCatalog({ gameId, version, ...(architecture === undefined ? {} : { architecture }) });
       return { id: gameId, version, architecture: architecture ?? null, deleted: true as const };
+    });
+  }
+
+  moderate(options: { readonly gameId: string; readonly version: string; readonly action: "hidden" | "unpublished" | "restored"; readonly reason?: string }, context: AdminMutationContext): { readonly id: string; readonly version: string; readonly action: string; readonly reason: string } {
+    if (!this.moderationDatabase) throw new AdminError("catalog_moderation_unavailable", 503, "catalog moderation is unavailable");
+    const gameId = adminGameId(options.gameId);
+    const version = adminVersion(options.version);
+    const reason = options.reason?.trim() ?? "";
+    if (reason.length > 500) throw new AdminError("catalog_moderation_invalid", 400, "moderation reason is invalid");
+    return this.mutate(`catalog.moderation.${options.action}`, { gameId, version }, context, () => {
+      const database = this.moderationDatabase as Database.Database;
+      database.prepare("UPDATE catalog_moderation SET active = 0 WHERE cartridge_id = ? AND version = ? AND active = 1").run(gameId, version);
+      database.prepare("INSERT INTO catalog_moderation(cartridge_id, version, action, reason, actor_user_id, created_at, active) VALUES (?, ?, ?, ?, ?, ?, 1)").run(gameId, version, options.action, reason, context.actorUserId, new Date().toISOString());
+      return { id: gameId, version, action: options.action, reason };
     });
   }
 

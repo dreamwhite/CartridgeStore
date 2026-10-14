@@ -65,6 +65,17 @@ function bounded(value: string | null | undefined, max: number): string | null {
   return value;
 }
 
+function profileAttribute(profile: Profile, names: readonly string[], max: number): string | null {
+  const values = profile as unknown as Record<string, unknown>;
+  for (const name of names) {
+    const candidate = values[name];
+    const value = Array.isArray(candidate) ? candidate.find((item): item is string => typeof item === "string") : candidate;
+    const result = bounded(typeof value === "string" ? value : null, max);
+    if (result) return result;
+  }
+  return null;
+}
+
 function safeReturnPath(value: string | null): string {
   const candidate = value ?? "/";
   if (candidate.length > 512 || !candidate.startsWith("/") || candidate.startsWith("//") || candidate.includes("\\") || hasControlCharacter(candidate)) {
@@ -299,11 +310,25 @@ export class SamlService {
       if (error instanceof FederationTransactionError && error.code === "federation_transaction_expired") throw new SamlError("saml_transaction_expired", 400, "SAML transaction expired");
       throw new SamlError("saml_transaction_invalid", 400, "SAML transaction is invalid");
     }
-    const externalIdentity = ValidatedExternalIdentity.fromProtocolAdapter({ protocol: "saml", providerId: provider.providerId, issuer: profile.issuer, subject: profile.nameID, authenticatedAt: new Date().toISOString() });
+    const email = profileAttribute(profile, ["email", "mail", "http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress", "urn:oid:0.9.2342.19200300.100.1.3"], 254);
+    const username = profileAttribute(profile, ["preferred_username", "uid", "userPrincipalName", "email"], 80);
+    const displayName = profileAttribute(profile, ["displayName", "name"], 160);
+    const externalIdentity = ValidatedExternalIdentity.fromProtocolAdapter({
+      protocol: "saml",
+      providerId: provider.providerId,
+      issuer: profile.issuer,
+      subject: profile.nameID,
+      ...(email ? { email } : {}),
+      ...(username ? { username } : {}),
+      ...(displayName ? { displayName } : {}),
+      authenticatedAt: new Date().toISOString()
+    });
     let resolved;
     try { resolved = this.identities.resolve(externalIdentity); }
     catch (error) {
       if (error instanceof FederationIdentityError && error.code === "federation_identity_unknown") throw new SamlError("saml_identity_link_required", 401, "SAML identity is not linked");
+      if (error instanceof FederationIdentityError && error.code === "federation_identity_email_required") throw new SamlError("saml_identity_email_required", 401, "SAML identity did not provide a usable email");
+      if (error instanceof FederationIdentityError && error.code === "federation_identity_conflict") throw new SamlError("saml_identity_conflict", 409, "SAML identity requires an explicit account link");
       if (error instanceof FederationIdentityError && error.code === "federation_account_disabled") throw new SamlError("saml_account_disabled", 403, "SAML authentication is unavailable");
       throw error;
     }

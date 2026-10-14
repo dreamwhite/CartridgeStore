@@ -1,7 +1,7 @@
 import type Database from "better-sqlite3";
 
 import { markRevokedBefore } from "../auth/revocation.js";
-import { hasAccountStateColumn, invalidateAccountAccess } from "../auth/account-state.js";
+import { accountStatus, hasAccountStateColumn, hasAccountStatusColumn, invalidateAccountAccess, type AccountStatus } from "../auth/account-state.js";
 import { generateWerkzeugScryptHash, validatePassword } from "../auth/service.js";
 import { ROLE_LEVELS, normalizeRole, type Role } from "../auth/principal.js";
 import type { BackendConfig } from "../config/env.js";
@@ -45,6 +45,10 @@ export interface UserView {
   readonly last_login: string | null;
   readonly groups: readonly GroupView[];
   readonly disabled_at: string | null;
+  readonly account_status: AccountStatus;
+  readonly status_reason: string | null;
+  readonly status_changed_at: string | null;
+  readonly status_expires_at: string | null;
 }
 
 export interface GroupView {
@@ -156,15 +160,18 @@ export class AdminIdentityService {
 
   private user(database: Database.Database, userId: number): UserView {
     const disabledColumn = hasAccountStateColumn(database) ? "users.disabled_at" : "NULL AS disabled_at";
+    const statusColumns = hasAccountStatusColumn(database)
+      ? "users.account_status, users.status_reason, users.status_changed_at, users.status_expires_at"
+      : "NULL AS account_status, NULL AS status_reason, NULL AS status_changed_at, NULL AS status_expires_at";
     const row = database.prepare(
-      `SELECT id, username, email, role, external_provider, created_at, last_login, ${disabledColumn},
+      `SELECT id, username, email, role, external_provider, created_at, last_login, ${disabledColumn}, ${statusColumns},
               (SELECT json_group_array(json_object('id', groups.id, 'name', groups.name, 'created_at', groups.created_at))
                  FROM user_groups JOIN groups ON groups.id = user_groups.group_id
                 WHERE user_groups.user_id = users.id) AS groups_json
          FROM users WHERE id = ?`
     ).get(userId) as {
       id: number; username: string; email: string; role: string; external_provider: string | null;
-      created_at: string; last_login: string | null; groups_json: string | null; disabled_at: string | null
+      created_at: string; last_login: string | null; groups_json: string | null; disabled_at: string | null; account_status?: string | null; status_reason?: string | null; status_changed_at?: string | null; status_expires_at?: string | null
     } | undefined;
     if (!row) throw new AdminError("user_not_found", 404, "user not found");
     let role: Role;
@@ -178,7 +185,11 @@ export class AdminIdentityService {
       created_at: row.created_at,
       last_login: row.last_login,
       groups: jsonGroups(row.groups_json ?? "[]")
-      ,disabled_at: row.disabled_at
+      ,disabled_at: row.disabled_at,
+      account_status: accountStatus(database, row.id),
+      status_reason: row.status_reason ?? null,
+      status_changed_at: row.status_changed_at ?? null,
+      status_expires_at: row.status_expires_at ?? null
     };
   }
 
@@ -227,25 +238,29 @@ export class AdminIdentityService {
     const where = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
     const database = this.database;
     const disabledColumn = hasAccountStateColumn(database) ? "users.disabled_at" : "NULL AS disabled_at";
+    const statusColumns = hasAccountStatusColumn(database)
+      ? "users.account_status, users.status_reason, users.status_changed_at, users.status_expires_at"
+      : "NULL AS account_status, NULL AS status_reason, NULL AS status_changed_at, NULL AS status_expires_at";
     const total = Number((database.prepare(`SELECT COUNT(*) AS count FROM users ${where}`).get(...values) as { count: number }).count);
     const rows = database.prepare(
-      `SELECT users.id, users.username, users.email, users.role, users.external_provider, users.created_at, users.last_login, ${disabledColumn},
+      `SELECT users.id, users.username, users.email, users.role, users.external_provider, users.created_at, users.last_login, ${disabledColumn}, ${statusColumns},
               (SELECT json_group_array(json_object('id', groups.id, 'name', groups.name, 'created_at', groups.created_at))
                  FROM user_groups JOIN groups ON groups.id = user_groups.group_id
                 WHERE user_groups.user_id = users.id) AS groups_json
          FROM users ${where} ORDER BY users.created_at ASC, users.id ASC LIMIT ? OFFSET ?`
     ).all(...values, limit, (page - 1) * limit) as Array<{
       id: number; username: string; email: string; role: string; external_provider: string | null;
-      created_at: string; last_login: string | null; groups_json: string | null; disabled_at: string | null
+      created_at: string; last_login: string | null; groups_json: string | null; disabled_at: string | null; account_status?: string | null; status_reason?: string | null; status_changed_at?: string | null; status_expires_at?: string | null
     }>;
     const users = rows.map((row) => this.userFromRow(row));
     return { users, page, limit, total };
   }
 
-  private userFromRow(row: { id: number; username: string; email: string; role: string; external_provider: string | null; created_at: string; last_login: string | null; groups_json: string | null; disabled_at: string | null }): UserView {
+  private userFromRow(row: { id: number; username: string; email: string; role: string; external_provider: string | null; created_at: string; last_login: string | null; groups_json: string | null; disabled_at: string | null; account_status?: string | null; status_reason?: string | null; status_changed_at?: string | null; status_expires_at?: string | null }): UserView {
     let role: Role;
     try { role = normalizeRole(row.role); } catch { throw new AdminError("admin_identity_inconsistent", 503, "stored user role is invalid"); }
-    return { id: row.id, username: row.username, email: row.email, role, external_provider: row.external_provider, created_at: row.created_at, last_login: row.last_login, groups: jsonGroups(row.groups_json ?? "[]"), disabled_at: row.disabled_at };
+    const status = row.disabled_at !== null ? "disabled" : (row.account_status === "suspended" || row.account_status === "banned" ? row.account_status : "active");
+    return { id: row.id, username: row.username, email: row.email, role, external_provider: row.external_provider, created_at: row.created_at, last_login: row.last_login, groups: jsonGroups(row.groups_json ?? "[]"), disabled_at: row.disabled_at, account_status: status, status_reason: row.status_reason ?? null, status_changed_at: row.status_changed_at ?? null, status_expires_at: row.status_expires_at ?? null };
   }
 
   getUser(userId: number): UserView { return this.user(this.database, positiveId(userId, "user_id")); }
@@ -331,6 +346,34 @@ export class AdminIdentityService {
       const next = disabledValue ? new Date().toISOString() : null;
       database.prepare("UPDATE users SET disabled_at = ? WHERE id = ?").run(next, id);
       if (disabledValue) invalidateAccountAccess(database, id);
+      return this.user(database, id);
+    });
+  }
+
+  setStatus(userId: number, statusValue: unknown, reasonValue: unknown, expiresValue: unknown, context: AdminMutationContext): UserView {
+    if (statusValue !== "active" && statusValue !== "suspended" && statusValue !== "banned") {
+      throw new AdminError("invalid_account_status", 400, "status is invalid");
+    }
+    const status = statusValue;
+    const reason = reasonValue === undefined ? "" : typeof reasonValue === "string" ? reasonValue.trim() : (() => { throw new AdminError("invalid_status_reason", 400, "reason is invalid"); })();
+    if (reason.length > 500) throw new AdminError("invalid_status_reason", 400, "reason is invalid");
+    const expiresAt = expiresValue === undefined || expiresValue === null || expiresValue === ""
+      ? null
+      : typeof expiresValue === "string" && !Number.isNaN(Date.parse(expiresValue)) ? new Date(expiresValue).toISOString() : (() => { throw new AdminError("invalid_status_expiry", 400, "expires_at is invalid"); })();
+    const id = positiveId(userId, "user_id");
+    return this.mutate(context, `user.account.${status}`, "user", String(id), (database) => {
+      if (!hasAccountStatusColumn(database)) throw new AdminError("account_status_unavailable", 503, "account status is unavailable");
+      this.ensureEditors(database);
+      const current = this.user(database, id);
+      if (id === context.actorUserId && status !== "active") throw new AdminError("self_status_change_forbidden", 409, "administrators cannot suspend or ban themselves");
+      if (current.role === "admin" && status !== "active" && current.account_status === "active") {
+        const count = Number((database.prepare("SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND disabled_at IS NULL AND account_status = 'active'").get() as { count: number }).count);
+        if (count <= 1) throw new AdminError("final_administrator_required", 409, "at least one active administrator must remain");
+      }
+      const now = new Date().toISOString();
+      database.prepare("UPDATE users SET account_status = ?, status_reason = ?, status_actor_user_id = ?, status_changed_at = ?, status_expires_at = ?, disabled_at = CASE WHEN ? = 'active' THEN NULL ELSE disabled_at END WHERE id = ?")
+        .run(status, reason || null, context.actorUserId, now, expiresAt, status, id);
+      if (status !== "active") invalidateAccountAccess(database, id);
       return this.user(database, id);
     });
   }
@@ -423,6 +466,15 @@ export class AdminIdentityService {
     }));
   }
 
+  listAudit(limitValue = 100): { readonly events: readonly Record<string, unknown>[]; readonly limit: number } {
+    const limit = Math.min(Math.max(Math.trunc(limitValue), 1), 200);
+    const database = this.database;
+    const hasTable = Boolean(database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'admin_audit_events'").get());
+    if (!hasTable) return { events: [], limit };
+    const rows = database.prepare("SELECT event_id, timestamp, actor_user_id, target_type, target_id, action, outcome, summary_json, request_id FROM admin_audit_events ORDER BY timestamp DESC, event_id DESC LIMIT ?").all(limit) as Array<{ event_id: string; timestamp: string; actor_user_id: number | null; target_type: string; target_id: string; action: string; outcome: string; summary_json: string; request_id: string }>;
+    return { limit, events: rows.map((row) => ({ event_id: row.event_id, timestamp: row.timestamp, actor_user_id: row.actor_user_id, target_type: row.target_type, target_id: row.target_id, action: row.action, outcome: row.outcome, summary: safeAuditSummary(row.summary_json), request_id: row.request_id })) };
+  }
+
   private group(database: Database.Database, groupId: number): GroupView {
     const row = database.prepare(
       `SELECT groups.id, groups.name, groups.created_at, COUNT(user_groups.user_id) AS user_count
@@ -445,4 +497,11 @@ export class AdminIdentityService {
     const insert = database.prepare("INSERT INTO user_groups(user_id, group_id) VALUES (?, ?)");
     for (const groupId of groupIds) insert.run(userId, groupId);
   }
+}
+
+function safeAuditSummary(value: string): Record<string, unknown> {
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
+  } catch { return {}; }
 }

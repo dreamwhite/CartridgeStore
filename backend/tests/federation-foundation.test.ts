@@ -17,7 +17,7 @@ function database(): Database.Database {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "prg32-federation-foundation-"));
   roots.push(root);
   const db = new Database(path.join(root, "auth.sqlite"));
-  db.exec("PRAGMA foreign_keys = ON; CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, email TEXT NOT NULL UNIQUE, password_hash TEXT, role TEXT NOT NULL DEFAULT 'user', external_provider TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), last_login TEXT); CREATE TABLE api_tokens (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, token_hash TEXT NOT NULL UNIQUE, label TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), last_used TEXT); CREATE TABLE groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE); CREATE TABLE user_groups (user_id INTEGER NOT NULL, group_id INTEGER NOT NULL, PRIMARY KEY(user_id, group_id)); CREATE TABLE registration_tokens (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, used_at TEXT); CREATE TABLE store_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO users(username,email,password_hash,role) VALUES ('alice','alice@example.test','local-hash','user'); INSERT INTO users(username,email,password_hash,role) VALUES ('admin','admin@example.test','local-hash','admin');");
+  db.exec("PRAGMA foreign_keys = ON; CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE, email TEXT NOT NULL UNIQUE, password_hash TEXT, role TEXT NOT NULL DEFAULT 'user', external_id TEXT, external_provider TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), last_login TEXT); CREATE TABLE api_tokens (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE, token_hash TEXT NOT NULL UNIQUE, label TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')), last_used TEXT); CREATE TABLE groups (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE); CREATE TABLE user_groups (user_id INTEGER NOT NULL, group_id INTEGER NOT NULL, PRIMARY KEY(user_id, group_id)); CREATE TABLE registration_tokens (id INTEGER PRIMARY KEY AUTOINCREMENT, email TEXT NOT NULL, token_hash TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, expires_at TEXT NOT NULL, used_at TEXT); CREATE TABLE store_settings (key TEXT PRIMARY KEY, value TEXT NOT NULL); INSERT INTO users(username,email,password_hash,role) VALUES ('alice','alice@example.test','local-hash','user'); INSERT INTO users(username,email,password_hash,role) VALUES ('admin','admin@example.test','local-hash','admin');");
   return db;
 }
 
@@ -66,6 +66,20 @@ describe("M6.3d.2h.2 federated identity foundation", () => {
       expect(() => service.link(identity("alice"), 1, auth)).toThrowError(/reserved/);
       db.prepare("UPDATE users SET disabled_at = datetime('now') WHERE id = 1").run();
       expect(() => service.resolve(identity("alice"))).toThrowError(/not linked|disabled/);
+    } finally { db.close(); }
+  });
+
+  it("migrates an unambiguous historical external identity without using email matching", () => {
+    const db = database();
+    try {
+      applyFederationMigrations(db);
+      db.prepare("UPDATE users SET external_provider = ?, external_id = ? WHERE id = 1").run("school", "legacy-subject");
+      const providers = new FederationProviderService(db);
+      providers.create({ providerId: "school", protocol: "oidc", displayName: "School IdP", issuer: "https://id.example.test" });
+      const service = new FederationIdentityService(db, providers);
+      expect(service.migrateLegacyMappings()).toEqual({ migrated: 1, alreadyMapped: 0, skipped: 0 });
+      expect(service.migrateLegacyMappings()).toEqual({ migrated: 0, alreadyMapped: 1, skipped: 0 });
+      expect(db.prepare("SELECT user_id, provider_id, issuer, subject FROM user_external_identities").get()).toEqual({ user_id: 1, provider_id: "school", issuer: "https://id.example.test/", subject: "legacy-subject" });
     } finally { db.close(); }
   });
 

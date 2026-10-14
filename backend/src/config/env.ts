@@ -1,16 +1,24 @@
 import path from "node:path";
 
 import { parseLegacyConfiguredUsers, type LegacyConfiguredUser } from "../auth/tokens.js";
+import { CANONICAL_DISPOSABLE_READ_MODE, CANONICAL_OPERATIONAL_READ_MODE, CANONICAL_OPERATIONAL_WORKFLOW_MODE, CANONICAL_READ_AUTHORIZATION, CANONICAL_WRITE_AUTHORIZATION, CANONICAL_WORKFLOW_MODE, LEGACY_READ_MODE, type CatalogReadMode, type CanonicalWorkflowMode } from "../storage-v2/read-mode.js";
+import { CANDIDATE_RUNTIME_AUTHORIZATION, CANDIDATE_RUNTIME_MODE, type CandidateRuntimeMode } from "../runtime/candidate.js";
 
 export interface BackendConfig {
   readonly host: string;
   readonly port: number;
   readonly logLevel: string;
+  readonly trustProxy: boolean;
   readonly databasePath: string;
   readonly storeDataDirectory: string;
   readonly storePortOverride: string | undefined;
   readonly storeName: string;
   readonly storeVersion: string;
+  readonly mdnsEnabled: boolean;
+  readonly mdnsName: string;
+  readonly mdnsHost: string | undefined;
+  readonly mdnsPort: number;
+  readonly mdnsInterface: string;
   readonly busyTimeoutMs: number;
   readonly multiplayerMaxPeers: number;
   readonly legacyConfiguredUsers: readonly LegacyConfiguredUser[];
@@ -21,13 +29,22 @@ export interface BackendConfig {
   readonly authSessionSecret: string | undefined;
   readonly authCookieSecure: boolean;
   readonly authCookieSameSite: "lax" | "strict" | "none";
+  readonly authCookieDomain: string | undefined;
   readonly authSessionLifetimeSeconds: number;
+  readonly federationAutoProvision: boolean;
   readonly authBootstrapToken: string | undefined;
   readonly federationLifecycleTestToken: string | undefined;
   readonly federationLifecycleTestEnabled: boolean;
   readonly authRecentReauthSeconds: number;
   readonly authRateLimitMax: number;
   readonly authRateLimitWindowSeconds: number;
+  readonly emailTransport: "disabled" | "memory" | "smtp";
+  readonly emailFrom: string;
+  readonly emailPublicOrigin: string | undefined;
+  readonly emailSmtpHost: string | undefined;
+  readonly emailSmtpPort: number;
+  readonly emailSmtpUser: string | undefined;
+  readonly emailSmtpPassword: string | undefined;
   readonly oidcPublicOrigin: string | undefined;
   readonly federationPublicOrigin: string | undefined;
   readonly frontendPublicOrigin: string | undefined;
@@ -74,6 +91,13 @@ export interface BackendConfig {
   readonly backupMaxPathBytes: number;
   readonly backupMaxPathDepth: number;
   readonly backupMaxCompressionRatio: number;
+  readonly catalogReadMode: CatalogReadMode;
+  readonly canonicalStorageRoot: string | undefined;
+  readonly canonicalReadAuthorization: string | undefined;
+  readonly canonicalWorkflowMode: CanonicalWorkflowMode | undefined;
+  readonly canonicalWriteAuthorization: string | undefined;
+  readonly candidateRuntimeMode: CandidateRuntimeMode | undefined;
+  readonly candidateRuntimeAuthorization: string | undefined;
 }
 
 function positiveInteger(name: string, value: string | undefined, fallback: number): number {
@@ -129,6 +153,44 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
     path.resolve(process.cwd(), "data")
   );
   const legacyConfiguredUsers = parseLegacyConfiguredUsers(environment.PRG32_USERS);
+  const configuredCatalogReadMode = optionalNonEmpty(environment.PRG32_BACKEND_CATALOG_READ_MODE) ?? LEGACY_READ_MODE;
+  if (configuredCatalogReadMode !== LEGACY_READ_MODE && configuredCatalogReadMode !== CANONICAL_DISPOSABLE_READ_MODE && configuredCatalogReadMode !== CANONICAL_OPERATIONAL_READ_MODE) {
+    throw new Error("PRG32_BACKEND_CATALOG_READ_MODE must be legacy, canonical-disposable, or canonical-operational");
+  }
+  const canonicalStorageRoot = optionalNonEmpty(environment.PRG32_BACKEND_CANONICAL_STORAGE_ROOT);
+  const canonicalReadAuthorization = optionalNonEmpty(environment.PRG32_BACKEND_CANONICAL_READ_AUTHORIZATION);
+  if (configuredCatalogReadMode === CANONICAL_DISPOSABLE_READ_MODE) {
+    if (!canonicalStorageRoot) throw new Error("PRG32_BACKEND_CANONICAL_STORAGE_ROOT is required in canonical-disposable mode");
+    if (canonicalReadAuthorization !== CANONICAL_READ_AUTHORIZATION) throw new Error("PRG32_BACKEND_CANONICAL_READ_AUTHORIZATION is invalid");
+    if ((environment.NODE_ENV ?? "").trim().toLowerCase() === "production") throw new Error("canonical-disposable catalog mode is disabled in production");
+  }
+  const canonicalWorkflowMode = optionalNonEmpty(environment.PRG32_BACKEND_CANONICAL_WORKFLOW_MODE);
+  const canonicalWriteAuthorization = optionalNonEmpty(environment.PRG32_BACKEND_CANONICAL_WRITE_AUTHORIZATION);
+  const candidateRuntimeMode = optionalNonEmpty(environment.PRG32_BACKEND_CANDIDATE_MODE);
+  const candidateRuntimeAuthorization = optionalNonEmpty(environment.PRG32_BACKEND_CANDIDATE_AUTHORIZATION);
+  if (candidateRuntimeMode !== undefined && candidateRuntimeMode !== CANDIDATE_RUNTIME_MODE) {
+    throw new Error("PRG32_BACKEND_CANDIDATE_MODE must be two-service-disposable");
+  }
+  if (candidateRuntimeMode !== undefined && candidateRuntimeAuthorization !== CANDIDATE_RUNTIME_AUTHORIZATION) {
+    throw new Error("PRG32_BACKEND_CANDIDATE_AUTHORIZATION is invalid");
+  }
+  if (canonicalWorkflowMode !== undefined && canonicalWorkflowMode !== CANONICAL_WORKFLOW_MODE && canonicalWorkflowMode !== CANONICAL_OPERATIONAL_WORKFLOW_MODE) {
+    throw new Error("PRG32_BACKEND_CANONICAL_WORKFLOW_MODE must be disposable or operational");
+  }
+  if (canonicalWorkflowMode === CANONICAL_WORKFLOW_MODE) {
+    if (configuredCatalogReadMode !== CANONICAL_DISPOSABLE_READ_MODE) throw new Error("canonical workflow requires canonical-disposable catalog reads");
+    if (!canonicalStorageRoot || path.resolve(canonicalStorageRoot) !== path.resolve(environment.PRG32_BACKEND_CANONICAL_STORAGE_ROOT ?? "")) throw new Error("canonical workflow requires the canonical storage root");
+    if (canonicalReadAuthorization !== CANONICAL_READ_AUTHORIZATION) throw new Error("canonical workflow requires canonical read authorization");
+    if (canonicalWriteAuthorization !== CANONICAL_WRITE_AUTHORIZATION) throw new Error("PRG32_BACKEND_CANONICAL_WRITE_AUTHORIZATION is invalid");
+    if ((environment.NODE_ENV ?? "").trim().toLowerCase() === "production") throw new Error("canonical disposable workflow is disabled in production");
+  }
+  const operationalMode = configuredCatalogReadMode === CANONICAL_OPERATIONAL_READ_MODE || canonicalWorkflowMode === CANONICAL_OPERATIONAL_WORKFLOW_MODE;
+  if (operationalMode) {
+    if (configuredCatalogReadMode !== CANONICAL_OPERATIONAL_READ_MODE || canonicalWorkflowMode !== CANONICAL_OPERATIONAL_WORKFLOW_MODE) throw new Error("canonical operational mode requires canonical-operational reads and workflow");
+    if (!canonicalStorageRoot) throw new Error("PRG32_BACKEND_CANONICAL_STORAGE_ROOT is required in canonical-operational mode");
+    if (!canonicalReadAuthorization || canonicalReadAuthorization.length < 32) throw new Error("PRG32_BACKEND_CANONICAL_READ_AUTHORIZATION must contain at least 32 characters in canonical-operational mode");
+    if (!canonicalWriteAuthorization || canonicalWriteAuthorization.length < 32) throw new Error("PRG32_BACKEND_CANONICAL_WRITE_AUTHORIZATION must contain at least 32 characters in canonical-operational mode");
+  }
 
   const authWriteEnabled = booleanValue(
     "PRG32_BACKEND_AUTH_WRITE_ENABLED",
@@ -139,6 +201,14 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
   const authWriteDatabasePath = optionalNonEmpty(environment.PRG32_BACKEND_AUTH_WRITE_DB);
   const authDisposableRoot = optionalNonEmpty(environment.PRG32_BACKEND_AUTH_DISPOSABLE_ROOT);
   const authSessionSecret = optionalNonEmpty(environment.PRG32_BACKEND_SESSION_SECRET);
+  const federationAutoProvision = booleanValue(
+    "PRG32_BACKEND_FEDERATION_AUTO_PROVISION",
+    environment.PRG32_BACKEND_FEDERATION_AUTO_PROVISION,
+    false
+  );
+  if (federationAutoProvision && (!authWriteEnabled || authWriteMode !== "test" || (environment.NODE_ENV ?? "").trim().toLowerCase() === "production")) {
+    throw new Error("federation auto-provisioning is restricted to the isolated non-production auth writer");
+  }
   const authBootstrapToken = optionalNonEmpty(environment.PRG32_BACKEND_BOOTSTRAP_TOKEN);
   const federationLifecycleTestToken = optionalNonEmpty(environment.PRG32_BACKEND_FEDERATION_LIFECYCLE_TEST_TOKEN);
   const federationLifecycleTestEnabled = booleanValue(
@@ -149,6 +219,15 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
   const oidcPublicOrigin = optionalNonEmpty(environment.PRG32_BACKEND_OIDC_PUBLIC_ORIGIN);
   const federationPublicOrigin = optionalNonEmpty(environment.PRG32_BACKEND_FEDERATION_PUBLIC_ORIGIN ?? oidcPublicOrigin);
   const frontendPublicOrigin = optionalNonEmpty(environment.PRG32_BACKEND_FRONTEND_PUBLIC_ORIGIN);
+  const emailTransport = (environment.PRG32_BACKEND_EMAIL_TRANSPORT ?? (authWriteMode === "test" ? "memory" : "disabled")).trim().toLowerCase();
+  if (emailTransport !== "disabled" && emailTransport !== "memory" && emailTransport !== "smtp") throw new Error("PRG32_BACKEND_EMAIL_TRANSPORT must be disabled, memory, or smtp");
+  const emailFrom = nonEmpty("PRG32_BACKEND_EMAIL_FROM", environment.PRG32_BACKEND_EMAIL_FROM, "no-reply@prg32.local");
+  const emailPublicOrigin = optionalNonEmpty(environment.PRG32_BACKEND_EMAIL_PUBLIC_ORIGIN ?? frontendPublicOrigin ?? (authWriteMode === "test" ? "http://store.prg32.local" : undefined));
+  const emailSmtpHost = optionalNonEmpty(environment.PRG32_BACKEND_EMAIL_SMTP_HOST);
+  const emailSmtpPort = positiveInteger("PRG32_BACKEND_EMAIL_SMTP_PORT", environment.PRG32_BACKEND_EMAIL_SMTP_PORT, 587);
+  const emailSmtpUser = optionalNonEmpty(environment.PRG32_BACKEND_EMAIL_SMTP_USER);
+  const emailSmtpPassword = optionalNonEmpty(environment.PRG32_BACKEND_EMAIL_SMTP_PASSWORD);
+  if (emailTransport === "smtp" && (!emailSmtpHost || !emailPublicOrigin)) throw new Error("SMTP email transport requires an SMTP host and public origin");
   const corsAllowedOrigins = (environment.PRG32_BACKEND_CORS_ORIGINS ?? "")
     .split(",")
     .map((value) => value.trim())
@@ -187,8 +266,8 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
   );
   const backupMode = optionalNonEmpty(environment.PRG32_BACKEND_BACKUP_MODE);
   if (authWriteEnabled) {
-    if (authWriteMode !== "test") {
-      throw new Error("PRG32_BACKEND_AUTH_WRITE_MODE must be test when auth writes are enabled");
+    if (authWriteMode !== "test" && !(operationalMode && authWriteMode === "operational")) {
+      throw new Error("PRG32_BACKEND_AUTH_WRITE_MODE must be test or operational when auth writes are enabled");
     }
     if (!authWriteDatabasePath) {
       throw new Error("PRG32_BACKEND_AUTH_WRITE_DB is required when auth writes are enabled");
@@ -203,9 +282,18 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
     if (looksLikeSqliteUri(authWriteDatabasePath)) {
       throw new Error("SQLite URI syntax is not allowed for the auth write database");
     }
-    if (path.resolve(authWriteDatabasePath) === path.resolve(configuredDatabase)) {
+    if (path.resolve(authWriteDatabasePath) === path.resolve(configuredDatabase) && candidateRuntimeMode === undefined && !operationalMode) {
       throw new Error("auth write database must be separate from the shadow database");
     }
+    if (canonicalWorkflowMode === CANONICAL_WORKFLOW_MODE || operationalMode) {
+      const canonicalRoot = path.resolve(canonicalStorageRoot as string);
+      if (path.resolve(authDisposableRoot) !== canonicalRoot || path.resolve(authWriteDatabasePath) !== path.join(canonicalRoot, "store.sqlite")) {
+        throw new Error("canonical workflow authentication must use the canonical storage-v2 database");
+      }
+    }
+  }
+  if ((canonicalWorkflowMode === CANONICAL_WORKFLOW_MODE || operationalMode) && !authWriteEnabled) {
+    throw new Error("canonical workflow requires the canonical authentication writer");
   }
   if (federationLifecycleTestEnabled && (authWriteMode !== "test" || !authWriteEnabled || !authDisposableRoot || !authWriteDatabasePath)) {
     throw new Error("federation lifecycle test routes require the isolated auth writer configuration");
@@ -270,6 +358,24 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
   if (authCookieSameSite !== "lax" && authCookieSameSite !== "strict" && authCookieSameSite !== "none") {
     throw new Error("PRG32_BACKEND_SESSION_SAMESITE must be lax, strict, or none");
   }
+  const authCookieSecure = booleanValue(
+    "PRG32_BACKEND_SESSION_SECURE",
+    environment.PRG32_BACKEND_SESSION_SECURE,
+    (environment.NODE_ENV ?? "").trim().toLowerCase() === "production"
+  );
+  if ((environment.NODE_ENV ?? "").trim().toLowerCase() === "production" && !authCookieSecure) {
+    throw new Error("PRG32_BACKEND_SESSION_SECURE must remain enabled in production");
+  }
+  if (authCookieSameSite === "none" && !authCookieSecure) {
+    throw new Error("SameSite=None requires a Secure authentication cookie");
+  }
+  const authCookieDomain = optionalNonEmpty(environment.PRG32_BACKEND_SESSION_COOKIE_DOMAIN);
+  if (authCookieDomain && !/^\.?[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/.test(authCookieDomain)) {
+    throw new Error("PRG32_BACKEND_SESSION_COOKIE_DOMAIN must be a valid cookie domain");
+  }
+  if (authCookieDomain?.includes("..")) {
+    throw new Error("PRG32_BACKEND_SESSION_COOKIE_DOMAIN must not contain empty labels");
+  }
   if (oidcPublicOrigin) {
     let parsed: URL;
     try { parsed = new URL(oidcPublicOrigin); } catch { throw new Error("PRG32_BACKEND_OIDC_PUBLIC_ORIGIN must be a valid origin"); }
@@ -292,19 +398,81 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
       throw new Error("PRG32_BACKEND_FRONTEND_PUBLIC_ORIGIN and PRG32_BACKEND_CORS_ORIGINS must contain trusted HTTPS origins");
     }
   }
-  if ((environment.NODE_ENV ?? "").trim().toLowerCase() === "production" && corsAllowedOrigins.length > 0) {
+  if ((environment.NODE_ENV ?? "").trim().toLowerCase() === "production" && corsAllowedOrigins.length > 0 && !operationalMode) {
     throw new Error("PRG32_BACKEND_CORS_ORIGINS is disabled for production builds until a deployment-specific allowlist is reviewed");
   }
+  const mdnsEnabled = booleanValue("PRG32_BACKEND_MDNS_ENABLED", environment.PRG32_BACKEND_MDNS_ENABLED, false);
+  const trustProxy = booleanValue("PRG32_BACKEND_TRUST_PROXY", environment.PRG32_BACKEND_TRUST_PROXY, false);
+  const mdnsInterface = optionalNonEmpty(environment.PRG32_BACKEND_MDNS_INTERFACE);
+  if (mdnsEnabled && (environment.NODE_ENV ?? "").trim().toLowerCase() === "production") {
+    throw new Error("PRG32_BACKEND_MDNS_ENABLED is disabled in production until the advertised endpoint is explicitly reviewed");
+  }
+  if (mdnsEnabled && !mdnsInterface) {
+    throw new Error("PRG32_BACKEND_MDNS_INTERFACE is required when mDNS is enabled");
+  }
+  if (candidateRuntimeMode !== undefined) {
+    const candidateRoot = path.resolve(canonicalStorageRoot ?? "");
+    const canonicalDatabase = path.join(candidateRoot, "store.sqlite");
+    if ((environment.NODE_ENV ?? "").trim().toLowerCase() === "production") {
+      throw new Error("the two-service disposable candidate is disabled in production");
+    }
+    if (configuredCatalogReadMode !== CANONICAL_DISPOSABLE_READ_MODE || canonicalWorkflowMode !== CANONICAL_WORKFLOW_MODE) {
+      throw new Error("the two-service candidate requires canonical disposable workflow mode");
+    }
+    if (path.resolve(configuredDatabase) !== canonicalDatabase || path.resolve(configuredStoreData) !== candidateRoot) {
+      throw new Error("the two-service candidate requires one canonical root and store.sqlite database");
+    }
+    if (!authWriteEnabled || path.resolve(authDisposableRoot ?? "") !== candidateRoot || path.resolve(authWriteDatabasePath ?? "") !== canonicalDatabase) {
+      throw new Error("the two-service candidate requires the canonical SQLite writer boundary");
+    }
+    if (legacyConfiguredUsers.length > 0 || environment.PRG32_USERS !== undefined || environment.PRG32_SCORE_DB !== undefined || environment.PRG32_METRICS_DB !== undefined || environment.PRG32_STORE_DATA !== undefined || environment.PRG32_STORE_DB !== undefined) {
+      throw new Error("legacy database and configured-user fallbacks are disabled in the two-service candidate");
+    }
+    if (mdnsEnabled) throw new Error("mDNS must remain disabled in the two-service candidate");
+    if (backupEnabled) throw new Error("public backup support is disabled in the two-service candidate");
+  }
+  if (operationalMode) {
+    if (candidateRuntimeMode !== undefined) throw new Error("candidate runtime mode cannot be combined with canonical-operational mode");
+    if (legacyConfiguredUsers.length > 0 || environment.PRG32_USERS !== undefined || environment.PRG32_SCORE_DB !== undefined || environment.PRG32_METRICS_DB !== undefined || environment.PRG32_STORE_DATA !== undefined || environment.PRG32_STORE_DB !== undefined) {
+      throw new Error("legacy database and configured-user fallbacks are disabled in canonical-operational mode");
+    }
+    if (path.resolve(configuredDatabase) !== path.join(path.resolve(canonicalStorageRoot as string), "store.sqlite") || path.resolve(configuredStoreData) !== path.resolve(canonicalStorageRoot as string)) {
+      throw new Error("canonical-operational mode requires one canonical root and store.sqlite database");
+    }
+    if (authWriteMode !== "operational" || !authWriteEnabled) throw new Error("canonical-operational mode requires the operational canonical auth writer");
+    if (!trustProxy) throw new Error("PRG32_BACKEND_TRUST_PROXY must be enabled in canonical-operational mode");
+    if (corsAllowedOrigins.some((origin) => origin === "*" || origin !== frontendPublicOrigin)) {
+      throw new Error("canonical-operational mode requires an exact CORS allowlist matching PRG32_BACKEND_FRONTEND_PUBLIC_ORIGIN");
+    }
+    if (mdnsEnabled) throw new Error("mDNS must remain disabled in canonical-operational mode");
+    if (federationLifecycleTestEnabled || federationAutoProvision) throw new Error("test federation lifecycle and auto-provisioning are disabled in canonical-operational mode");
+    requiredSecret("PRG32_BACKEND_SESSION_SECRET", authSessionSecret);
+    if (!authBootstrapToken) throw new Error("PRG32_BACKEND_BOOTSTRAP_TOKEN is required in canonical-operational mode");
+    requiredSecret("PRG32_BACKEND_BOOTSTRAP_TOKEN", authBootstrapToken);
+    if (!secretEncryptionEnabled || !secretKeyRegistryPath) throw new Error("canonical-operational mode requires external secret encryption key configuration");
+  }
+  const mdnsHost = optionalNonEmpty(environment.PRG32_BACKEND_MDNS_HOST);
+  const mdnsPort = positiveInteger(
+    "PRG32_BACKEND_MDNS_PORT",
+    environment.PRG32_BACKEND_MDNS_PORT ?? environment.PRG32_STORE_PORT ?? environment.PRG32_BACKEND_PORT,
+    5090
+  );
 
   return {
     host: nonEmpty("PRG32_BACKEND_HOST", environment.PRG32_BACKEND_HOST, "127.0.0.1"),
     port: positiveInteger("PRG32_BACKEND_PORT", environment.PRG32_BACKEND_PORT, 5090),
     logLevel: nonEmpty("PRG32_BACKEND_LOG_LEVEL", environment.PRG32_BACKEND_LOG_LEVEL, "info"),
+    trustProxy,
     databasePath: path.resolve(configuredDatabase),
     storeDataDirectory: path.resolve(configuredStoreData),
     storePortOverride: environment.PRG32_STORE_PORT?.trim() || undefined,
     storeName: nonEmpty("PRG32_STORE_NAME", environment.PRG32_STORE_NAME, "PRG32 Cartridge Store"),
     storeVersion: nonEmpty("PRG32_STORE_VERSION", environment.PRG32_STORE_VERSION, "1.0.0"),
+    mdnsEnabled,
+    mdnsName: nonEmpty("PRG32_BACKEND_MDNS_NAME", environment.PRG32_BACKEND_MDNS_NAME, environment.PRG32_STORE_NAME ?? "PRG32 Cartridge Store"),
+    mdnsHost,
+    mdnsPort,
+    mdnsInterface: mdnsInterface ?? "",
     multiplayerMaxPeers: positiveInteger(
       "PRG32_MP_MAX_PEERS",
       environment.PRG32_MP_MAX_PEERS,
@@ -321,17 +489,15 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
     authWriteDatabasePath: authWriteEnabled ? path.resolve(authWriteDatabasePath as string) : undefined,
     authDisposableRoot: authWriteEnabled ? path.resolve(authDisposableRoot as string) : undefined,
     authSessionSecret: authWriteEnabled ? authSessionSecret : undefined,
-    authCookieSecure: booleanValue(
-      "PRG32_BACKEND_SESSION_SECURE",
-      environment.PRG32_BACKEND_SESSION_SECURE,
-      (environment.NODE_ENV ?? "").trim().toLowerCase() === "production"
-    ),
+    authCookieSecure,
     authCookieSameSite,
+    authCookieDomain,
     authSessionLifetimeSeconds: positiveInteger(
       "PRG32_BACKEND_SESSION_LIFETIME_SECONDS",
       environment.PRG32_BACKEND_SESSION_LIFETIME_SECONDS,
       8 * 60 * 60
     ),
+    federationAutoProvision,
     authBootstrapToken,
     federationLifecycleTestToken: authWriteMode === "test" ? federationLifecycleTestToken : undefined,
     federationLifecycleTestEnabled,
@@ -350,6 +516,13 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
       environment.PRG32_BACKEND_AUTH_RATE_LIMIT_WINDOW_SECONDS,
       60
     ),
+    emailTransport,
+    emailFrom,
+    emailPublicOrigin,
+    emailSmtpHost,
+    emailSmtpPort,
+    emailSmtpUser,
+    emailSmtpPassword,
     oidcPublicOrigin,
     federationPublicOrigin,
     frontendPublicOrigin,
@@ -519,6 +692,13 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
         throw new Error("PRG32_BACKEND_BACKUP_MAX_COMPRESSION_RATIO must be positive");
       }
       return candidate;
-    })()
+    })(),
+    catalogReadMode: configuredCatalogReadMode,
+    canonicalStorageRoot: configuredCatalogReadMode === CANONICAL_DISPOSABLE_READ_MODE || configuredCatalogReadMode === CANONICAL_OPERATIONAL_READ_MODE ? path.resolve(canonicalStorageRoot as string) : undefined,
+    canonicalReadAuthorization: configuredCatalogReadMode === CANONICAL_DISPOSABLE_READ_MODE || configuredCatalogReadMode === CANONICAL_OPERATIONAL_READ_MODE ? canonicalReadAuthorization : undefined,
+    canonicalWorkflowMode,
+    canonicalWriteAuthorization: canonicalWorkflowMode === CANONICAL_WORKFLOW_MODE || canonicalWorkflowMode === CANONICAL_OPERATIONAL_WORKFLOW_MODE ? canonicalWriteAuthorization : undefined,
+    candidateRuntimeMode,
+    candidateRuntimeAuthorization: candidateRuntimeMode === CANDIDATE_RUNTIME_MODE ? candidateRuntimeAuthorization : undefined
   };
 }

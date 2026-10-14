@@ -8,13 +8,13 @@ import type { AuthorizationService } from "../authorization/service.js";
 import { permissionGuard } from "../authorization/guards.js";
 import { encodePythonJson } from "../compatibility/serialization.js";
 import { publicReviewError, ReviewError } from "./errors.js";
-import type { ReviewService, SubmissionRecord } from "./service.js";
+import type { ReviewWorkflowService, SubmissionRecord } from "./service.js";
 
 interface ReviewRouteOptions {
   readonly config: BackendConfig;
   readonly auth: AuthService;
   readonly authorization: AuthorizationService;
-  readonly review: ReviewService | null;
+  readonly review: ReviewWorkflowService | null;
 }
 
 interface SubmissionParams { readonly submission_id: string; }
@@ -86,6 +86,13 @@ function metadataFromJson(payload: Record<string, unknown>): Record<string, unkn
   if (metadata === undefined) return {};
   if (metadata === null || typeof metadata !== "object" || Array.isArray(metadata)) throw new ReviewError("metadata must be an object");
   return metadata as Record<string, unknown>;
+}
+
+function noteFromJson(payload: Record<string, unknown>): string {
+  const note = payload.note;
+  if (note === undefined || note === null) return "";
+  if (typeof note !== "string") throw new ReviewError("review note must be text");
+  return note.trim().slice(0, 4000);
 }
 
 function formValue(payload: Record<string, unknown>, key: string): string | undefined {
@@ -172,8 +179,15 @@ export function registerReviewRoutes(app: FastifyInstance, options: ReviewRouteO
   app.get<{ Params: SubmissionParams }>("/api/submissions/:submission_id", async (request, reply) => {
     const service = review();
     if (!service) return unavailable(reply);
-    if (!authorized(request, reply, options, "submissions:read", false)) return reply;
-    try { return sendJson(reply, { ok: true, submission: service.detail(id(request)) }); }
+    const authContext = context(request, options.auth);
+    if (!authContext.principal.authenticated || authContext.principal.id === null) return sendJson(reply, { ok: false, error: "login required", user: principalToJson(authContext.principal) }, 401);
+    try {
+      const submission = service.detail(id(request));
+      const reviewer = permissionGuard(options.authorization, authContext.principal, "submissions:read");
+      const owner = permissionGuard(options.authorization, authContext.principal, "catalog:submit") && submission.submitted_by_user_id === authContext.principal.id;
+      if (!reviewer && !owner) return sendJson(reply, { ok: false, error: "submission access denied", code: "permission_denied" }, 403);
+      return sendJson(reply, { ok: true, submission });
+    }
     catch (error) { return routeError(request, reply, error); }
   });
 
@@ -182,7 +196,7 @@ export function registerReviewRoutes(app: FastifyInstance, options: ReviewRouteO
     if (!service) return unavailable(reply);
     const principal = authorized(request, reply, options, "submissions:review", true);
     if (!principal) return reply;
-    try { return sendJson(reply, { ok: true, submission: service.approve(id(request), metadataFromJson(bodyObject(request)), principal) }); }
+    try { const payload = bodyObject(request); return sendJson(reply, { ok: true, submission: service.approve(id(request), metadataFromJson(payload), principal, noteFromJson(payload)) }); }
     catch (error) { return routeError(request, reply, error); }
   });
 
@@ -191,7 +205,7 @@ export function registerReviewRoutes(app: FastifyInstance, options: ReviewRouteO
     if (!service) return unavailable(reply);
     const principal = authorized(request, reply, options, "submissions:reject", true);
     if (!principal) return reply;
-    try { return sendJson(reply, { ok: true, submission: service.reject(id(request), principal) }); }
+    try { return sendJson(reply, { ok: true, submission: service.reject(id(request), principal, noteFromJson(bodyObject(request))) }); }
     catch (error) { return routeError(request, reply, error, true); }
   });
 
@@ -229,7 +243,7 @@ export function registerReviewRoutes(app: FastifyInstance, options: ReviewRouteO
     try { form = bodyObject(request); } catch (error) { return routeError(request, reply, error, true); }
     const principal = authorized(request, reply, options, "submissions:reject", true, formValue(form, "csrf_token"));
     if (!principal) return reply;
-    try { service.reject(id(request), principal); return reply.code(302).header("location", "/editor/submissions").send(); }
+    try { service.reject(id(request), principal, formValue(form, "note") ?? ""); return reply.code(302).header("location", "/editor/submissions").send(); }
     catch (error) { const result = publicReviewError(error, true); return sendHtml(reply, htmlPage("Invalid request", `<p>${escapeHtml(result.body.error)}</p>`, result.statusCode)); }
   });
 }

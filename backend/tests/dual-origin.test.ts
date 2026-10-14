@@ -70,4 +70,31 @@ describe("dual-origin CORS boundary", () => {
     expect(response.headers["access-control-allow-credentials"]).toBe("true");
     await app.close();
   });
+
+  it("publishes firmware API URLs on the API origin and browser URLs on the store origin", async () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "prg32-dual-origin-discovery-"));
+    roots.push(root);
+    const databasePath = path.join(root, "store.sqlite");
+    fs.closeSync(fs.openSync(databasePath, "a"));
+    const app = buildApp({
+      config: loadConfig({
+        NODE_ENV: "test",
+        PRG32_BACKEND_DB: databasePath,
+        PRG32_BACKEND_STORE_DATA: root,
+        PRG32_BACKEND_FRONTEND_PUBLIC_ORIGIN: "https://store.prg32.dream.test",
+        PRG32_BACKEND_FEDERATION_PUBLIC_ORIGIN: "https://api.prg32.dream.test",
+        PRG32_BACKEND_OIDC_PUBLIC_ORIGIN: "https://api.prg32.dream.test"
+      }),
+      logger: false
+    });
+    const response = await app.inject({ method: "GET", url: "/.well-known/prg32-store.json", headers: { host: "attacker.example.test", "x-forwarded-host": "attacker.example.test" } });
+    expect(response.statusCode).toBe(200);
+    const discovery = response.json<{ api: string; web: string; services: { cartridges: string; multiplayer: string } }>();
+    expect(discovery.api).toBe("https://api.prg32.dream.test/api");
+    expect(discovery.web).toBe("https://store.prg32.dream.test/");
+    expect(discovery.services.cartridges).toBe("https://api.prg32.dream.test/api/games");
+    expect(discovery.services.multiplayer).toBe("wss://api.prg32.dream.test/api/multiplayer");
+    expect(response.body).not.toContain("attacker.example.test");
+    await app.close();
+  });
 });

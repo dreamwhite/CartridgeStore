@@ -14,6 +14,7 @@ interface ProviderParams { readonly providerId: string }
 interface OidcRouteOptions {
   readonly config: BackendConfig;
   readonly oidc: OidcService;
+  readonly sessionLifetimeSeconds: () => number;
 }
 
 function json(reply: FastifyReply, body: unknown, status = 200): FastifyReply {
@@ -61,7 +62,7 @@ export function registerOidcRoutes(app: FastifyInstance, options: OidcRouteOptio
     try {
       const cookies = parseCookies(request.headers.cookie);
       const result = await options.oidc.complete(request.params.providerId, request.url, cookies.get(OIDC_CORRELATION_COOKIE), cookies.get(SESSION_COOKIE), { requestId: request.id, ip: requestIp(request) });
-      const sessionCookie = serializeSessionCookie({ name: SESSION_COOKIE, secure: options.config.authCookieSecure, sameSite: options.config.authCookieSameSite, maxAgeSeconds: options.config.authSessionLifetimeSeconds }, result.sessionCookie);
+      const sessionCookie = serializeSessionCookie({ name: SESSION_COOKIE, secure: options.config.authCookieSecure, sameSite: options.config.authCookieSameSite, domain: options.config.authCookieDomain, maxAgeSeconds: options.sessionLifetimeSeconds() }, result.sessionCookie);
       setCookies(reply, [sessionCookie, clearCorrelationCookie(options.config)]);
       reply.header("cache-control", "no-store");
       return reply.redirect(browserReturnLocation(options.config, result.returnPath));

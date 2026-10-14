@@ -2,6 +2,8 @@ import fs from "node:fs";
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
+import { parseCookies } from "../auth/session.js";
+import type { AuthService } from "../auth/service.js";
 import type { BackendConfig } from "../config/env.js";
 import { encodePythonJson } from "../compatibility/serialization.js";
 import type { ReadonlyDatabaseManager } from "../db/readonly.js";
@@ -13,8 +15,11 @@ import {
   ROLE_LEVELS,
   fileEtag,
   parseCartridgeMedia,
-  paginateCatalog
+  paginateCatalog,
+  type ResolvedVariant
 } from "./catalog.js";
+import { CanonicalCatalog, type ResolvedCatalogMedia } from "../storage-v2/catalog.js";
+import { CANONICAL_DISPOSABLE_READ_MODE, CANONICAL_OPERATIONAL_READ_MODE, CANONICAL_READ_AUTHORIZATION } from "../storage-v2/read-mode.js";
 
 interface CatalogQuery {
   readonly q?: string;
@@ -33,13 +38,89 @@ interface GameParams {
 interface CatalogRouteOptions {
   readonly config: BackendConfig;
   readonly database: ReadonlyDatabaseManager;
+  readonly auth?: AuthService;
+  readonly downloadTelemetry?: DownloadTelemetrySink;
+}
+
+export interface DownloadTelemetrySink {
+  recordDownload(event: {
+    readonly gameId: string;
+    readonly version: string;
+    readonly architecture: "esp32c6" | "qemu";
+    readonly userId: number | null;
+    readonly ipAddress: string | null;
+    readonly userAgent: string;
+  }): void;
+}
+
+interface CatalogReadSource {
+  readonly listGames: (query?: string) => Record<string, unknown>[];
+  readonly publicGame: (gameId: string, version?: string) => Record<string, unknown>;
+  readonly resolveVariant: (gameId: string, version?: string, architecture?: string) => ResolvedVariant;
+  readonly resolveMedia: (gameId: string, version: string | undefined, architecture: string | undefined, kind: "icon" | "screenshot") => ResolvedCatalogMedia | { readonly bytes: Buffer; readonly mediaType: string };
+  readonly colophon: (gameId: string, version?: string) => Record<string, unknown>;
+  readonly storeName: (fallback: string) => string;
+  readonly close: () => void;
+}
+
+class LegacyCatalogReadSource implements CatalogReadSource {
+  constructor(private readonly catalog: ReadonlyCatalog, private readonly readStoreName: () => string) {}
+
+  listGames(query?: string): Record<string, unknown>[] { return this.catalog.listGames(query); }
+  publicGame(gameId: string, version?: string): Record<string, unknown> { return this.catalog.publicGame(gameId, version); }
+  resolveVariant(gameId: string, version?: string, architecture?: string): ResolvedVariant { return this.catalog.resolveVariant(gameId, version, architecture); }
+  resolveMedia(gameId: string, version: string | undefined, architecture: string | undefined, kind: "icon" | "screenshot"): { readonly bytes: Buffer; readonly mediaType: string } {
+    const resolved = this.catalog.resolveVariant(gameId, version, architecture);
+    const media = parseCartridgeMedia(fs.readFileSync(resolved.filePath));
+    if (kind === "icon" && media.icon) return { bytes: media.icon, mediaType: stringHeader(resolved.variant.icon_mime, media.iconMime ?? "image/png") };
+    if (kind === "screenshot" && media.screenshot) return { bytes: media.screenshot, mediaType: stringHeader(resolved.variant.screenshot_mime, media.screenshotMime ?? "image/png") };
+    throw new CatalogError(`${kind} not found`);
+  }
+  colophon(gameId: string, version?: string): Record<string, unknown> {
+    const resolved = this.catalog.resolveVariant(gameId, version);
+    const media = parseCartridgeMedia(fs.readFileSync(resolved.filePath));
+    if (!media.colophon) throw new CatalogError("colophon not found");
+    return media.colophon;
+  }
+  storeName(fallback: string): string {
+    try {
+      return this.readStoreName() || fallback;
+    } catch {
+      return fallback;
+    }
+  }
+  close(): void { /* legacy catalog has no open resource */ }
+}
+
+class CanonicalCatalogReadSource implements CatalogReadSource {
+  constructor(private readonly catalog: CanonicalCatalog) {}
+  listGames(query?: string): Record<string, unknown>[] { return this.catalog.listGames(query); }
+  publicGame(gameId: string, version?: string): Record<string, unknown> { return this.catalog.publicGame(gameId, version); }
+  resolveVariant(gameId: string, version?: string, architecture?: string): ResolvedVariant { return this.catalog.resolveVariant(gameId, version, architecture); }
+  resolveMedia(gameId: string, version: string | undefined, architecture: string | undefined, kind: "icon" | "screenshot"): ResolvedCatalogMedia { return this.catalog.resolveMedia(gameId, version, architecture, kind); }
+  colophon(gameId: string, version?: string): Record<string, unknown> { return this.catalog.colophon(gameId, version); }
+  storeName(fallback: string): string { return this.catalog.storeName(fallback); }
+  close(): void { this.catalog.close(); }
+}
+
+function createCatalogReadSource(options: CatalogRouteOptions): CatalogReadSource {
+  if (options.config.catalogReadMode === CANONICAL_DISPOSABLE_READ_MODE || options.config.catalogReadMode === CANONICAL_OPERATIONAL_READ_MODE) {
+    if (!options.config.canonicalStorageRoot || (options.config.catalogReadMode === CANONICAL_DISPOSABLE_READ_MODE && options.config.canonicalReadAuthorization !== CANONICAL_READ_AUTHORIZATION) || (options.config.catalogReadMode === CANONICAL_OPERATIONAL_READ_MODE && (!options.config.canonicalReadAuthorization || options.config.canonicalReadAuthorization.length < 32))) throw new Error("canonical catalog mode is not authorized");
+    return new CanonicalCatalogReadSource(new CanonicalCatalog(options.config.canonicalStorageRoot, {
+      operational: options.config.catalogReadMode === CANONICAL_OPERATIONAL_READ_MODE,
+      legacyRoots: options.config.candidateRuntimeMode === undefined && options.config.catalogReadMode !== CANONICAL_OPERATIONAL_READ_MODE
+        ? [options.config.storeDataDirectory, options.config.databasePath]
+        : []
+    }));
+  }
+  return new LegacyCatalogReadSource(new ReadonlyCatalog(options.config.storeDataDirectory), () => legacyStoreName(options));
 }
 
 function sendJson(reply: FastifyReply, body: unknown): FastifyReply {
   return reply.header("content-type", "application/json").send(Buffer.from(`${encodePythonJson(body)}\n`, "utf8"));
 }
 
-function storeName(options: CatalogRouteOptions): string {
+function legacyStoreName(options: CatalogRouteOptions): string {
   try {
     const row = options.database.get().sqlite
       .prepare("SELECT value FROM store_settings WHERE key = 'store_name'")
@@ -51,6 +132,9 @@ function storeName(options: CatalogRouteOptions): string {
 }
 
 function requestHost(request: FastifyRequest, config: BackendConfig): string {
+  if (config.frontendPublicOrigin) {
+    return new URL(config.frontendPublicOrigin).host;
+  }
   const configuredHost = typeof request.headers.host === "string"
     ? request.headers.host
     : `${request.hostname}:${config.port}`;
@@ -116,16 +200,32 @@ function sendDownload(
   filePath: string,
   gameId: string,
   version: string,
-  architecture: string
+  architecture: string,
+  telemetry: { readonly auth?: AuthService; readonly sink?: DownloadTelemetrySink }
 ): FastifyReply {
   const stat = fs.statSync(filePath);
   const etag = setFileHeaders(reply, filePath, stat);
   reply
     .header("content-type", CARTRIDGE_MIME)
     .header("content-disposition", `attachment; filename=${gameId}-${version}-${architecture}.prg32`);
+  const range = parseRange(request.headers.range, stat.size);
+  if (telemetry.sink) {
+    const bearer = request.headers.authorization;
+    const token = typeof bearer === "string" && bearer.toLowerCase().startsWith("bearer ")
+      ? bearer.slice(7).trim() || undefined
+      : typeof request.headers["x-prg32-token"] === "string" ? request.headers["x-prg32-token"].trim() || undefined : undefined;
+    const authContext = telemetry.auth?.context(parseCookies(request.headers.cookie).get("prg32_ts_session"), token);
+    telemetry.sink.recordDownload({
+      gameId,
+      version,
+      architecture: architecture as "esp32c6" | "qemu",
+      userId: authContext?.principal.authenticated ? authContext.principal.id : null,
+      ipAddress: request.ip || null,
+      userAgent: typeof request.headers["user-agent"] === "string" ? request.headers["user-agent"] : ""
+    });
+  }
   if (conditionalNotModified(request, etag, stat)) return reply.code(304).send();
 
-  const range = parseRange(request.headers.range, stat.size);
   if (!range) return reply.send(fs.createReadStream(filePath));
   const length = range.end - range.start + 1;
   reply
@@ -135,30 +235,38 @@ function sendDownload(
   return reply.send(fs.createReadStream(filePath, { start: range.start, end: range.end }));
 }
 
-export function registerCatalogRoutes(app: FastifyInstance, options: CatalogRouteOptions): void {
-  const catalog = new ReadonlyCatalog(options.config.storeDataDirectory);
+export function registerCatalogRoutes(app: FastifyInstance, options: CatalogRouteOptions): CatalogReadSource {
+  const catalog = createCatalogReadSource(options);
 
   app.get("/.well-known/prg32-store.json", async (request, reply) => {
-    const host = requestHost(request, options.config);
-    const scheme = request.protocol;
-    const base = `${scheme}://${host}`;
-    const websocket = scheme === "https" ? "wss" : "ws";
+    const webOrigin = options.config.frontendPublicOrigin
+      ? new URL(options.config.frontendPublicOrigin).origin
+      : undefined;
+    const apiOrigin = options.config.federationPublicOrigin
+      ? new URL(options.config.federationPublicOrigin).origin
+      : webOrigin;
+    const webHost = webOrigin ? new URL(webOrigin).host : requestHost(request, options.config);
+    const webScheme = webOrigin ? new URL(webOrigin).protocol.replace(":", "") : request.protocol;
+    const apiBase = apiOrigin ?? `${webScheme}://${webHost}`;
+    const apiHost = apiOrigin ? new URL(apiOrigin).host : webHost;
+    const apiScheme = apiOrigin ? new URL(apiOrigin).protocol.replace(":", "") : webScheme;
+    const websocket = apiScheme === "https" ? "wss" : "ws";
     return sendJson(reply, {
       abi: DISCOVERY_ABI,
-      name: storeName(options),
-      api: `${base}/api`,
-      web: `${base}/`,
+      name: catalog.storeName(options.config.storeName),
+      api: `${apiBase}/api`,
+      web: `${webOrigin ?? `${webScheme}://${webHost}`}/`,
       version: options.config.storeVersion,
       auth_enabled: true,
       roles: [...ROLE_LEVELS],
       services: {
-        cartridges: `${base}/api/games`,
-        bundle_publish: `${base}/api/publish/bundle`,
-        submissions: `${base}/api/submissions`,
-        scores: `${base}/api/scores`,
-        metrics: `${base}/api/runs`,
-        multiplayer: `${websocket}://${host}/api/multiplayer`,
-        multiplayer_status: `${base}/api/multiplayer/status`
+        cartridges: `${apiBase}/api/games`,
+        bundle_publish: `${apiBase}/api/publish/bundle`,
+        submissions: `${apiBase}/api/submissions`,
+        scores: `${apiBase}/api/scores`,
+        metrics: `${apiBase}/api/runs`,
+        multiplayer: `${websocket}://${apiHost}/api/multiplayer`,
+        multiplayer_status: `${apiBase}/api/multiplayer/status`
       }
     });
   });
@@ -176,34 +284,32 @@ export function registerCatalogRoutes(app: FastifyInstance, options: CatalogRout
   });
 
   app.get<{ Params: GameParams; Querystring: CatalogQuery }>("/api/games/:game_id/icon", async (request, reply) => {
-    const resolved = catalog.resolveVariant(request.params.game_id, request.query.version, request.query.architecture);
-    const media = parseCartridgeMedia(fs.readFileSync(resolved.filePath));
-    if (!media.icon) throw new CatalogError("icon not found");
-    return reply.header("content-type", stringHeader(resolved.variant.icon_mime, media.iconMime ?? "image/png"))
-      .header("content-length", media.icon.length)
-      .send(media.icon);
+    const media = catalog.resolveMedia(request.params.game_id, request.query.version, request.query.architecture, "icon");
+    if ("bytes" in media) return reply.header("content-type", media.mediaType).header("content-length", media.bytes.length).send(media.bytes);
+    const stat = fs.statSync(media.filePath);
+    return reply.header("content-type", media.mediaType).header("content-length", stat.size).send(fs.createReadStream(media.filePath));
   });
 
   app.get<{ Params: GameParams; Querystring: CatalogQuery }>("/api/games/:game_id/screenshot", async (request, reply) => {
-    const resolved = catalog.resolveVariant(request.params.game_id, request.query.version, request.query.architecture);
-    const media = parseCartridgeMedia(fs.readFileSync(resolved.filePath));
-    if (!media.screenshot) throw new CatalogError("screenshot not found");
-    return reply.header("content-type", stringHeader(resolved.variant.screenshot_mime, media.screenshotMime ?? "image/png"))
-      .header("content-length", media.screenshot.length)
-      .send(media.screenshot);
+    const media = catalog.resolveMedia(request.params.game_id, request.query.version, request.query.architecture, "screenshot");
+    if ("bytes" in media) return reply.header("content-type", media.mediaType).header("content-length", media.bytes.length).send(media.bytes);
+    const stat = fs.statSync(media.filePath);
+    return reply.header("content-type", media.mediaType).header("content-length", stat.size).send(fs.createReadStream(media.filePath));
   });
 
   app.get<{ Params: GameParams; Querystring: CatalogQuery }>("/api/games/:game_id/colophon", async (request, reply) => {
-    const resolved = catalog.resolveVariant(request.params.game_id, request.query.version, request.query.architecture);
-    const media = parseCartridgeMedia(fs.readFileSync(resolved.filePath));
-    if (!media.colophon) throw new CatalogError("colophon not found");
-    return sendJson(reply, { ok: true, colophon: media.colophon });
+    return sendJson(reply, { ok: true, colophon: catalog.colophon(request.params.game_id, request.query.version) });
   });
 
   app.get<{ Params: GameParams; Querystring: CatalogQuery }>("/api/games/:game_id/download", async (request, reply) => {
     const resolved = catalog.resolveVariant(request.params.game_id, request.query.version, request.query.architecture);
-    return sendDownload(request, reply, resolved.filePath, stringHeader(resolved.publicGame.id, request.params.game_id), resolved.version, resolved.architecture);
+    return sendDownload(request, reply, resolved.filePath, stringHeader(resolved.publicGame.id, request.params.game_id), resolved.version, resolved.architecture, {
+      ...(options.auth === undefined ? {} : { auth: options.auth }),
+      ...(options.downloadTelemetry === undefined ? {} : { sink: options.downloadTelemetry })
+    });
   });
+
+  return catalog;
 }
 
 function stringHeader(value: unknown, fallback: string): string {

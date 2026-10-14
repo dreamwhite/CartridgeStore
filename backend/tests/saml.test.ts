@@ -52,6 +52,7 @@ interface ResponseOverrides {
   readonly destination?: string;
   readonly recipient?: string;
   readonly notOnOrAfter?: string;
+  readonly email?: string;
 }
 
 function signedResponse(requestId: string, acsUrl: string, idpIssuer: string, privateKey: string, subject: string, overrides: ResponseOverrides = {}): string {
@@ -64,7 +65,8 @@ function signedResponse(requestId: string, acsUrl: string, idpIssuer: string, pr
   const audience = overrides.audience ?? "https://store.example.test/sp";
   const assertionId = "_" + crypto.randomBytes(24).toString("base64url");
   const responseId = "_" + crypto.randomBytes(24).toString("base64url");
-  const bare = `<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="${responseId}" Version="2.0" IssueInstant="${issueInstant}" Destination="${destination}" InResponseTo="${requestId}"><saml:Issuer>${responseIssuer}</saml:Issuer><samlp:Status><samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></samlp:Status><saml:Assertion ID="${assertionId}" Version="2.0" IssueInstant="${issueInstant}"><saml:Issuer>${responseIssuer}</saml:Issuer><saml:Subject><saml:NameID Format="${persistentNameId}">${subject}</saml:NameID><saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer"><saml:SubjectConfirmationData InResponseTo="${requestId}" Recipient="${recipient}" NotOnOrAfter="${notOnOrAfter}"/></saml:SubjectConfirmation></saml:Subject><saml:Conditions NotBefore="${issueInstant}" NotOnOrAfter="${notOnOrAfter}"><saml:AudienceRestriction><saml:Audience>${audience}</saml:Audience></saml:AudienceRestriction></saml:Conditions><saml:AuthnStatement AuthnInstant="${issueInstant}" SessionIndex="_session"><saml:AuthnContext><saml:AuthnContextClassRef>urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport</saml:AuthnContextClassRef></saml:AuthnContext></saml:AuthnStatement></saml:Assertion></samlp:Response>`;
+  const attributes = overrides.email ? `<saml:AttributeStatement><saml:Attribute Name="email"><saml:AttributeValue>${overrides.email}</saml:AttributeValue></saml:Attribute></saml:AttributeStatement>` : "";
+  const bare = `<samlp:Response xmlns:samlp="urn:oasis:names:tc:SAML:2.0:protocol" xmlns:saml="urn:oasis:names:tc:SAML:2.0:assertion" ID="${responseId}" Version="2.0" IssueInstant="${issueInstant}" Destination="${destination}" InResponseTo="${requestId}"><saml:Issuer>${responseIssuer}</saml:Issuer><samlp:Status><samlp:StatusCode Value="urn:oasis:names:tc:SAML:2.0:status:Success"/></samlp:Status><saml:Assertion ID="${assertionId}" Version="2.0" IssueInstant="${issueInstant}"><saml:Issuer>${responseIssuer}</saml:Issuer><saml:Subject><saml:NameID Format="${persistentNameId}">${subject}</saml:NameID><saml:SubjectConfirmation Method="urn:oasis:names:tc:SAML:2.0:cm:bearer"><saml:SubjectConfirmationData InResponseTo="${requestId}" Recipient="${recipient}" NotOnOrAfter="${notOnOrAfter}"/></saml:SubjectConfirmation></saml:Subject><saml:Conditions NotBefore="${issueInstant}" NotOnOrAfter="${notOnOrAfter}"><saml:AudienceRestriction><saml:Audience>${audience}</saml:Audience></saml:AudienceRestriction></saml:Conditions>${attributes}<saml:AuthnStatement AuthnInstant="${issueInstant}" SessionIndex="_session"><saml:AuthnContext><saml:AuthnContextClassRef>urn:oasis:names:tc:SAML:2.0:ac:classes:PasswordProtectedTransport</saml:AuthnContextClassRef></saml:AuthnContext></saml:AuthnStatement></saml:Assertion></samlp:Response>`;
   const assertionSigned = signXml(bare, privateKey, "//*[local-name(.)='Assertion']", "//*[local-name(.)='Assertion']");
   return signXml(assertionSigned, privateKey, "//*[local-name(.)='Response']", "//*[local-name(.)='Response']");
 }
@@ -80,7 +82,7 @@ function decodeRedirectRequest(location: string): { requestId: string; relayStat
   return { requestId, relayState };
 }
 
-function fixture(): { app: ReturnType<typeof buildApp>; databasePath: string; idpIssuer: string; privateKey: string; publicKey: string } {
+function fixture(autoProvision = false): { app: ReturnType<typeof buildApp>; databasePath: string; idpIssuer: string; privateKey: string; publicKey: string } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "prg32-saml-"));
   roots.push(root);
   const databasePath = createDatabase(root);
@@ -98,6 +100,7 @@ function fixture(): { app: ReturnType<typeof buildApp>; databasePath: string; id
       PRG32_BACKEND_AUTH_DISPOSABLE_ROOT: root,
       PRG32_BACKEND_SESSION_SECRET: sessionSecret,
       PRG32_BACKEND_SESSION_SECURE: "false",
+      PRG32_BACKEND_FEDERATION_AUTO_PROVISION: autoProvision ? "true" : "false",
       PRG32_BACKEND_FEDERATION_PUBLIC_ORIGIN: "http://127.0.0.1:5090"
     }),
     logger: false
@@ -181,6 +184,28 @@ describe("M6.3d.2h.4 SAML service provider", () => {
     const missing = await test.app.inject({ method: "POST", url: "/api/auth/saml/school-saml/acs", headers: { "content-type": "application/x-www-form-urlencoded" }, payload: new URLSearchParams({ SAMLResponse: encoded, RelayState: request.relayState }).toString() });
     expect(missing.statusCode).toBe(401);
     expect(missing.json()).toMatchObject({ ok: false, code: "saml_browser_binding_failed" });
+    await test.app.close();
+  });
+
+  it("provisions a new SAML identity only with a disposable opt-in and never email-links", async () => {
+    const test = fixture(true);
+    const acsUrl = "http://127.0.0.1:5090/api/auth/saml/school-saml/acs";
+    const login = await test.app.inject({ method: "GET", url: "/api/auth/saml/school-saml/login" });
+    const request = decodeRedirectRequest(login.headers.location as string);
+    const response = signedResponse(request.requestId, acsUrl, test.idpIssuer, test.privateKey, "new-saml-subject", { email: "new-saml@example.test" });
+    const completed = await test.app.inject({
+      method: "POST",
+      url: "/api/auth/saml/school-saml/acs",
+      headers: { "content-type": "application/x-www-form-urlencoded", cookie: cookie(login, "prg32_saml_correlation") },
+      payload: new URLSearchParams({ SAMLResponse: Buffer.from(response, "utf8").toString("base64"), RelayState: request.relayState }).toString()
+    });
+    expect(completed.statusCode).toBe(302);
+    const database = new Database(test.databasePath, { readonly: true });
+    expect(database.prepare("SELECT email, password_hash, role FROM users WHERE email = ?").get("new-saml@example.test"))
+      .toMatchObject({ email: "new-saml@example.test", password_hash: null, role: "user" });
+    expect(database.prepare("SELECT subject, provider_id FROM user_external_identities WHERE subject = ?").get("new-saml-subject"))
+      .toEqual({ subject: "new-saml-subject", provider_id: "school-saml" });
+    database.close();
     await test.app.close();
   });
 

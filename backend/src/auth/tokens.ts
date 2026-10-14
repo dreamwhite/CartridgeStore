@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 
 import type Database from "better-sqlite3";
 
-import { hasAccountStateColumn } from "./account-state.js";
+import { hasAccountStateColumn, hasAccountStatusColumn } from "./account-state.js";
 
 export interface TokenOwner {
   readonly id: number;
@@ -33,9 +33,10 @@ export function hashApiToken(token: string): string {
 export function lookupApiToken(sqlite: Database.Database, token: string): ApiTokenLookup | null {
   const tokenHash = hashApiToken(token);
   const disabledColumn = hasAccountStateColumn(sqlite) ? ", users.disabled_at" : "";
+  const statusColumn = hasAccountStatusColumn(sqlite) ? ", users.account_status" : "";
   const row = sqlite.prepare(
     "SELECT api_tokens.token_hash, api_tokens.label, api_tokens.created_at, api_tokens.last_used," +
-    " users.id, users.username, users.email, users.role" + disabledColumn +
+    " users.id, users.username, users.email, users.role" + disabledColumn + statusColumn +
     " FROM api_tokens JOIN users ON users.id = api_tokens.user_id" +
     " WHERE api_tokens.token_hash = ?"
   ).get(tokenHash) as
@@ -49,9 +50,10 @@ export function lookupApiToken(sqlite: Database.Database, token: string): ApiTok
         email: string;
         role: string;
         disabled_at?: string | null;
+        account_status?: string | null;
       }
     | undefined;
-  if (!row || (row.disabled_at !== undefined && row.disabled_at !== null)) return null;
+  if (!row || (row.disabled_at !== undefined && row.disabled_at !== null) || row.account_status === "suspended" || row.account_status === "banned" || row.account_status === "disabled") return null;
   const groups = sqlite
     .prepare(
       "SELECT groups.name FROM user_groups " +

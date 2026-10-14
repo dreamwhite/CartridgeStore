@@ -25,6 +25,7 @@ export interface FederationRuntimeOptions {
   readonly config: BackendConfig;
   readonly auth: AuthService;
   readonly secrets: SecretStore;
+  readonly audit?: AdminAuditLog;
 }
 
 /**
@@ -36,9 +37,12 @@ export function createFederationRuntime(options: FederationRuntimeOptions): Fede
   if (!options.auth.isWriteEnabled() || !options.config.authSessionSecret) return null;
 
   const writer: Database.Database = options.auth.writableDatabase();
-  const audit = new AdminAuditLogImpl(options.config);
+  const audit = options.audit ?? new AdminAuditLogImpl(options.config, writer);
   const providers = new FederationProviderService(writer, audit);
-  const identities = new FederationIdentityService(writer, providers, audit);
+  const identities = new FederationIdentityService(writer, providers, audit, {
+    autoProvision: options.config.federationAutoProvision
+  });
+  identities.migrateLegacyMappings();
   const transactions = new FederationTransactionStore(writer, options.config.authSessionSecret, providers);
 
   return {

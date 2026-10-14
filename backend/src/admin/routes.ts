@@ -192,6 +192,33 @@ function optionalString(query: JsonObject, field: string, maximum = 160): string
 }
 
 export function registerAdminRoutes(app: FastifyInstance, options: AdminRouteOptions): void {
+  app.get("/api/admin/catalog/moderation", async (request, reply) => {
+    const current = requireCatalogAdmin(request, reply, options, false, "moderation", "catalog.moderation.list");
+    if (!current) return reply;
+    try {
+      const query = queryObject(request);
+      assertFields(query, ["page", "limit", "q", "version", "architecture"]);
+      const page = positiveQuery(query.page, "page", 1, 100000);
+      const limit = positiveQuery(query.limit, "limit", 50, 100);
+      const search = optionalString(query, "q", 80);
+      const version = optionalString(query, "version", 80);
+      const architecture = optionalString(query, "architecture", 32);
+      return json(reply, { ok: true, ...options.catalog.moderationList({ page, limit, ...(search === undefined ? {} : { query: search }), ...(version === undefined ? {} : { version }), ...(architecture === undefined ? {} : { architecture }) }) });
+    } catch (error) { return operationFailure(reply, request, error); }
+  });
+
+  app.get<{ Params: CartridgeParams }>("/api/admin/catalog/moderation/:cartridgeId", async (request, reply) => {
+    const id = cartridgeId(request.params);
+    const current = requireCatalogAdmin(request, reply, options, false, id, "catalog.moderation.detail");
+    if (!current) return reply;
+    try {
+      const query = queryObject(request);
+      assertFields(query, ["version"]);
+      const version = optionalString(query, "version", 80);
+      return json(reply, { ok: true, cartridge: options.catalog.moderationDetail(id, version) });
+    } catch (error) { return operationFailure(reply, request, error); }
+  });
+
   app.get("/api/admin/cartridges", async (request, reply) => {
     const current = requireCatalogAdmin(request, reply, options, false, "list", "catalog.list");
     if (!current) return reply;
@@ -239,6 +266,20 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRouteOpt
     } catch (error) { return operationFailure(reply, request, error); }
   });
 
+  app.post<{ Params: CartridgeParams }>("/api/admin/cartridges/:cartridgeId/moderation", async (request, reply) => {
+    const id = cartridgeId(request.params);
+    const current = requireCatalogAdmin(request, reply, options, true, id, "catalog.moderation");
+    if (!current) return reply;
+    try {
+      const query = queryObject(request);
+      assertFields(query, ["version"]);
+      const body = object(request.body);
+      assertFields(body, ["action", "reason"]);
+      if (body.action !== "hidden" && body.action !== "unpublished" && body.action !== "restored") throw new AdminError("catalog_moderation_invalid", 400, "moderation action is invalid");
+      return json(reply, { ok: true, moderation: options.catalog.moderate({ gameId: id, version: requiredVersion(query), action: body.action, ...(body.reason === undefined ? {} : { reason: body.reason as string }) }, mutationContext(current, request)) });
+    } catch (error) { return operationFailure(reply, request, error); }
+  });
+
   app.delete<{ Params: CartridgeParams }>("/api/admin/cartridges/:cartridgeId", async (request, reply) => {
     const id = cartridgeId(request.params);
     const current = requireCatalogAdmin(request, reply, options, true, id, "catalog.delete");
@@ -264,6 +305,17 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRouteOpt
       const search = query.q === undefined ? undefined : typeof query.q === "string" && query.q.length <= 80 ? query.q.trim() : (() => { throw new AdminError("invalid_filter", 400, "q is invalid"); })();
       const role = query.role === undefined ? undefined : typeof query.role === "string" ? query.role : (() => { throw new AdminError("invalid_filter", 400, "role is invalid"); })();
       return json(reply, { ok: true, ...options.identity.listUsers({ page, limit, ...(search === undefined ? {} : { query: search }), ...(role === undefined ? {} : { role }), ...(groupIdValue === undefined ? {} : { groupId: groupIdValue }) }) });
+    } catch (error) { return operationFailure(reply, request, error); }
+  });
+
+  app.get("/api/admin/audit", async (request, reply) => {
+    const current = requireAdmin(request, reply, options, "settings:read", false);
+    if (!current) return reply;
+    try {
+      const query = queryObject(request);
+      assertFields(query, ["limit"]);
+      const limit = query.limit === undefined ? 100 : positiveQuery(query.limit, "limit", 100, 200);
+      return json(reply, { ok: true, ...options.identity.listAudit(limit) });
     } catch (error) { return operationFailure(reply, request, error); }
   });
 
@@ -314,6 +366,18 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRouteOpt
       assertFields(body, ["disabled"]);
       if (!Object.hasOwn(body, "disabled")) throw new AdminError("invalid_account_state", 400, "disabled is required");
       return json(reply, { ok: true, user: options.identity.setDisabled(userId(request.params), body.disabled, mutationContext(current, request)) });
+    } catch (error) { return operationFailure(reply, request, error); }
+  });
+
+  app.patch<{ Params: UserParams }>("/api/admin/users/:userId/status", async (request, reply) => {
+    if (!options.auth.isWriteEnabled()) return json(reply, { ok: false, error: "administrative writes are unavailable", code: "admin_write_unavailable" }, 503);
+    const current = requireAdmin(request, reply, options, "users:update", true);
+    if (!current) return reply;
+    try {
+      const body = object(request.body);
+      assertFields(body, ["status", "reason", "expires_at"]);
+      if (!Object.hasOwn(body, "status")) throw new AdminError("invalid_account_status", 400, "status is required");
+      return json(reply, { ok: true, user: options.identity.setStatus(userId(request.params), body.status, body.reason, body.expires_at, mutationContext(current, request)) });
     } catch (error) { return operationFailure(reply, request, error); }
   });
 

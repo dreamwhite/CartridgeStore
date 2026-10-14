@@ -23,6 +23,12 @@
     "storage:status": "tsx src/storage-v2/migration/cli.ts status",
     "storage:dispose": "tsx src/storage-v2/migration/cli.ts dispose",
     "storage:parity": "tsx src/storage-v2/differential/cli.ts",
+    "storage:backup": "tsx src/storage-v2/backup-cli.ts",
+    "storage:backup-v4": "tsx src/storage-v2/backup-v4-cli.ts",
+    "storage:candidate-init": "tsx src/storage-v2/candidate-init-cli.ts",
+    "storage:bootstrap-operational": "tsx src/storage-v2/operational-bootstrap-cli.ts",
+    "preflight:config": "tsx src/preflight/cli.ts",
+    "readiness:report": "tsx src/readiness/cli.ts",
     "secrets:migrate": "tsx src/secrets/cli.ts migrate",
     "secrets:rollback": "tsx src/secrets/cli.ts rollback",
     "secrets:rotate": "tsx src/secrets/cli.ts rotate",
@@ -44,6 +50,9 @@
     "fflate": "^0.8.3",
     "jose": "6.2.12",
     "openid-client": "6.8.8"
+  },
+  "optionalDependencies": {
+    "multicast-dns": "7.2.5"
   },
   "devDependencies": {
     "@eslint/js": "^9.22.0",

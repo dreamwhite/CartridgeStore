@@ -253,20 +253,10 @@ export class FederationProviderService {
   ) {}
 
   create(input: ProviderInput, context?: ProviderMutationContext, allowHttp = false): FederationProviderConfig {
-    const normalized = this.normalize(input, allowHttp);
+    const normalized = this.normalizeForProvisioning(input, allowHttp);
     try {
       this.database.exec("BEGIN IMMEDIATE");
-      this.database.prepare(
-        "INSERT INTO federation_providers(provider_id, protocol, display_name, issuer, client_id, client_auth_method, discovery_issuer, redirect_uri, scopes_json, client_secret_reference, idp_entity_id, sp_entity_id, acs_url, metadata_reference, trusted_certificate_reference, signing_key_reference, saml_entry_point, saml_name_id_format, saml_idp_certificate_pem, saml_trusted_certificates_json, saml_sp_certificate_pem, saml_want_assertions_signed, saml_want_authn_response_signed, saml_sign_authn_requests, saml_accepted_clock_skew_ms, saml_metadata_lifecycle_policy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-      ).run(
-        normalized.providerId, normalized.protocol, normalized.displayName, normalized.issuer,
-        normalized.clientId, normalized.clientAuthMethod, normalized.discoveryIssuer, normalized.redirectUri, JSON.stringify(normalized.scopes),
-        normalized.clientSecretReference, normalized.idpEntityId, normalized.spEntityId, normalized.acsUrl,
-        normalized.metadataReference, normalized.trustedCertificateReference, normalized.signingKeyReference,
-        normalized.samlEntryPoint, normalized.samlNameIdFormat, normalized.samlIdpCertificatePem, JSON.stringify(normalized.samlTrustedCertificatesPem), normalized.samlSpCertificatePem,
-        normalized.samlWantAssertionsSigned ? 1 : 0, normalized.samlWantAuthnResponseSigned ? 1 : 0,
-        normalized.samlSignAuthnRequests ? 1 : 0, normalized.samlAcceptedClockSkewMs, normalized.samlMetadataLifecyclePolicy
-      );
+      this.insertNormalized(normalized);
       this.database.exec("COMMIT");
       this.auditMutation(context, "federation.provider.created", normalized.providerId);
       return this.get(normalized.providerId);
@@ -275,6 +265,52 @@ export class FederationProviderService {
       if (this.isConstraint(error)) throw new FederationProviderError("federation_provider_conflict", 409, "provider identity already exists");
       throw error;
     }
+  }
+
+  normalizeForProvisioning(input: ProviderInput, allowHttp = false): FederationProviderConfig {
+    return this.normalize(input, allowHttp);
+  }
+
+  provisionMany(inputs: readonly ProviderInput[], allowHttp = false): { readonly providers: readonly FederationProviderConfig[]; readonly alreadyPresent: readonly string[] } {
+    const normalized = inputs.map((input) => this.normalizeForProvisioning(input, allowHttp));
+    const providerIds = new Set<string>();
+    const issuerKeys = new Set<string>();
+    for (const provider of normalized) {
+      if (providerIds.has(provider.providerId)) throw new FederationProviderError("federation_provider_duplicate", 409, "provider document contains duplicate provider ids");
+      providerIds.add(provider.providerId);
+      const issuerKey = `${provider.protocol}\u0000${provider.issuer}`;
+      if (issuerKeys.has(issuerKey)) throw new FederationProviderError("federation_provider_duplicate", 409, "provider document contains duplicate provider identities");
+      issuerKeys.add(issuerKey);
+      if (provider.protocol === "oidc" && provider.clientAuthMethod !== "none" && !provider.clientSecretReference) {
+        throw new FederationProviderError("federation_provider_secret_reference_required", 400, "OIDC client secret reference is required");
+      }
+      if (provider.protocol === "saml" && provider.samlSignAuthnRequests && !provider.signingKeyReference) {
+        throw new FederationProviderError("federation_provider_secret_reference_required", 400, "SAML signing key reference is required");
+      }
+    }
+    const alreadyPresent: string[] = [];
+    try {
+      this.database.exec("BEGIN IMMEDIATE");
+      for (const provider of normalized) {
+        const row = this.database.prepare("SELECT * FROM federation_providers WHERE provider_id = ?").get(provider.providerId) as Record<string, unknown> | undefined;
+        if (row) {
+          const existing = rowToConfig(row);
+          if (!sameProvisionedProvider(existing, provider)) throw new FederationProviderError("federation_provider_conflict", 409, "existing provider does not match the explicit provisioning document");
+          alreadyPresent.push(provider.providerId);
+          continue;
+        }
+        const conflicting = this.database.prepare("SELECT provider_id FROM federation_providers WHERE protocol = ? AND issuer = ?").get(provider.protocol, provider.issuer) as { provider_id?: string } | undefined;
+        if (conflicting?.provider_id) throw new FederationProviderError("federation_provider_conflict", 409, "provider issuer or entity identity is already assigned");
+        this.insertNormalized(provider);
+      }
+      this.database.exec("COMMIT");
+    } catch (error) {
+      if (this.database.inTransaction) this.database.exec("ROLLBACK");
+      if (error instanceof FederationProviderError) throw error;
+      if (this.isConstraint(error)) throw new FederationProviderError("federation_provider_conflict", 409, "provider identity already exists");
+      throw error;
+    }
+    return { providers: normalized.map((provider) => this.get(provider.providerId)), alreadyPresent };
   }
 
   update(providerIdValue: string, changes: Partial<Omit<ProviderInput, "providerId" | "protocol" | "issuer">>, context?: ProviderMutationContext, allowHttp = false): FederationProviderConfig {
@@ -307,7 +343,7 @@ export class FederationProviderService {
       samlAcceptedClockSkewMs: changes.samlAcceptedClockSkewMs ?? current.samlAcceptedClockSkewMs,
       samlMetadataLifecyclePolicy: changes.samlMetadataLifecyclePolicy ?? current.samlMetadataLifecyclePolicy
     };
-    const normalized = this.normalize(input, allowHttp);
+    const normalized = this.normalizeForProvisioning(input, allowHttp);
     const securityChanged = current.clientId !== normalized.clientId
       || current.clientAuthMethod !== normalized.clientAuthMethod
       || current.discoveryIssuer !== normalized.discoveryIssuer
@@ -500,6 +536,20 @@ export class FederationProviderService {
     };
   }
 
+  private insertNormalized(normalized: FederationProviderConfig): void {
+    this.database.prepare(
+      "INSERT INTO federation_providers(provider_id, protocol, display_name, issuer, client_id, client_auth_method, discovery_issuer, redirect_uri, scopes_json, client_secret_reference, idp_entity_id, sp_entity_id, acs_url, metadata_reference, trusted_certificate_reference, signing_key_reference, saml_entry_point, saml_name_id_format, saml_idp_certificate_pem, saml_trusted_certificates_json, saml_sp_certificate_pem, saml_want_assertions_signed, saml_want_authn_response_signed, saml_sign_authn_requests, saml_accepted_clock_skew_ms, saml_metadata_lifecycle_policy) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    ).run(
+      normalized.providerId, normalized.protocol, normalized.displayName, normalized.issuer,
+      normalized.clientId, normalized.clientAuthMethod, normalized.discoveryIssuer, normalized.redirectUri, JSON.stringify(normalized.scopes),
+      normalized.clientSecretReference, normalized.idpEntityId, normalized.spEntityId, normalized.acsUrl,
+      normalized.metadataReference, normalized.trustedCertificateReference, normalized.signingKeyReference,
+      normalized.samlEntryPoint, normalized.samlNameIdFormat, normalized.samlIdpCertificatePem, JSON.stringify(normalized.samlTrustedCertificatesPem), normalized.samlSpCertificatePem,
+      normalized.samlWantAssertionsSigned ? 1 : 0, normalized.samlWantAuthnResponseSigned ? 1 : 0,
+      normalized.samlSignAuthnRequests ? 1 : 0, normalized.samlAcceptedClockSkewMs, normalized.samlMetadataLifecyclePolicy
+    );
+  }
+
   private auditMutation(context: ProviderMutationContext | undefined, action: string, target: string): void {
     if (!context || !this.audit) return;
     // Administrative routes preflight audit storage before mutation. If the
@@ -511,4 +561,17 @@ export class FederationProviderService {
   private isConstraint(error: unknown): boolean {
     return error instanceof Error && "code" in error && typeof error.code === "string" && error.code.startsWith("SQLITE_CONSTRAINT");
   }
+}
+
+function sameProvisionedProvider(left: FederationProviderConfig, right: FederationProviderConfig): boolean {
+  const fields: Array<keyof FederationProviderConfig> = [
+    "providerId", "protocol", "displayName", "issuer", "clientId", "clientAuthMethod",
+    "discoveryIssuer", "redirectUri", "scopes", "clientSecretReference", "idpEntityId",
+    "spEntityId", "acsUrl", "metadataReference", "trustedCertificateReference",
+    "signingKeyReference", "samlEntryPoint", "samlNameIdFormat", "samlIdpCertificatePem",
+    "samlTrustedCertificatesPem", "samlSpCertificatePem", "samlWantAssertionsSigned",
+    "samlWantAuthnResponseSigned", "samlSignAuthnRequests", "samlAcceptedClockSkewMs",
+    "samlMetadataLifecyclePolicy"
+  ];
+  return fields.every((field) => JSON.stringify(left[field]) === JSON.stringify(right[field]));
 }

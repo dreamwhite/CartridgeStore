@@ -7,6 +7,7 @@ import { SubmissionError } from "./errors.js";
 import { buildSubmissionCartridge, normalizeArchitecture, validateCartridgeBinary, validateColophon, validateMetadata, COLOPHON_ABI } from "./prg32.js";
 import { parseZipArchive, type ZipEntry } from "./zip.js";
 import { PendingCartridgeStorage, type PendingStorage, type PendingVariant } from "./storage.js";
+import type { RuntimePolicy } from "../settings/runtime-policy.js";
 
 export interface SubmissionResult {
   readonly status: "pending";
@@ -81,7 +82,12 @@ function colophonFromManifest(manifest: Record<string, unknown>): Record<string,
   return colophon;
 }
 
-function prepareBundle(entries: Map<string, ZipEntry>, config: BackendConfig): { manifest: Record<string, unknown>; variants: PendingVariant[] } {
+export interface PreparedSubmissionBundle {
+  readonly manifest: Record<string, unknown>;
+  readonly variants: readonly PendingVariant[];
+}
+
+export function prepareSubmissionBundle(entries: Map<string, ZipEntry>, config: BackendConfig): PreparedSubmissionBundle {
   const manifest = parseManifest(entries, config);
   const assets = record(manifest.assets, "manifest.assets must be an object");
   const iconEntry = entry(entries, assets.icon, "manifest.assets.icon");
@@ -117,6 +123,7 @@ export interface SubmissionServiceOptions {
   readonly config: BackendConfig;
   readonly database: Database.Database;
   readonly storage?: PendingStorage;
+  readonly policy?: RuntimePolicy;
 }
 
 export class SubmissionService {
@@ -131,8 +138,10 @@ export class SubmissionService {
 
   createFromBundle(bundle: Uint8Array, principal: Principal): SubmissionResult {
     if (!principal.authenticated || principal.id === null) throw new SubmissionError("login required", "authentication_required", 401);
+    if (this.options.policy && !this.options.policy.publishingEnabled()) throw new SubmissionError("publishing is disabled", "invalid_request", 403);
+    if (this.options.policy && bundle.byteLength > this.options.policy.maxArtifactBytes()) throw new SubmissionError("bundle upload is too large", "submission_payload_too_large", 413);
     const entries = parseZipArchive(bundle, this.options.config);
-    const prepared = prepareBundle(entries, this.options.config);
+    const prepared = prepareSubmissionBundle(entries, this.options.config);
     if (prepared.variants.length === 0) throw new SubmissionError("bundle did not contain any cartridge variants");
     const metadata = clone(prepared.manifest);
     delete metadata.assets;

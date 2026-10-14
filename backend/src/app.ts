@@ -1,9 +1,11 @@
 import Fastify, { type FastifyInstance, type FastifyServerOptions } from "fastify";
 import multipart from "@fastify/multipart";
+import path from "node:path";
+import type Database from "better-sqlite3";
 
 import type { BackendConfig } from "./config/env.js";
 import { ReadonlyDatabaseManager } from "./db/readonly.js";
-import { CatalogError, ReadonlyCatalog } from "./catalog/catalog.js";
+import { CatalogError } from "./catalog/catalog.js";
 import { registerCatalogRoutes } from "./catalog/routes.js";
 import { encodePythonJson } from "./compatibility/serialization.js";
 import { registerAuthRoutes } from "./auth/routes.js";
@@ -18,6 +20,7 @@ import { MetricsService } from "./metrics/service.js";
 import { registerScoreRoutes, scoreRequestError } from "./scores/routes.js";
 import { ScoresService } from "./scores/service.js";
 import { registerStatsRoutes } from "./stats/routes.js";
+import { registerProfileRoutes } from "./profile/routes.js";
 import { BackupError } from "./backup/format.js";
 import { registerBackupRoutes } from "./backup/routes.js";
 import { BackupService } from "./backup/service.js";
@@ -39,6 +42,17 @@ import { ANONYMOUS, normalizeRole } from "./auth/principal.js";
 import { lookupLegacyConfiguredUser } from "./auth/tokens.js";
 import { MultiplayerHub } from "./multiplayer/hub.js";
 import { registerMultiplayerRoutes } from "./multiplayer/routes.js";
+import { openTargetStorage } from "./storage-v2/database.js";
+import { CanonicalCatalog } from "./storage-v2/catalog.js";
+import { CanonicalWorkflowService } from "./storage-v2/workflow.js";
+import { CanonicalDraftService } from "./storage-v2/drafts.js";
+import { mountDraftEndpoints } from "./storage-v2/draft-endpoints.js";
+import { createDiscoveryService, DiscoveryDependencyError } from "./discovery/service.js";
+import { createEmailService } from "./email/service.js";
+import { AdminAuditLog } from "./admin/audit.js";
+import { RuntimePolicy } from "./settings/runtime-policy.js";
+import { registerSetupRoutes } from "./setup/routes.js";
+import { SetupService } from "./setup/service.js";
 
 export interface AppOptions {
   readonly config: BackendConfig;
@@ -48,7 +62,28 @@ export interface AppOptions {
 
 export function buildApp(options: AppOptions): FastifyInstance {
   const database = new ReadonlyDatabaseManager(options.config);
-  const auth = new AuthService({ config: options.config, readonlyDatabase: database });
+  const email = createEmailService(options.config);
+  const auth = new AuthService({ config: options.config, readonlyDatabase: database, email });
+  let runtimeDatabase: Database.Database | null = null;
+  const runtimePolicy = new RuntimePolicy(() => runtimeDatabase ?? auth.database());
+  auth.setRuntimePolicy(runtimePolicy);
+  const canonicalWorkflow = options.config.canonicalWorkflowMode && options.config.canonicalStorageRoot
+    ? new CanonicalWorkflowService({
+      config: options.config,
+      root: options.config.canonicalStorageRoot,
+        database: openTargetStorage(options.config.canonicalStorageRoot, "read-write"),
+        policy: runtimePolicy
+    })
+    : null;
+  const canonicalDrafts = canonicalWorkflow ? new CanonicalDraftService(canonicalWorkflow.database, canonicalWorkflow.paths, options.config, canonicalWorkflow) : null;
+  const canonicalReadResource = canonicalWorkflow === null && options.config.canonicalStorageRoot
+    ? openTargetStorage(options.config.canonicalStorageRoot, "read-only")
+    : null;
+  const canonicalDatabaseForReads = canonicalWorkflow?.database ?? canonicalReadResource?.sqlite;
+  // Keep read-only configurations lazy: policy construction must not force a
+  // database open merely to build the app or to report an unavailable target.
+  runtimeDatabase = canonicalDatabaseForReads ?? null;
+  const canonicalMode = canonicalWorkflow !== null || canonicalReadResource !== null;
   const multiplayer = new MultiplayerHub({
     maxPeers: options.config.multiplayerMaxPeers,
     authenticationEnabled: options.config.legacyConfiguredUsers.length > 0 || auth.isWriteEnabled(),
@@ -74,7 +109,7 @@ export function buildApp(options: AppOptions): FastifyInstance {
   const authorization = new AuthorizationService();
   const secrets = new SecretStore({
     ...(options.config.secretKeyRegistryPath ? { keyRegistryPath: options.config.secretKeyRegistryPath } : {}),
-    applicationDataRoot: options.config.storeDataDirectory,
+    applicationDataRoot: options.config.canonicalStorageRoot ?? options.config.storeDataDirectory,
     maxRows: options.config.secretMaxRows
   });
   if (options.config.secretEncryptionEnabled || options.config.secretKeyRegistryPath) {
@@ -83,60 +118,90 @@ export function buildApp(options: AppOptions): FastifyInstance {
       throw new SecretStorageError("secret_plaintext_legacy", "secret settings require explicit migration before encryption is enabled");
     }
   }
+  const auditDatabase = options.config.authWriteEnabled ? auth.writableDatabase() : undefined;
+  const audit = new AdminAuditLog(options.config, auditDatabase);
   const identity = new AdminIdentityService({
     config: options.config,
     database: () => auth.database(),
-    writableDatabase: options.config.authWriteEnabled ? auth.writableDatabase() : null
+    writableDatabase: options.config.authWriteEnabled ? auth.writableDatabase() : null,
+    audit
   });
-  const federation = createFederationRuntime({ config: options.config, auth, secrets });
+  const federation = createFederationRuntime({ config: options.config, auth, secrets, audit });
   const adminTokens = new AdminTokenService({
     config: options.config,
     database: () => auth.database(),
-    writableDatabase: options.config.authWriteEnabled ? auth.writableDatabase() : null
+    writableDatabase: options.config.authWriteEnabled ? auth.writableDatabase() : null,
+    audit
   });
   const settings = new SettingsService({
     config: options.config,
-    database: () => auth.database(),
+    database: () => canonicalDatabaseForReads ?? auth.database(),
     writableDatabase: options.config.authWriteEnabled ? auth.writableDatabase() : null,
-    secrets
+    ...(options.config.canonicalStorageRoot ? { assetDirectory: path.join(options.config.canonicalStorageRoot, "storage", "objects", "site-assets") } : {}),
+    secrets,
+    audit,
+    email
+  });
+  const setupDatabase = canonicalWorkflow?.database ?? (auth.isWriteEnabled() ? auth.writableDatabase() : null);
+  const setup = new SetupService({
+    config: options.config,
+    auth,
+    settings,
+    providers: federation?.providers ?? null,
+    operations: federation?.operations ?? null,
+    audit,
+    database: setupDatabase
   });
   const backup = options.config.backupEnabled
     ? new BackupService(options.config, auth.writableDatabase(), { secrets })
     : null;
   backup?.recoverIncomplete();
-  const submission = options.config.submissionWriteEnabled
-    ? new SubmissionService({ config: options.config, database: auth.writableDatabase() })
-    : null;
-  const publication = options.config.submissionWriteEnabled && options.config.submissionDisposableRoot
+  const submission = canonicalWorkflow ?? (options.config.submissionWriteEnabled
+    ? new SubmissionService({ config: options.config, database: auth.writableDatabase(), policy: runtimePolicy })
+    : null);
+  const publication = canonicalWorkflow ? null : options.config.submissionWriteEnabled && options.config.submissionDisposableRoot
     ? new PublicationConsistencyService({ root: options.config.submissionDisposableRoot, database: auth.writableDatabase() })
     : null;
-  const review = options.config.submissionWriteEnabled && options.config.submissionDisposableRoot
+  const review = canonicalWorkflow ?? (options.config.submissionWriteEnabled && options.config.submissionDisposableRoot
     ? new ReviewService({
       root: options.config.submissionDisposableRoot,
       database: auth.writableDatabase(),
       maxSubmissions: options.config.reviewMaxSubmissions,
+      policy: runtimePolicy,
       ...(publication === null ? {} : { publication })
     })
+    : null);
+  const canonicalAdminCatalog = options.config.canonicalStorageRoot
+    ? new CanonicalCatalog(options.config.canonicalStorageRoot, {
+      operational: options.config.catalogReadMode === "canonical-operational",
+      legacyRoots: options.config.candidateRuntimeMode === undefined && options.config.catalogReadMode !== "canonical-operational"
+        ? [options.config.storeDataDirectory, options.config.databasePath]
+        : []
+    })
     : null;
-  const catalogAdmin = new CatalogAdminService({ config: options.config, publication });
+  const catalogAdmin = new CatalogAdminService({ config: options.config, publication, audit, moderationDatabase: canonicalWorkflow?.database ?? (options.config.authWriteEnabled ? auth.writableDatabase() : null), ...(canonicalAdminCatalog === null ? {} : { catalog: canonicalAdminCatalog }) });
   const metrics = new MetricsService({
     config: options.config,
     authorization,
-    writeEnabled: options.config.metricsWriteEnabled,
-    database: options.config.metricsWriteEnabled
+    canonicalMode,
+    policy: runtimePolicy,
+    writeEnabled: canonicalWorkflow !== null || options.config.metricsWriteEnabled,
+    database: canonicalDatabaseForReads ?? (options.config.metricsWriteEnabled
       ? auth.writableDatabase()
-      : () => (auth.isWriteEnabled() ? auth.writableDatabase() : database.get().sqlite)
+      : () => (auth.isWriteEnabled() ? auth.writableDatabase() : database.get().sqlite))
   });
   const scores = new ScoresService({
     config: options.config,
-    writeEnabled: options.config.scoresWriteEnabled,
-    database: options.config.scoresWriteEnabled
+    writeEnabled: canonicalWorkflow !== null || options.config.scoresWriteEnabled,
+    database: canonicalDatabaseForReads ?? (options.config.scoresWriteEnabled
       ? auth.writableDatabase()
-      : () => (auth.isWriteEnabled() ? auth.writableDatabase() : database.get().sqlite)
+      : () => (auth.isWriteEnabled() ? auth.writableDatabase() : database.get().sqlite))
   });
   const app = Fastify({
-    logger: options.logger ?? { level: options.config.logLevel }
+    logger: options.logger ?? { level: options.config.logLevel },
+    trustProxy: options.config.trustProxy
   });
+  const discovery = createDiscoveryService(options.config);
 
   // Credentialed browser access is opt-in and exact-origin only. The default
   // empty allowlist preserves the existing same-origin behaviour.
@@ -145,6 +210,10 @@ export function buildApp(options: AppOptions): FastifyInstance {
     app.addHook("onRequest", async (request, reply) => {
       const origin = request.headers.origin;
       if (typeof origin !== "string" || origin.length === 0) return;
+      // A SAML ACS submission is a browser form navigation from the external
+      // identity provider, not a script-initiated CORS request. Its Origin is
+      // therefore intentionally outside the API allowlist.
+      if (request.method === "POST" && request.url.startsWith("/api/auth/saml/") && request.url.endsWith("/acs")) return;
       if (!corsOrigins.has(origin)) {
         return reply.code(403).header("content-type", "application/json").send(Buffer.from(`${encodePythonJson({ ok: false, error: "origin is not allowed", code: "cors_origin_denied" })}\n`, "utf8"));
       }
@@ -164,11 +233,17 @@ export function buildApp(options: AppOptions): FastifyInstance {
     catch { done(new Error("invalid form body")); }
   });
 
-  registerCatalogRoutes(app, { config: options.config, database });
-  registerAuthRoutes(app, { config: options.config, auth, authorization });
+  const catalogRoutes = registerCatalogRoutes(app, {
+    config: options.config,
+    database,
+    auth,
+    ...(canonicalWorkflow === null ? {} : { downloadTelemetry: canonicalWorkflow })
+  });
+  registerAuthRoutes(app, { config: options.config, auth, authorization, email, legacyBootstrapAllowed: () => setup.legacyBootstrapAllowed() });
+  registerSetupRoutes(app, { config: options.config, setup });
   if (federation) {
-    registerOidcRoutes(app, { config: options.config, oidc: federation.oidc });
-    registerSamlRoutes(app, { config: options.config, saml: federation.saml });
+    registerOidcRoutes(app, { config: options.config, oidc: federation.oidc, sessionLifetimeSeconds: () => auth.sessionLifetimeSeconds() });
+    registerSamlRoutes(app, { config: options.config, saml: federation.saml, sessionLifetimeSeconds: () => auth.sessionLifetimeSeconds() });
     registerFederationAdminRoutes(app, {
       config: options.config,
       auth,
@@ -190,25 +265,41 @@ export function buildApp(options: AppOptions): FastifyInstance {
       parts: 12
     }
   });
-  registerMultiplayerRoutes(app, { hub: multiplayer });
+  const multiplayerPublicOrigin = options.config.federationPublicOrigin ?? options.config.frontendPublicOrigin;
+  if (multiplayerPublicOrigin) registerMultiplayerRoutes(app, { hub: multiplayer, publicOrigin: multiplayerPublicOrigin });
+  else registerMultiplayerRoutes(app, { hub: multiplayer });
   registerSettingsRoutes(app, { config: options.config, auth, authorization, settings });
   registerAdminRoutes(app, { auth, authorization, identity, tokens: adminTokens, catalog: catalogAdmin });
   registerBackupRoutes(app, { config: options.config, auth, authorization, backup });
   registerSubmissionRoutes(app, { config: options.config, auth, authorization, submission });
   registerReviewRoutes(app, { config: options.config, auth, authorization, review });
+  if (canonicalDrafts) mountDraftEndpoints(app, { config: options.config, auth, authorization, drafts: canonicalDrafts });
   registerMetricsRoutes(app, { config: options.config, auth, metrics });
   registerScoreRoutes(app, { config: options.config, auth, scores });
   registerStatsRoutes(app, {
-    database,
-    catalog: new ReadonlyCatalog(options.config.storeDataDirectory),
+    database: canonicalDatabaseForReads ?? database,
+    catalog: catalogRoutes,
+    canonicalMode,
     ...(options.nowSeconds === undefined ? {} : { nowSeconds: options.nowSeconds })
   });
+  registerProfileRoutes(app, { database: canonicalDatabaseForReads ?? database, auth });
 
   app.addHook("onRequest", async (request) => {
     // Registration links carry a one-time secret in the query string. Keep
     // request diagnostics useful without copying that secret into logs.
     request.log.info({ method: request.method, url: request.url.split("?", 1)[0] }, "request received");
     await Promise.resolve();
+  });
+
+  app.addHook("onReady", async () => {
+    if (!options.config.mdnsEnabled) return;
+    try {
+      await discovery.start();
+    } catch (error) {
+      const code = error instanceof DiscoveryDependencyError ? error.code : "mdns_start_failed";
+      app.log.error({ code }, "mDNS startup failed while explicitly enabled");
+      throw error;
+    }
   });
 
   app.get("/health", () => ({
@@ -218,13 +309,37 @@ export function buildApp(options: AppOptions): FastifyInstance {
   }));
 
   app.get("/ready", async (_request, reply) => {
-    const databaseReady = database.check();
+    let databaseReady = false;
+    let storageReady = true;
+    let writerReady = true;
+    try {
+      if (canonicalWorkflow) {
+        canonicalWorkflow.database.prepare("SELECT 1").get();
+        const state = canonicalWorkflow.database.prepare("SELECT state FROM storage_metadata WHERE singleton_id = 1").get() as { state?: string } | undefined;
+        storageReady = state?.state === "ready";
+        databaseReady = true;
+      } else {
+        databaseReady = database.check();
+      }
+    } catch {
+      databaseReady = false;
+      storageReady = false;
+    }
+    if (options.config.candidateRuntimeMode !== undefined || options.config.catalogReadMode === "canonical-operational") writerReady = canonicalWorkflow !== null;
+    const ready = databaseReady && storageReady && writerReady;
+    const resources = options.config.candidateRuntimeMode === undefined && options.config.catalogReadMode !== "canonical-operational"
+      ? { database: ready ? "available" : "unavailable" }
+      : {
+          database: databaseReady ? "available" : "unavailable",
+          canonical_storage: storageReady ? "available" : "unavailable",
+          writer_lease: writerReady ? "held" : "unavailable"
+        };
     const body = {
-      ok: databaseReady,
-      status: databaseReady ? "ready" : "not_ready",
-      resources: { database: databaseReady ? "available" : "unavailable" }
+      ok: ready,
+      status: ready ? "ready" : "not_ready",
+      resources
     } as const;
-    if (!databaseReady) {
+    if (!ready) {
       return reply.code(503).send(body);
     }
     return body;
@@ -291,9 +406,15 @@ export function buildApp(options: AppOptions): FastifyInstance {
       })}\n`, "utf8"));
   });
 
-  app.addHook("onClose", () => {
+  app.addHook("onClose", async () => {
+    await discovery.stop();
     multiplayer.close();
+    catalogRoutes.close();
+    canonicalAdminCatalog?.close();
+    canonicalWorkflow?.close();
+    canonicalReadResource?.close();
     auth.close();
+    email.close();
     database.close();
   });
 

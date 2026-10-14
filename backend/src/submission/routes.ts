@@ -15,7 +15,7 @@ interface SubmissionRouteOptions {
   readonly config: BackendConfig;
   readonly auth: AuthService;
   readonly authorization: AuthorizationService;
-  readonly submission: SubmissionService | null;
+  readonly submission: Pick<SubmissionService, "createFromBundle"> | null;
 }
 
 interface MultipartPayload {

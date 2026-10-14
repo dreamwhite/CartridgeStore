@@ -9,6 +9,8 @@ import { ARCHITECTURES } from "../submission/prg32.js";
 import { DISCOVERY_ABI, DISCOVERY_SERVICE_TYPE, SETTINGS, WRITABLE_SETTING_KEYS, type SettingValue, type WritableSettingKey } from "./definitions.js";
 import { parseSettingsPatch, parseStoredValue, SettingsValidationError } from "./schemas.js";
 import type { SecretStore } from "../secrets/service.js";
+import type { AdminAuditLog } from "../admin/audit.js";
+import type { EmailService, SmtpRuntimeConfig } from "../email/service.js";
 
 type DatabaseSource = Database.Database | (() => Database.Database);
 type AssetKind = "logo" | "favicon";
@@ -37,7 +39,38 @@ export interface SettingsServiceOptions {
   readonly assetDirectory?: string;
   readonly fault?: (point: "after-asset-publish" | "before-settings-commit") => void;
   readonly secrets?: SecretStore;
+  readonly audit?: AdminAuditLog;
+  readonly email?: EmailService;
 }
+
+const APPLICATION_SETTING_DEFINITIONS = {
+  "application.store_name": { type: "string", category: "application", sensitivity: "public", default: "PRG32 Cartridge Store" },
+  "application.store_description": { type: "string", category: "application", sensitivity: "public", default: "" },
+  "application.contact_email": { type: "string", category: "application", sensitivity: "public", default: "" },
+  "registration.enabled": { type: "boolean", category: "registration", sensitivity: "admin", default: true },
+  "registration.require_email_verification": { type: "boolean", category: "registration", sensitivity: "admin", default: false },
+  "publishing.enabled": { type: "boolean", category: "publishing", sensitivity: "admin", default: true },
+  "publishing.max_artifact_bytes": { type: "number", category: "publishing", sensitivity: "admin", default: 50 * 1024 * 1024 },
+  // Existing clients may reject without a note.  The policy is opt-in until
+  // an administrator explicitly enables it, preserving the current contract.
+  "review.require_note_on_rejection": { type: "boolean", category: "review", sensitivity: "admin", default: false },
+  "telemetry.collection_enabled": { type: "boolean", category: "telemetry", sensitivity: "admin", default: true },
+  "security.notify_user_on_account_change": { type: "boolean", category: "security", sensitivity: "admin", default: true },
+  "discovery.mdns_enabled": { type: "boolean", category: "discovery", sensitivity: "admin", default: false },
+  "session.lifetime_seconds": { type: "number", category: "session", sensitivity: "admin", default: 86400 },
+  "smtp.enabled": { type: "boolean", category: "smtp", sensitivity: "admin", default: false },
+  "smtp.host": { type: "string", category: "smtp", sensitivity: "admin", default: "" },
+  "smtp.port": { type: "number", category: "smtp", sensitivity: "admin", default: 1025 },
+  "smtp.encryption": { type: "enum", category: "smtp", sensitivity: "admin", default: "none" },
+  "smtp.auth_enabled": { type: "boolean", category: "smtp", sensitivity: "admin", default: false },
+  "smtp.username": { type: "string", category: "smtp", sensitivity: "admin", default: "" },
+  "smtp.from_name": { type: "string", category: "smtp", sensitivity: "admin", default: "PRG32 Cartridge Store" },
+  "smtp.from_email": { type: "string", category: "smtp", sensitivity: "admin", default: "" },
+  "smtp.reply_to": { type: "string", category: "smtp", sensitivity: "admin", default: "" },
+  "smtp.connection_timeout_ms": { type: "number", category: "smtp", sensitivity: "admin", default: 10000 },
+  "smtp.delivery_timeout_ms": { type: "number", category: "smtp", sensitivity: "admin", default: 10000 }
+} as const;
+type ApplicationSettingKey = keyof typeof APPLICATION_SETTING_DEFINITIONS;
 
 function rawValue(database: Database.Database, key: string): string | undefined {
   const row = database.prepare("SELECT value FROM store_settings WHERE key = ?").get(key) as { value?: unknown } | undefined;
@@ -117,6 +150,8 @@ export class SettingsService {
   private readonly assetDirectory: string;
   private readonly fault: SettingsServiceOptions["fault"];
   readonly secrets: SecretStore | undefined;
+  private readonly audit: AdminAuditLog | undefined;
+  private readonly email: EmailService | undefined;
 
   constructor(options: SettingsServiceOptions) {
     this.databaseSource = options.database;
@@ -125,6 +160,12 @@ export class SettingsService {
     this.assetDirectory = options.assetDirectory ?? path.join(options.config.storeDataDirectory, "static");
     this.fault = options.fault;
     this.secrets = options.secrets;
+    this.audit = options.audit;
+    this.email = options.email;
+    // Apply persisted SMTP settings at process start.  The environment only
+    // supplies bootstrap defaults; the canonical settings row is authoritative
+    // for subsequent disposable runtime operation.
+    if (this.writable) this.applyEmailRuntime(this.database);
   }
 
   private get database(): Database.Database {
@@ -136,9 +177,12 @@ export class SettingsService {
     const settings: Record<string, SettingView> = {};
     for (const key of WRITABLE_SETTING_KEYS) settings[key] = settingView(database, key);
     for (const key of ["theme_logo_url", "theme_favicon_url"] as const) settings[key] = settingView(database, key);
+    const applicationSettings = this.applicationSettings(database);
+    const smtp = this.smtpView(database, applicationSettings);
     return {
       ok: true,
       settings,
+      application_settings: applicationSettings,
       read_only: {
         auth_default_role: settingView(database, "auth_default_role", "user"),
         auth_require_email_domain: settingView(database, "auth_require_email_domain"),
@@ -158,13 +202,135 @@ export class SettingsService {
           port: this.discoveryPort(),
           version: this.config.storeVersion
         },
-        smtp: {
-          configured: false,
-          delivery_available: false,
-          runtime: "SMTP delivery is not implemented by Fastify; credentials remain deployment-managed"
-        }
+        smtp
       }
     };
+  }
+
+  private applicationSettings(database: Database.Database): Record<string, unknown> {
+    const rows = new Map<string, unknown>();
+    if (this.hasTable(database, "application_settings")) {
+      for (const row of database.prepare("SELECT setting_key, value_json FROM application_settings").all() as Array<{ setting_key: string; value_json: string }>) {
+        try { rows.set(row.setting_key, JSON.parse(row.value_json) as unknown); } catch { /* invalid persisted values are ignored and replaced by a safe default */ }
+      }
+    }
+    return Object.fromEntries(Object.entries(APPLICATION_SETTING_DEFINITIONS).map(([key, definition]) => [key, {
+      value: rows.has(key) ? rows.get(key) : definition.default,
+      type: definition.type,
+      category: definition.category,
+      sensitivity: definition.sensitivity,
+      writable: true,
+      version: this.settingVersion(database, key)
+    }]));
+  }
+
+  private settingVersion(database: Database.Database, key: string): number {
+    if (!this.hasTable(database, "application_settings")) return 0;
+    const row = database.prepare("SELECT version FROM application_settings WHERE setting_key = ?").get(key) as { version?: number } | undefined;
+    return Number.isSafeInteger(row?.version) ? Number(row?.version) : 0;
+  }
+
+  private smtpView(database: Database.Database, settings: Record<string, unknown>): Record<string, unknown> {
+    const value = (key: string, fallback: unknown): unknown => {
+      const row = settings[key];
+      return row && typeof row === "object" && !Array.isArray(row) && "value" in row ? row.value : fallback;
+    };
+    const secret = rawValue(database, "smtp_password");
+    return {
+      enabled: value("smtp.enabled", false), host: value("smtp.host", ""), port: value("smtp.port", 1025),
+      encryption: value("smtp.encryption", "none"), auth_enabled: value("smtp.auth_enabled", false),
+      username: value("smtp.username", ""), from_name: value("smtp.from_name", "PRG32 Cartridge Store"),
+      from_email: value("smtp.from_email", this.config.emailFrom), reply_to: value("smtp.reply_to", ""),
+      connection_timeout_ms: value("smtp.connection_timeout_ms", 10000), delivery_timeout_ms: value("smtp.delivery_timeout_ms", 10000),
+      password_configured: typeof secret === "string" && secret.length > 0,
+      configured: Boolean(value("smtp.host", "")),
+      delivery_available: Boolean(this.email),
+      runtime: "SMTP settings are persistent; passwords are encrypted and never returned"
+    };
+  }
+
+  private applyEmailRuntime(database: Database.Database): void {
+    if (!this.email) return;
+    const settings = this.applicationSettings(database);
+    const get = (key: string, fallback: unknown): unknown => {
+      const item = settings[key];
+      return item && typeof item === "object" && !Array.isArray(item) && "value" in item ? item.value : fallback;
+    };
+    const enabled = get("smtp.enabled", false) === true;
+    if (!enabled) {
+      this.email.configure({ transport: this.config.emailTransport === "memory" ? "memory" : "disabled", from: this.config.emailFrom, ...(this.config.emailPublicOrigin === undefined ? {} : { publicOrigin: this.config.emailPublicOrigin }) });
+      return;
+    }
+    const host = String(get("smtp.host", ""));
+    if (!host) throw new SettingsError("smtp_invalid_configuration", 400, "SMTP host is required when SMTP is enabled");
+    const encryption = String(get("smtp.encryption", "none"));
+    if (encryption !== "none" && encryption !== "starttls" && encryption !== "implicit_tls") throw new SettingsError("smtp_invalid_configuration", 400, "SMTP encryption is invalid");
+    const smtp: SmtpRuntimeConfig = {
+      host,
+      port: Number(get("smtp.port", 1025)),
+      encryption,
+      connectionTimeoutMs: Number(get("smtp.connection_timeout_ms", 10000)),
+      deliveryTimeoutMs: Number(get("smtp.delivery_timeout_ms", 10000)),
+      ...(String(get("smtp.username", "")) ? { username: String(get("smtp.username", "")) } : {})
+    };
+    const authEnabled = get("smtp.auth_enabled", false) === true;
+    if (authEnabled) {
+      if (!this.secrets) throw new SettingsError("secret_storage_unavailable", 503, "secret storage is unavailable");
+      const password = this.secrets.decrypt(database, "smtp_password");
+      if (!password) throw new SettingsError("smtp_invalid_configuration", 400, "SMTP password is not configured");
+      (smtp as { password?: string }).password = password;
+    }
+    this.email.configure({ transport: "smtp", from: String(get("smtp.from_email", this.config.emailFrom)), ...(this.config.emailPublicOrigin === undefined ? {} : { publicOrigin: this.config.emailPublicOrigin }), smtp });
+  }
+
+  private hasTable(database: Database.Database, table: string): boolean {
+    return Boolean(database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table));
+  }
+
+  private parseApplicationPatch(value: unknown): { readonly values: Partial<Record<ApplicationSettingKey, unknown>>; readonly smtpPassword?: string } {
+    if (value === undefined) return { values: {} };
+    if (value === null || typeof value !== "object" || Array.isArray(value)) throw new SettingsError("settings_invalid_value", 400, "application_settings must be an object");
+    const values: Partial<Record<ApplicationSettingKey, unknown>> = {};
+    let smtpPassword: string | undefined;
+    for (const [key, candidate] of Object.entries(value as Record<string, unknown>)) {
+      if (key === "smtp.password") {
+        if (typeof candidate !== "string" || candidate.length > 4096) throw new SettingsError("settings_invalid_value", 400, "SMTP password is invalid");
+        smtpPassword = candidate;
+        continue;
+      }
+      if (!(key in APPLICATION_SETTING_DEFINITIONS)) throw new SettingsError("settings_unknown_key", 400, "unknown application setting");
+      const definition = APPLICATION_SETTING_DEFINITIONS[key as ApplicationSettingKey];
+      if (definition.type === "boolean" && typeof candidate !== "boolean") throw new SettingsError("settings_invalid_value", 400, "setting value is invalid");
+      if (definition.type === "number" && (!Number.isSafeInteger(candidate) || Number(candidate) < 0 || Number(candidate) > 2_000_000_000)) throw new SettingsError("settings_invalid_value", 400, "setting value is invalid");
+      if ((definition.type === "string" || definition.type === "enum") && (typeof candidate !== "string" || candidate.length > 512)) throw new SettingsError("settings_invalid_value", 400, "setting value is invalid");
+      if (key === "smtp.encryption" && !["none", "starttls", "implicit_tls"].includes(String(candidate))) throw new SettingsError("settings_invalid_value", 400, "SMTP encryption is invalid");
+      values[key as ApplicationSettingKey] = candidate;
+    }
+    return { values, ...(smtpPassword === undefined ? {} : { smtpPassword }) };
+  }
+
+  private validateRuntimePatch(values: Partial<Record<ApplicationSettingKey, unknown>>, smtpPassword: string | undefined): void {
+    const database = this.database;
+    const current = this.applicationSettings(database);
+    const get = (key: ApplicationSettingKey, fallback: unknown): unknown => values[key] ?? (current[key] as { value?: unknown } | undefined)?.value ?? fallback;
+    if (get("session.lifetime_seconds", 86400) !== undefined && (!Number.isSafeInteger(get("session.lifetime_seconds", 86400)) || Number(get("session.lifetime_seconds", 86400)) < 60)) {
+      throw new SettingsError("settings_invalid_value", 400, "session lifetime must be at least 60 seconds");
+    }
+    const maxArtifact = get("publishing.max_artifact_bytes", 50 * 1024 * 1024);
+    if (!Number.isSafeInteger(maxArtifact) || Number(maxArtifact) < 1) throw new SettingsError("settings_invalid_value", 400, "publishing artifact limit is invalid");
+    const enabled = get("smtp.enabled", false) === true;
+    if (!enabled) return;
+    const host = String(get("smtp.host", ""));
+    if (!host) throw new SettingsError("smtp_invalid_configuration", 400, "SMTP host is required when SMTP is enabled");
+    const encryption = String(get("smtp.encryption", "none"));
+    if (!(["none", "starttls", "implicit_tls"] as string[]).includes(encryption)) throw new SettingsError("smtp_invalid_configuration", 400, "SMTP encryption is invalid");
+    if (get("smtp.auth_enabled", false) === true && smtpPassword === undefined) {
+      const stored = rawValue(database, "smtp_password");
+      if (!stored) throw new SettingsError("smtp_invalid_configuration", 400, "SMTP password is not configured");
+      if (!this.secrets) throw new SettingsError("secret_storage_unavailable", 503, "secret storage is unavailable");
+      try { this.secrets.decrypt(database, "smtp_password"); }
+      catch { throw new SettingsError("secret_storage_unavailable", 503, "secret storage is unavailable"); }
+    }
   }
 
   private discoveryPort(): number {
@@ -172,24 +338,59 @@ export class SettingsService {
     return Number.isSafeInteger(candidate) && candidate > 0 ? candidate : 5080;
   }
 
-  update(value: unknown): Record<string, unknown> {
+  update(value: unknown, context?: { readonly actorUserId: number; readonly requestId: string }): Record<string, unknown> {
     if (!this.writable) throw new SettingsError("settings_unavailable", 503, "settings write isolation is unavailable");
     let patch: Partial<Record<WritableSettingKey, SettingValue>>;
+    let application: { readonly values: Partial<Record<ApplicationSettingKey, unknown>>; readonly smtpPassword?: string };
+    const expectedVersions: Record<string, number> = {};
     try {
-      patch = parseSettingsPatch(value);
+      if (value === null || typeof value !== "object" || Array.isArray(value)) throw new SettingsError("settings_invalid_value", 400, "settings patch is invalid");
+      const input = value as Record<string, unknown>;
+      application = this.parseApplicationPatch(input.application_settings);
+      const expected = input.expected_versions;
+      if (expected !== undefined) {
+        if (expected === null || typeof expected !== "object" || Array.isArray(expected)) throw new SettingsError("settings_invalid_value", 400, "expected_versions must be an object");
+        for (const [key, version] of Object.entries(expected as Record<string, unknown>)) {
+          if (!(key in APPLICATION_SETTING_DEFINITIONS) || !Number.isSafeInteger(version) || Number(version) < 0) throw new SettingsError("settings_invalid_value", 400, "expected_versions is invalid");
+          expectedVersions[key] = Number(version);
+        }
+      }
+      const legacy = { ...input };
+      delete legacy.application_settings;
+      delete legacy.expected_versions;
+      patch = parseSettingsPatch(legacy);
     } catch (error) {
       if (error instanceof SettingsValidationError) throw error;
       throw new SettingsError("settings_invalid_value", 400, "settings patch is invalid");
     }
-    if (Object.keys(patch).length === 0) return this.read();
+    if (Object.keys(patch).length === 0 && Object.keys(application.values).length === 0 && application.smtpPassword === undefined) return this.read();
     const database = this.writable;
     try {
+      this.validateRuntimePatch(application.values, application.smtpPassword);
       database.exec("BEGIN IMMEDIATE");
+      for (const [key, expectedVersion] of Object.entries(expectedVersions)) {
+        const actual = this.settingVersion(database, key);
+        if (actual !== expectedVersion) throw new SettingsError("settings_conflict", 409, "settings version conflict");
+      }
       const write = database.prepare("INSERT INTO store_settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value");
       for (const key of WRITABLE_SETTING_KEYS) {
         const valueForKey = patch[key];
         if (valueForKey === undefined) continue;
         write.run(key, Array.isArray(valueForKey) ? valueForKey.join(",") : String(valueForKey));
+      }
+      if (this.hasTable(database, "application_settings")) {
+        const writeTyped = database.prepare(`INSERT INTO application_settings(setting_key, value_json, value_type, category, sensitivity, version, updated_at, updated_by_user_id)
+          VALUES (?, ?, ?, ?, ?, 1, ?, ?) ON CONFLICT(setting_key) DO UPDATE SET value_json = excluded.value_json, version = application_settings.version + 1, updated_at = excluded.updated_at, updated_by_user_id = excluded.updated_by_user_id`);
+        const now = new Date().toISOString();
+        for (const [key, candidate] of Object.entries(application.values)) {
+          const definition = APPLICATION_SETTING_DEFINITIONS[key as ApplicationSettingKey];
+          writeTyped.run(key, JSON.stringify(candidate), definition.type, definition.category, definition.sensitivity, now, context?.actorUserId ?? null);
+        }
+      }
+      if (application.smtpPassword !== undefined) {
+        if (!this.secrets) throw new SettingsError("secret_storage_unavailable", 503, "secret storage is unavailable");
+        const encrypted = this.secrets.encrypt("smtp_password", application.smtpPassword);
+        database.prepare("INSERT INTO store_settings(key, value) VALUES ('smtp_password', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(encrypted);
       }
       this.fault?.("before-settings-commit");
       database.exec("COMMIT");
@@ -198,7 +399,22 @@ export class SettingsService {
       if (error instanceof SettingsValidationError || error instanceof SettingsError) throw error;
       throw new SettingsError("settings_storage_failed", 503, "settings update failed", { cause: error });
     }
+    this.applyEmailRuntime(database);
+    if (this.audit && context) {
+      this.audit.append({ actor_user_id: context.actorUserId, target_type: "settings", target_id: "application", action: "settings.update", outcome: "committed", request_id: context.requestId, summary: { keys: [...Object.keys(patch), ...Object.keys(application.values), ...(application.smtpPassword === undefined ? [] : ["smtp.password"])].sort() } });
+    }
     return this.read();
+  }
+
+  async testSmtpConnection(): Promise<void> {
+    if (!this.email) throw new SettingsError("smtp_unavailable", 503, "email delivery is unavailable");
+    await this.email.testConnection();
+  }
+
+  async sendSmtpTest(to: string): Promise<void> {
+    if (!this.email) throw new SettingsError("smtp_unavailable", 503, "email delivery is unavailable");
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to) || to.length > 254) throw new SettingsError("smtp_test_recipient_invalid", 400, "test recipient is invalid");
+    await this.email.sendTest(to);
   }
 
   assetPath(kind: AssetKind): { readonly path: string; readonly extension: string; readonly mimeType: string } | null {

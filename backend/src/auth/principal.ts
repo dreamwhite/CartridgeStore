@@ -1,6 +1,6 @@
 import type Database from "better-sqlite3";
 
-import { hasAccountStateColumn } from "./account-state.js";
+import { hasAccountStateColumn, isAccountEnabled } from "./account-state.js";
 import { lookupApiToken, type ApiTokenLookup, hashApiToken } from "./tokens.js";
 
 export const ROLE_LEVELS = {
@@ -70,11 +70,11 @@ function groupsForUser(sqlite: Database.Database, userId: number): string[] {
 
 export function principalFromUserRow(
   sqlite: Database.Database,
-  row: { id: number; username: string; email: string; role: string; external_provider?: string | null; disabled_at?: string | null },
+  row: { id: number; username: string; email: string; role: string; external_provider?: string | null; disabled_at?: string | null; account_status?: string | null },
   authMethod: Principal["authMethod"],
   tokenHash?: string
 ): Principal {
-  if (row.disabled_at !== undefined && row.disabled_at !== null) return ANONYMOUS;
+  if ((row.disabled_at !== undefined && row.disabled_at !== null) || row.account_status === "suspended" || row.account_status === "banned" || row.account_status === "disabled") return ANONYMOUS;
   const role = normalizeRole(row.role);
   return {
     authenticated: true,
@@ -90,16 +90,19 @@ export function principalFromUserRow(
 }
 
 export function loadPrincipalById(sqlite: Database.Database, userId: number, authMethod: Principal["authMethod"]): Principal {
+  const columns = new Set((sqlite.prepare("PRAGMA table_info(users)").all() as Array<{ name: string }>).map((item) => item.name));
   const state = hasAccountStateColumn(sqlite) ? ", disabled_at" : "";
+  const status = columns.has("account_status") ? ", account_status" : "";
   const row = sqlite.prepare(
-    "SELECT id, username, email, role, external_provider" + state + " FROM users WHERE id = ?"
-  ).get(userId) as { id: number; username: string; email: string; role: string; external_provider?: string | null; disabled_at?: string | null } | undefined;
+    "SELECT id, username, email, role, external_provider" + state + status + " FROM users WHERE id = ?"
+  ).get(userId) as { id: number; username: string; email: string; role: string; external_provider?: string | null; disabled_at?: string | null; account_status?: string | null } | undefined;
   return row ? principalFromUserRow(sqlite, row, authMethod) : ANONYMOUS;
 }
 
 export function authenticateBearer(sqlite: Database.Database, token: string, writable: boolean): Principal {
   const lookup: ApiTokenLookup | null = lookupApiToken(sqlite, token);
   if (!lookup) return ANONYMOUS;
+  if (lookup.owner.id !== null && !isAccountEnabled(sqlite, lookup.owner.id)) return ANONYMOUS;
   if (writable) {
     sqlite.prepare("UPDATE api_tokens SET last_used = datetime('now') WHERE token_hash = ?").run(lookup.tokenHash);
   }

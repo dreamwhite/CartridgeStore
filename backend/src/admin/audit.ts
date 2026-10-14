@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import type { BackendConfig } from "../config/env.js";
+import type Database from "better-sqlite3";
 
 export const MAX_AUDIT_RECORD_BYTES = 4096;
 export const MAX_AUDIT_FILE_BYTES = 10 * 1024 * 1024;
@@ -15,6 +16,7 @@ export interface AuditEvent {
   readonly target_id: string;
   readonly action: string;
   readonly outcome: "attempted" | "committed" | "failed" | "rejected";
+  readonly summary?: Record<string, unknown>;
   readonly request_id: string;
 }
 
@@ -49,10 +51,12 @@ function eventId(): string {
 
 export class AdminAuditLog {
   private readonly path: string;
+  private readonly database: Database.Database | undefined;
 
-  constructor(config: BackendConfig) {
+  constructor(config: BackendConfig, database?: Database.Database) {
     const root = config.authDisposableRoot ?? path.join(config.storeDataDirectory, "admin");
     this.path = path.join(root, "admin-audit.jsonl");
+    this.database = database;
   }
 
   ensureReady(): void {
@@ -88,6 +92,18 @@ export class AdminAuditLog {
       fs.fsyncSync(fd);
     } finally {
       fs.closeSync(fd);
+    }
+    if (this.database) {
+      const table = this.database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'admin_audit_events'").get();
+      if (table) {
+        const summary = record.summary ?? {};
+        const summaryJson = JSON.stringify(summary);
+        if (summaryJson.length > 2048) throw new AuditUnavailableError();
+        this.database.prepare(
+          `INSERT INTO admin_audit_events(event_id, timestamp, actor_user_id, target_type, target_id, action, outcome, summary_json, request_id)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ).run(record.event_id, record.timestamp, record.actor_user_id, record.target_type, record.target_id, record.action, record.outcome, summaryJson, record.request_id);
+      }
     }
     return record;
   }

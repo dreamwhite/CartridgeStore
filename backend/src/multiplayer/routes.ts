@@ -10,6 +10,7 @@ interface MultiplayerQuery {
 
 export interface MultiplayerRouteOptions {
   readonly hub: MultiplayerHub;
+  readonly publicOrigin?: string;
 }
 
 export function registerMultiplayerRoutes(app: FastifyInstance, options: MultiplayerRouteOptions): void {
@@ -31,11 +32,13 @@ export function registerMultiplayerRoutes(app: FastifyInstance, options: Multipl
         method: "GET",
         url: "/api/multiplayer",
         handler: (request, reply) => {
-          const scheme = request.protocol === "https" ? "wss" : "ws";
+          const configuredOrigin = options.publicOrigin ? new URL(options.publicOrigin) : null;
+          const scheme = configuredOrigin ? (configuredOrigin.protocol === "https:" ? "wss" : "ws") : (request.protocol === "https" ? "wss" : "ws");
+          const host = configuredOrigin?.host ?? request.headers.host ?? "localhost";
           return reply.send({
             ok: true,
             service: "PRG32 multiplayer relay",
-            websocket: `${scheme}://${request.headers.host ?? "localhost"}/api/multiplayer`,
+            websocket: `${scheme}://${host}/api/multiplayer`,
             auth_enabled: options.hub.authenticationEnabled,
             protocol: {
               join: { type: "join", signature: "game-v1", player_id: 1 },
@@ -72,6 +75,8 @@ export function registerMultiplayerRoutes(app: FastifyInstance, options: Multipl
 function tokenFromRequest(request: FastifyRequest<{ Querystring: MultiplayerQuery }>): string {
   const authorization = request.headers.authorization;
   if (authorization?.toLowerCase().startsWith("bearer ")) return authorization.slice(7).trim();
+  const explicit = request.headers["x-prg32-token"];
+  if (typeof explicit === "string") return explicit.trim();
   return request.query.token?.trim() ?? "";
 }
 

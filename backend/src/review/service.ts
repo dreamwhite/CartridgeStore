@@ -8,6 +8,7 @@ import { encodePythonJson } from "../compatibility/serialization.js";
 import { PublicationConsistencyService, applyReviewMetadata, type ReconciliationFinding } from "../consistency/publication.js";
 import type { Principal } from "../auth/principal.js";
 import { ReviewError, type ReviewErrorCode } from "./errors.js";
+import type { RuntimePolicy } from "../settings/runtime-policy.js";
 
 const REVIEW_OPERATION_ROOT = "review-operations";
 const MAX_REVIEW_JOURNAL_BYTES = 512 * 1024;
@@ -33,6 +34,9 @@ export interface SubmissionRecord {
   readonly reviewed_at: string | null;
   readonly metadata: Record<string, unknown>;
   readonly architectures: readonly Record<string, unknown>[];
+  readonly revision_of_submission_id?: number | null;
+  readonly revision_number?: number;
+  readonly review_history?: readonly Record<string, unknown>[];
 }
 
 export interface OwnedSubmissionSummary {
@@ -57,6 +61,14 @@ export interface OwnedSubmissionPage {
     readonly next_page: number | null;
     readonly prev_page: number | null;
   };
+}
+
+export interface ReviewWorkflowService {
+  list(status: string | undefined): SubmissionRecord[];
+  listMine(userId: number, status: string | undefined, page?: number, perPage?: number): OwnedSubmissionPage;
+  detail(submissionId: number): SubmissionRecord;
+  approve(submissionId: number, metadataUpdates: Record<string, unknown>, principal: Principal, note?: string): SubmissionRecord;
+  reject(submissionId: number, principal: Principal, note?: string): SubmissionRecord;
 }
 
 type SubmissionRow = Omit<SubmissionRecord, "metadata" | "architectures">;
@@ -166,6 +178,7 @@ export interface ReviewServiceOptions {
   readonly maxSubmissions?: number;
   readonly publication?: PublicationConsistencyService;
   readonly fault?: (point: "after-rejection-database-update" | "after-rejection-cleanup") => void;
+  readonly policy?: RuntimePolicy;
 }
 
 export class ReviewService {
@@ -174,12 +187,14 @@ export class ReviewService {
   private readonly maxSubmissions: number;
   readonly publication: PublicationConsistencyService;
   private readonly fault: ReviewServiceOptions["fault"];
+  private readonly policy: RuntimePolicy | undefined;
 
   constructor(options: ReviewServiceOptions) {
     this.root = path.resolve(options.root);
     this.database = options.database;
     this.maxSubmissions = options.maxSubmissions ?? MAX_REVIEW_SUBMISSIONS;
     this.fault = options.fault;
+    this.policy = options.policy;
     if (!fs.existsSync(this.root) || !fs.lstatSync(this.root).isDirectory() || fs.lstatSync(this.root).isSymbolicLink()) fail("review disposable root is invalid", "review_unavailable", 503);
     this.publication = options.publication ?? new PublicationConsistencyService({ root: this.root, database: this.database });
     fs.mkdirSync(safeInside(this.root, REVIEW_OPERATION_ROOT), { recursive: true, mode: 0o700 });
@@ -254,9 +269,10 @@ export class ReviewService {
     return this.detail(id);
   }
 
-  reject(submissionId: number, principal: Principal): SubmissionRecord {
+  reject(submissionId: number, principal: Principal, note = ""): SubmissionRecord {
     const id = safeSubmissionId(submissionId);
     const reviewer = reviewerOf(principal);
+    if (this.policy?.requireReviewNoteOnRejection() && note.trim().length === 0) fail("a rejection note is required");
     return this.publication.runSerialized(() => {
       const row = rowFor(this.database, id);
       if (!row) fail("submission not found", "review_not_found", 404);

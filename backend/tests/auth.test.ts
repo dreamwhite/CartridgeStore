@@ -81,6 +81,33 @@ afterEach(() => {
 });
 
 describe("M4.1 isolated authentication foundation", () => {
+  it("completes username registration and password recovery through the in-memory mail transport", async () => {
+    const databasePath = createAuthDatabase();
+    const app = createApp(databasePath);
+    const initial = await csrf(app);
+    const requested = await app.inject({ method: "POST", url: "/auth/register", headers: { cookie: initial.cookie, "x-csrftoken": initial.token }, payload: { username: "new-user", email: "new-user@example.test", password: "registration-password", password_confirm: "registration-password" } });
+    expect(requested.statusCode).toBe(200);
+    const mail = await app.inject({ method: "GET", url: "/api/_test/email/messages", headers: { "x-prg32-bootstrap-token": TEST_BOOTSTRAP_TOKEN } });
+    const registrationText = (mail.json<{ messages: Array<{ text: string }> }>().messages.at(-1)?.text ?? "");
+    const registrationToken = new URL(registrationText.match(/https?:\/\/\S+/u)?.[0] ?? "http://invalid").searchParams.get("token") ?? "";
+    const completed = await app.inject({ method: "POST", url: "/auth/register/complete", headers: { cookie: initial.cookie, "x-csrftoken": initial.token }, payload: { token: registrationToken } });
+    expect(completed.statusCode).toBe(200);
+    expect((completed.json<{ user: { username: string } }>().user).username).toBe("new-user");
+    const activeCookie = cookieFrom(completed);
+    const activeCsrf = await csrf(app, activeCookie);
+    const resetRequest = await app.inject({ method: "POST", url: "/auth/password/reset/request", headers: { cookie: activeCookie, "x-csrftoken": activeCsrf.token }, payload: { identifier: "new-user" } });
+    expect(resetRequest.statusCode).toBe(200);
+    const resetMail = await app.inject({ method: "GET", url: "/api/_test/email/messages", headers: { "x-prg32-bootstrap-token": TEST_BOOTSTRAP_TOKEN } });
+    const resetText = (resetMail.json<{ messages: Array<{ text: string }> }>().messages.at(-1)?.text ?? "");
+    const resetToken = new URL(resetText.match(/https?:\/\/\S+/u)?.[0] ?? "http://invalid").searchParams.get("token") ?? "";
+    const resetCsrf = await csrf(app);
+    const reset = await app.inject({ method: "POST", url: "/auth/password/reset/complete", headers: { cookie: resetCsrf.cookie, "x-csrftoken": resetCsrf.token }, payload: { token: resetToken, password: "reset-password-123", password_confirm: "reset-password-123" } });
+    expect(reset.statusCode).toBe(200);
+    const replay = await app.inject({ method: "POST", url: "/auth/password/reset/complete", headers: { cookie: resetCsrf.cookie, "x-csrftoken": resetCsrf.token }, payload: { token: resetToken, password: "reset-password-123", password_confirm: "reset-password-123" } });
+    expect(replay.statusCode).toBe(400);
+    expect((await app.inject({ method: "GET", url: "/auth/me", headers: { cookie: initial.cookie } })).statusCode).toBe(401);
+    await app.close();
+  });
   it("fails closed when write isolation is missing or points at the shadow database", () => {
     expect(() => loadConfig({ PRG32_BACKEND_AUTH_WRITE_ENABLED: "true" })).toThrow("AUTH_WRITE_MODE");
     expect(() => loadConfig({
@@ -125,12 +152,19 @@ describe("M4.1 isolated authentication foundation", () => {
     const validLogin = await app.inject({ method: "POST", url: "/auth/login", headers: { cookie: bootCookie, "x-csrftoken": bootCsrf.token }, payload: { username: "admin", password: "long-password-123" } });
     expect(validLogin.json<{ user: { permissions: string[] } }>().user.permissions).toEqual(expect.arrayContaining(["settings:read", "users:read", "catalog:metadata:write"]));
     const rotatedCookie = cookieFrom(validLogin);
+    expect(header(validLogin, "set-cookie")).toMatch(/HttpOnly/);
+    expect(header(validLogin, "set-cookie")).toMatch(/SameSite=Lax/);
+    expect(header(validLogin, "set-cookie")).toMatch(/Path=\//);
     expect(rotatedCookie).not.toBe(bootCookie);
     expect((await app.inject({ method: "GET", url: "/auth/me", headers: { cookie: bootCookie } })).statusCode).toBe(401);
+    const dualOriginMe = await app.inject({ method: "GET", url: "/api/auth/me", headers: { cookie: rotatedCookie } });
+    expect(dualOriginMe.statusCode).toBe(200);
+    expect(jsonBody(dualOriginMe).user).toMatchObject({ username: "admin", email: "admin@example.test" });
     const currentCsrf = await csrf(app, rotatedCookie);
     expect((await app.inject({ method: "POST", url: "/auth/logout", headers: { cookie: rotatedCookie } })).statusCode).toBe(403);
     expect((await app.inject({ method: "POST", url: "/auth/logout", headers: { cookie: rotatedCookie, "x-csrftoken": currentCsrf.token } })).statusCode).toBe(200);
     expect((await app.inject({ method: "GET", url: "/auth/me", headers: { cookie: rotatedCookie } })).statusCode).toBe(401);
+    expect((await app.inject({ method: "GET", url: "/auth/me", headers: { cookie: "prg32_ts_session=%E0%A4%A" } })).statusCode).toBe(401);
     await app.close();
   });
 
@@ -270,6 +304,8 @@ describe("M4.1 isolated authentication foundation", () => {
     };
     expect(() => loadConfig({ ...base, PRG32_BACKEND_SESSION_SECRET: "too-short" })).toThrow("32 characters");
     expect(() => loadConfig({ ...base, PRG32_BACKEND_BOOTSTRAP_TOKEN: "too-short" })).toThrow("32 characters");
+    expect(() => loadConfig({ PRG32_BACKEND_FEDERATION_AUTO_PROVISION: "true" })).toThrow("isolated non-production auth writer");
+    expect(() => loadConfig({ ...base, NODE_ENV: "production", PRG32_BACKEND_FEDERATION_AUTO_PROVISION: "true" })).toThrow("isolated non-production auth writer");
   });
 
   it("expires opaque sessions and preserves cookie integrity attributes", () => {

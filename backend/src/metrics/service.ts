@@ -4,6 +4,7 @@ import type { BackendConfig } from "../config/env.js";
 import type { Principal } from "../auth/principal.js";
 import { AuthorizationService } from "../authorization/service.js";
 import { MetricsError } from "./errors.js";
+import type { RuntimePolicy } from "../settings/runtime-policy.js";
 
 type DatabaseSource = Database.Database | (() => Database.Database);
 
@@ -57,8 +58,10 @@ export interface MetricsServiceOptions {
   readonly config: BackendConfig;
   readonly database: DatabaseSource;
   readonly writeEnabled: boolean;
+  readonly canonicalMode?: boolean;
   readonly authorization?: AuthorizationService;
   readonly fault?: (point: "after-batch-sample" | "before-batch-commit") => void;
+  readonly policy?: RuntimePolicy;
 }
 
 function fail(message: string, code: ConstructorParameters<typeof MetricsError>[1], statusCode = 400): never {
@@ -149,21 +152,26 @@ export class MetricsService {
   private readonly databaseSource: DatabaseSource;
   private readonly config: BackendConfig;
   private readonly writeEnabled: boolean;
+  private readonly canonicalMode: boolean;
   private readonly fault: MetricsServiceOptions["fault"];
   private readonly authorization: AuthorizationService;
+  private readonly policy: RuntimePolicy | undefined;
 
   constructor(options: MetricsServiceOptions) {
     this.databaseSource = options.database;
     this.config = options.config;
     this.writeEnabled = options.writeEnabled;
+    this.canonicalMode = options.canonicalMode ?? false;
     this.fault = options.fault;
     this.authorization = options.authorization ?? new AuthorizationService();
+    this.policy = options.policy;
   }
 
   private get database(): Database.Database { return typeof this.databaseSource === "function" ? this.databaseSource() : this.databaseSource; }
 
   private ensureWrite(): void {
     if (!this.writeEnabled) fail("metrics write isolation is unavailable", "metrics_unavailable", 503);
+    if (this.policy && !this.policy.telemetryCollectionEnabled()) fail("telemetry collection is disabled", "metrics_unavailable", 503);
   }
 
   private runRow(runId: string): RunRecord | null {
@@ -203,6 +211,24 @@ export class MetricsService {
     const db = this.database;
     try {
       db.exec("BEGIN IMMEDIATE");
+      if (this.canonicalMode) {
+        const existing = db.prepare("SELECT board_id, target, display_backend, firmware_version, firmware_git_sha, game_name, sample_period_frames, started_at, submitted_by, user_id FROM runs WHERE run_id = ?").get(record.runId) as Record<string, unknown> | undefined;
+        if (existing) {
+          const same = existing.board_id === record.boardId
+            && existing.target === record.target
+            && existing.display_backend === record.displayBackend
+            && existing.firmware_version === record.firmwareVersion
+            && existing.firmware_git_sha === record.firmwareGitSha
+            && existing.game_name === record.gameName
+            && existing.sample_period_frames === record.samplePeriodFrames
+            && existing.started_at === record.startedAt
+            && existing.submitted_by === record.submittedBy
+            && (existing.user_id ?? null) === (record.userId ?? null);
+          if (!same) throw new MetricsError("run already exists with different metadata", "run_state_conflict", 409);
+          db.exec("COMMIT");
+          return { ok: true, run_id: runId };
+        }
+      }
       db.prepare(
         `INSERT INTO runs(run_id, board_id, target, display_backend, firmware_version,
           firmware_git_sha, game_name, sample_period_frames, started_at, submitted_by, user_id)
@@ -218,6 +244,7 @@ export class MetricsService {
       return { ok: true, run_id: runId };
     } catch (error) {
       if (db.inTransaction) db.exec("ROLLBACK");
+      if (error instanceof MetricsError) throw error;
       throw new MetricsError("metrics storage failed", "metrics_storage_failed", 500, { cause: error });
     }
   }
@@ -269,6 +296,23 @@ export class MetricsService {
     const finishedAt = intValue(payload.finished_ms, Math.trunc(Date.now()), 0);
     const dropped = intValue(payload.dropped_samples, 0, 0);
     const db = this.database;
+    if (this.canonicalMode) {
+      try {
+        db.exec("BEGIN IMMEDIATE");
+        const existing = db.prepare("SELECT finished_at FROM runs WHERE run_id = ?").get(runId) as { finished_at: number | null } | undefined;
+        if (!existing) fail("run_id not found", "run_not_found", 404);
+        if (existing.finished_at !== null && existing.finished_at !== finishedAt) {
+          throw new MetricsError("run has already been completed with a different timestamp", "run_state_conflict", 409);
+        }
+        db.prepare("UPDATE runs SET finished_at = ?, dropped_samples = MAX(dropped_samples, ?) WHERE run_id = ?").run(finishedAt, dropped, runId);
+        db.exec("COMMIT");
+        return { ok: true, run_id: runId };
+      } catch (error) {
+        if (db.inTransaction) db.exec("ROLLBACK");
+        if (error instanceof MetricsError) throw error;
+        throw new MetricsError("metrics storage failed", "metrics_storage_failed", 500, { cause: error });
+      }
+    }
     const changes = db.prepare("UPDATE runs SET finished_at = ?, dropped_samples = MAX(dropped_samples, ?) WHERE run_id = ?").run(finishedAt, dropped, runId).changes;
     if (changes === 0) fail("run_id not found", "run_not_found", 404);
     return { ok: true, run_id: runId };

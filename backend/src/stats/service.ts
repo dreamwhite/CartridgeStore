@@ -1,7 +1,12 @@
 import type Database from "better-sqlite3";
 
-import type { ReadonlyCatalog } from "../catalog/catalog.js";
 import type { ReadonlyDatabaseManager } from "../db/readonly.js";
+
+type DatabaseSource = Database.Database | ReadonlyDatabaseManager;
+
+export interface StatsCatalogSource {
+  listGames(query?: string): Record<string, unknown>[];
+}
 
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
 const WEEK_SECONDS = 7 * 24 * 60 * 60;
@@ -95,7 +100,7 @@ function parseDownloadQuery(query: StatsQuery): ParsedDownloadQuery {
   };
 }
 
-function filters(query: ParsedDownloadQuery, gameId?: string): { sql: string; params: string[] } {
+function filters(query: ParsedDownloadQuery, gameId: string | undefined, gameColumn: "game_id" | "cartridge_id"): { sql: string; params: string[] } {
   const clauses: string[] = [];
   const params: string[] = [];
   if (query.since) {
@@ -107,13 +112,13 @@ function filters(query: ParsedDownloadQuery, gameId?: string): { sql: string; pa
     params.push(query.until);
   }
   if (gameId) {
-    clauses.push("game_id = ?");
+    clauses.push(`${gameColumn} = ?`);
     params.push(gameId);
   }
   return { sql: clauses.length ? `WHERE ${clauses.join(" AND ")}` : "", params };
 }
 
-function catalogLookup(catalog: ReadonlyCatalog): Map<string, Record<string, unknown>> {
+function catalogLookup(catalog: StatsCatalogSource): Map<string, Record<string, unknown>> {
   try {
     return new Map(catalog.listGames().map((game) => [String(game.id), game]));
   } catch {
@@ -137,17 +142,22 @@ export interface GameDownloadBreakdown {
 
 export class StatsService {
   constructor(
-    private readonly database: ReadonlyDatabaseManager,
-    private readonly catalog: ReadonlyCatalog,
+    private readonly database: DatabaseSource,
+    private readonly catalog: StatsCatalogSource,
+    private readonly canonicalMode = false,
     private readonly nowSeconds: () => number = () => Math.floor(Date.now() / 1000)
   ) {}
 
   private get sqlite(): Database.Database {
-    return this.database.get().sqlite;
+    return "get" in this.database ? this.database.get().sqlite : this.database;
+  }
+
+  private get gameColumn(): "game_id" | "cartridge_id" {
+    return this.canonicalMode ? "cartridge_id" : "game_id";
   }
 
   private series(query: ParsedDownloadQuery, gameId?: string): Array<{ date: string; downloads: number }> {
-    const where = filters(query, gameId);
+    const where = filters(query, gameId, this.gameColumn);
     const rows = this.sqlite.prepare(
       `SELECT ${periodExpression(query.granularity)} AS bucket, COUNT(*) AS downloads
        FROM download_events
@@ -164,13 +174,13 @@ export class StatsService {
 
   downloadSummary(input: StatsQuery, gameId?: string): DownloadSummary {
     const query = parseDownloadQuery(input);
-    const where = filters(query, gameId);
+    const where = filters(query, gameId, this.gameColumn);
     const series = this.series(query, gameId);
     const total = this.sqlite.prepare(
       `SELECT COUNT(*) AS total FROM download_events ${where.sql}`
     ).get(...where.params) as DownloadCountRow;
     const topGames = this.sqlite.prepare(
-      `SELECT game_id, COUNT(*) AS downloads
+      `SELECT ${this.gameColumn} AS game_id, COUNT(*) AS downloads
        FROM download_events
        ${where.sql}
        GROUP BY game_id
@@ -198,7 +208,7 @@ export class StatsService {
     const rows = this.sqlite.prepare(
       `SELECT architecture, COUNT(*) AS downloads
        FROM download_events
-       WHERE game_id = ?
+       WHERE ${this.gameColumn} = ?
        GROUP BY architecture
        ORDER BY downloads DESC, architecture ASC`
     ).all(gameId) as ArchitectureRow[];

@@ -106,7 +106,10 @@ describe("M2.1 data and serialization compatibility gate", () => {
     }).sort((left, right) => left.name.localeCompare(right.name));
     const expected = expectedSchema.tables.map((table) => ({
       name: table.name,
-      columns: table.columns.map((column) => column.name)
+      columns: [
+        ...table.columns.map((column) => column.name),
+        ...(table.name === "users" ? ["disabled_at"] : [])
+      ]
     })).sort((left, right) => left.name.localeCompare(right.name));
     expect(mapped).toEqual(expected);
   });

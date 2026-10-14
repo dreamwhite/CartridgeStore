@@ -27,6 +27,8 @@ interface MockOidcProvider {
   issuer: string;
   server: http.Server;
   subject: string;
+  email: string;
+  preferredUsername: string;
   invalidSignature: boolean;
   usePreviousSigningKey: boolean;
   rotateSigningKey(): Promise<void>;
@@ -42,7 +44,7 @@ async function createMockProvider(): Promise<MockOidcProvider> {
   let previousKid: string | undefined;
   let signingKid = "test-key";
   const pending = new Map<string, PendingCode>();
-  const provider = { subject: "external-user", invalidSignature: false, usePreviousSigningKey: false } as MockOidcProvider;
+  const provider = { subject: "external-user", email: "linked@example.test", preferredUsername: "linked-user", invalidSignature: false, usePreviousSigningKey: false } as MockOidcProvider;
   // The handler is deliberately detached from the HTTP callback so the test
   // does not turn an asynchronous provider failure into an unhandled rejection.
   // eslint-disable-next-line @typescript-eslint/no-misused-promises
@@ -107,7 +109,7 @@ async function createMockProvider(): Promise<MockOidcProvider> {
         : provider.usePreviousSigningKey && previousKey
           ? previousKey.privateKey
           : signingKey.privateKey;
-      const idToken = await new SignJWT({ sub: provider.subject, email: "linked@example.test", name: "Linked User", nonce: record.nonce })
+      const idToken = await new SignJWT({ sub: provider.subject, email: provider.email, preferred_username: provider.preferredUsername, name: "Linked User", nonce: record.nonce })
         .setProtectedHeader({ alg: "RS256", kid: provider.invalidSignature ? "wrong-key" : provider.usePreviousSigningKey && previousKid ? previousKid : signingKid })
         .setIssuer(provider.issuer)
         .setAudience(record.clientId)
@@ -156,7 +158,7 @@ function createDatabase(root: string): string {
   return databasePath;
 }
 
-function createApp(databasePath: string) {
+function createApp(databasePath: string, autoProvision = false) {
   const shadowRoot = fs.mkdtempSync(path.join(os.tmpdir(), "prg32-oidc-shadow-"));
   roots.push(shadowRoot);
   const shadowPath = path.join(shadowRoot, "shadow.sqlite");
@@ -171,6 +173,7 @@ function createApp(databasePath: string) {
       PRG32_BACKEND_AUTH_DISPOSABLE_ROOT: path.dirname(databasePath),
       PRG32_BACKEND_SESSION_SECRET: sessionSecret,
       PRG32_BACKEND_SESSION_SECURE: "false",
+      PRG32_BACKEND_FEDERATION_AUTO_PROVISION: autoProvision ? "true" : "false",
       PRG32_BACKEND_OIDC_PUBLIC_ORIGIN: "http://127.0.0.1:5090"
     }),
     logger: false
@@ -188,12 +191,12 @@ function cookie(response: { headers: Record<string, string | string[] | undefine
   return all.find((item) => item.startsWith(name + "="))?.split(";", 1)[0] ?? "";
 }
 
-async function fixture(): Promise<{ app: ReturnType<typeof buildApp>; databasePath: string; provider: MockOidcProvider }> {
+async function fixture(autoProvision = false): Promise<{ app: ReturnType<typeof buildApp>; databasePath: string; provider: MockOidcProvider }> {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "prg32-oidc-"));
   roots.push(root);
   const provider = await createMockProvider();
   const databasePath = createDatabase(root);
-  const app = createApp(databasePath);
+  const app = createApp(databasePath, autoProvision);
   const database = new Database(databasePath);
   const providers = new FederationProviderService(database);
   const config = providers.create({
@@ -317,6 +320,39 @@ describe("M6.3d.2h.3 OIDC protocol implementation", () => {
     expect(wrongBinding.statusCode).toBe(401);
     expect(wrongBinding.json()).toMatchObject({ ok: false, code: "oidc_browser_binding_failed" });
 
+    await test.app.close();
+    await test.provider.close();
+  });
+
+  it("provisions a new federated identity only with an explicit disposable opt-in", async () => {
+    const test = await fixture(true);
+    test.provider.subject = "new-external-user";
+    test.provider.email = "new-user@example.test";
+    test.provider.preferredUsername = "new-user";
+    const login = await test.app.inject({ method: "GET", url: "/api/auth/oidc/school/login" });
+    const authorization = await fetch(responseHeader(login, "location"), { redirect: "manual" });
+    const callback = new URL(authorization.headers.get("location") ?? "");
+    const completed = await test.app.inject({ method: "GET", url: callback.pathname + callback.search, headers: { cookie: cookie(login, "prg32_oidc_correlation") } });
+    expect(completed.statusCode).toBe(302);
+    const database = new Database(test.databasePath, { readonly: true });
+    expect(database.prepare("SELECT username, email, password_hash, role FROM users WHERE email = ?").get("new-user@example.test"))
+      .toMatchObject({ username: "new-user", email: "new-user@example.test", password_hash: null, role: "user" });
+    expect(database.prepare("SELECT subject, provider_id FROM user_external_identities WHERE subject = ?").get("new-external-user"))
+      .toEqual({ subject: "new-external-user", provider_id: "school" });
+    database.close();
+    await test.app.close();
+    await test.provider.close();
+  });
+
+  it("refuses auto-provisioning when the email already belongs to a local account", async () => {
+    const test = await fixture(true);
+    test.provider.subject = "different-subject";
+    const login = await test.app.inject({ method: "GET", url: "/api/auth/oidc/school/login" });
+    const authorization = await fetch(responseHeader(login, "location"), { redirect: "manual" });
+    const callback = new URL(authorization.headers.get("location") ?? "");
+    const result = await test.app.inject({ method: "GET", url: callback.pathname + callback.search, headers: { cookie: cookie(login, "prg32_oidc_correlation") } });
+    expect(result.statusCode).toBe(409);
+    expect(result.json()).toMatchObject({ ok: false, code: "oidc_identity_conflict" });
     await test.app.close();
     await test.provider.close();
   });

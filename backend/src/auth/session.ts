@@ -15,6 +15,7 @@ export interface SessionCookieOptions {
   readonly name: string;
   readonly secure: boolean;
   readonly sameSite: "lax" | "strict" | "none";
+  readonly domain: string | undefined;
   readonly maxAgeSeconds: number;
 }
 
@@ -69,7 +70,7 @@ export class SessionStore {
 
   constructor(
     private readonly secret: string,
-    private readonly lifetimeSeconds: number,
+    private readonly lifetimeSeconds: number | (() => number),
     private readonly database?: Database.Database
   ) {}
 
@@ -80,7 +81,7 @@ export class SessionStore {
       userId,
       csrfToken: crypto.randomBytes(32).toString("base64url"),
       createdAt: now,
-      expiresAt: now + this.lifetimeSeconds * 1000,
+      expiresAt: now + (typeof this.lifetimeSeconds === "function" ? this.lifetimeSeconds() : this.lifetimeSeconds) * 1000,
       reauthenticatedAt: null
     };
     if (this.database) {
@@ -193,7 +194,14 @@ export function parseCookies(header: string | undefined): Map<string, string> {
   for (const item of (header ?? "").split(";")) {
     const separator = item.indexOf("=");
     if (separator <= 0) continue;
-    result.set(item.slice(0, separator).trim(), decodeURIComponent(item.slice(separator + 1).trim()));
+    const name = item.slice(0, separator).trim();
+    const rawValue = item.slice(separator + 1).trim();
+    if (!name || rawValue.length > 8192) continue;
+    try {
+      result.set(name, decodeURIComponent(rawValue));
+    } catch {
+      // Malformed cookie values are untrusted input, not server errors.
+    }
   }
   return result;
 }
@@ -205,6 +213,7 @@ export function serializeSessionCookie(options: SessionCookieOptions, value: str
     "HttpOnly",
     "SameSite=" + options.sameSite.charAt(0).toUpperCase() + options.sameSite.slice(1)
   ];
+  if (options.domain) attributes.push("Domain=" + options.domain);
   if (options.secure) attributes.push("Secure");
   if (expires) attributes.push("Max-Age=0");
   else attributes.push("Max-Age=" + options.maxAgeSeconds);

@@ -34,9 +34,10 @@ describe("Fastify multiplayer WebSocket parity", () => {
       auth_enabled: true
     });
 
-    const first = await connect(`ws://127.0.0.1:${address.port}/api/multiplayer`);
+    const first = await connect(`ws://127.0.0.1:${address.port}/api/multiplayer`, { authorization: "Bearer board-secret" });
     const second = await connect(`ws://127.0.0.1:${address.port}/api/multiplayer?token=board-secret`);
     const anonymous = await connect(`ws://127.0.0.1:${address.port}/api/multiplayer`);
+    const invalid = await connect(`ws://127.0.0.1:${address.port}/api/multiplayer?token=expired-token`);
 
     first.send(JSON.stringify({ type: "join", signature: "synthetic-room", token: "board-secret", player_id: 11 }));
     expect(await next(first)).toEqual({ type: "welcome", player_id: 11 });
@@ -57,6 +58,8 @@ describe("Fastify multiplayer WebSocket parity", () => {
 
     anonymous.send(JSON.stringify({ type: "join", signature: "synthetic-room" }));
     expect(await next(anonymous)).toMatchObject({ type: "error", error: "player role required" });
+    invalid.send(JSON.stringify({ type: "join", signature: "synthetic-room" }));
+    expect(await next(invalid)).toMatchObject({ type: "error", error: "player role required" });
     second.send("not-json");
     expect(await next(second)).toEqual({ type: "error", error: "invalid json" });
     second.send(JSON.stringify({ type: "unknown" }));
@@ -70,6 +73,8 @@ describe("Fastify multiplayer WebSocket parity", () => {
       multiplayer: { rooms: { "synthetic-room": 1 }, room_count: 1, max_peers: 8, auth_enabled: true }
     });
     await app.close();
+    await closed(first);
+    expect(first.readyState).toBe(WebSocket.CLOSED);
   });
 
   it("keeps rooms isolated and enforces the configured peer cap", async () => {
@@ -95,8 +100,8 @@ describe("Fastify multiplayer WebSocket parity", () => {
   });
 });
 
-async function connect(url: string): Promise<WebSocket> {
-  const socket = new WebSocket(url);
+async function connect(url: string, headers?: Record<string, string>): Promise<WebSocket> {
+  const socket = new WebSocket(url, headers === undefined ? undefined : { headers });
   openSockets.push(socket);
   await new Promise<void>((resolve, reject) => {
     socket.once("open", () => resolve());
@@ -116,6 +121,11 @@ async function next(socket: WebSocket): Promise<Record<string, unknown>> {
     });
     socket.once("error", (error) => reject(asError(error)));
   });
+}
+
+async function closed(socket: WebSocket): Promise<void> {
+  if (socket.readyState === WebSocket.CLOSED) return;
+  await new Promise<void>((resolve) => socket.once("close", () => resolve()));
 }
 
 function rawDataText(payload: WebSocket.RawData): string {

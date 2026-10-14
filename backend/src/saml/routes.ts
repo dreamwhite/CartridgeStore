@@ -14,6 +14,7 @@ interface ProviderParams { readonly providerId: string }
 interface SamlRouteOptions {
   readonly config: BackendConfig;
   readonly saml: SamlService;
+  readonly sessionLifetimeSeconds: () => number;
 }
 
 function json(reply: FastifyReply, body: unknown, status = 200): FastifyReply {
@@ -65,7 +66,7 @@ export function registerSamlRoutes(app: FastifyInstance, options: SamlRouteOptio
       const relayState = formValue(request, "RelayState", options.config.samlMaxRelayStateBytes, true);
       const cookies = parseCookies(request.headers.cookie);
       const result = await options.saml.complete(request.params.providerId, samlResponse as string, relayState, cookies.get(SAML_CORRELATION_COOKIE), cookies.get(SESSION_COOKIE), { requestId: request.id, ip: requestIp(request) });
-      const sessionCookie = serializeSessionCookie({ name: SESSION_COOKIE, secure: options.config.authCookieSecure, sameSite: options.config.authCookieSameSite, maxAgeSeconds: options.config.authSessionLifetimeSeconds }, result.sessionCookie);
+      const sessionCookie = serializeSessionCookie({ name: SESSION_COOKIE, secure: options.config.authCookieSecure, sameSite: options.config.authCookieSameSite, domain: options.config.authCookieDomain, maxAgeSeconds: options.sessionLifetimeSeconds() }, result.sessionCookie);
       setCookies(reply, [sessionCookie, clearSamlCorrelationCookie(options.config)]);
       reply.header("cache-control", "no-store");
       return reply.redirect(browserReturnLocation(options.config, result.returnPath));

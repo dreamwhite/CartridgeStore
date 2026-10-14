@@ -230,6 +230,7 @@ export class OidcService {
       issuer: claims.iss,
       subject: claims.sub,
       ...(typeof claims.email === "string" && claims.email.length <= 254 ? { email: claims.email } : {}),
+      ...(typeof claims.preferred_username === "string" && claims.preferred_username.length <= 80 ? { username: claims.preferred_username } : {}),
       ...(typeof claims.name === "string" && claims.name.length <= 160 ? { displayName: claims.name } : {}),
       authenticatedAt: new Date().toISOString()
     });
@@ -237,6 +238,8 @@ export class OidcService {
     try { resolved = this.identities.resolve(externalIdentity); }
     catch (error) {
       if (error instanceof FederationIdentityError && error.code === "federation_identity_unknown") throw new OidcError("oidc_identity_link_required", 401, "OIDC identity is not linked");
+      if (error instanceof FederationIdentityError && error.code === "federation_identity_email_required") throw new OidcError("oidc_identity_email_required", 401, "OIDC identity did not provide a usable email");
+      if (error instanceof FederationIdentityError && error.code === "federation_identity_conflict") throw new OidcError("oidc_identity_conflict", 409, "OIDC identity requires an explicit account link");
       if (error instanceof FederationIdentityError && error.code === "federation_account_disabled") throw new OidcError("oidc_account_disabled", 403, "OIDC authentication is unavailable");
       throw error;
     }
@@ -287,14 +290,14 @@ export class OidcService {
   }
 
   private async discoverUncached(provider: FederationProviderConfig): Promise<Configuration> {
-    const issuer = urlOrigin(provider.issuer);
+    const discoveryIssuer = urlOrigin(provider.discoveryIssuer ?? provider.issuer);
     const allowHttp = this.config.authWriteMode === "test";
     const secret = provider.clientAuthMethod === "none" ? undefined : this.loadClientSecret(provider);
     const authentication = provider.clientAuthMethod === "client_secret_post"
       ? oidc.ClientSecretPost(secret)
       : provider.clientAuthMethod === "client_secret_basic" ? oidc.ClientSecretBasic(secret) : oidc.None();
     try {
-      const configuration = await oidc.discovery(issuer, provider.clientId ?? "", {
+      const configuration = await oidc.discovery(discoveryIssuer, provider.clientId ?? "", {
         redirect_uris: [provider.redirectUri ?? ""],
         response_types: ["code"],
         token_endpoint_auth_method: provider.clientAuthMethod,
@@ -302,14 +305,14 @@ export class OidcService {
         ...(secret === undefined ? {} : { client_secret: secret })
       }, authentication, {
         timeout: OIDC_TIMEOUT_SECONDS,
-        [oidc.customFetch]: this.createFetch(issuer, allowHttp),
+        [oidc.customFetch]: this.createFetch(discoveryIssuer, allowHttp),
         ...(allowHttp ? { execute: [oidc.allowInsecureRequests] } : {})
       });
       const metadata = configuration.serverMetadata();
       if (metadata.issuer !== provider.issuer) throw new OidcError("oidc_metadata_issuer_mismatch", 503, "OIDC provider metadata is invalid");
-      assertBoundEndpoint(metadata.authorization_endpoint, issuer, allowHttp);
-      assertBoundEndpoint(metadata.token_endpoint, issuer, allowHttp);
-      assertBoundEndpoint(metadata.jwks_uri, issuer, allowHttp);
+      assertBoundEndpoint(metadata.authorization_endpoint, discoveryIssuer, allowHttp);
+      assertBoundEndpoint(metadata.token_endpoint, discoveryIssuer, allowHttp);
+      assertBoundEndpoint(metadata.jwks_uri, discoveryIssuer, allowHttp);
       return configuration;
     } catch (error) {
       if (error instanceof OidcError) throw error;
@@ -351,7 +354,7 @@ export class OidcService {
   private async verifyIdToken(configuration: Configuration, provider: UsableOidcProvider, idToken: string | null, requestId: string): Promise<JWTPayload> {
     if (!idToken) throw new OidcError("oidc_identity_invalid", 401, "OIDC identity is invalid");
     const metadata = configuration.serverMetadata();
-    const issuer = urlOrigin(provider.issuer);
+    const issuer = urlOrigin(provider.discoveryIssuer ?? provider.issuer);
     const jwksUri = assertBoundEndpoint(metadata.jwks_uri, issuer, this.config.authWriteMode === "test");
     try {
       const response = await this.createFetch(issuer, this.config.authWriteMode === "test")(jwksUri, { method: "GET", headers: {} } as CustomFetchOptions);
