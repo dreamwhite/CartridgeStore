@@ -1,36 +1,32 @@
 import type { NextConfig } from "next";
+import { resolveApiUpstream } from "./src/lib/next-proxy";
 
-const configuredFlaskTarget = process.env.FLASK_PROXY_TARGET?.trim();
 const configuredAdminFastifyTarget = process.env.PRG32_ADMIN_FASTIFY_TARGET?.trim();
 const configuredWorkflowFastifyTarget = process.env.PRG32_WORKFLOW_FASTIFY_TARGET?.trim();
 const configuredFederationAdminFastifyTarget = process.env.PRG32_FEDERATION_ADMIN_FASTIFY_TARGET?.trim();
 const configuredFederationAdminIntegration = process.env.PRG32_FEDERATION_ADMIN_INTEGRATION_ENABLED?.trim().toLowerCase() === "true";
 const configuredAuthFastifyTarget = process.env.PRG32_AUTH_FASTIFY_TARGET?.trim();
 const configuredAuthIntegration = process.env.PRG32_AUTH_INTEGRATION_ENABLED?.trim().toLowerCase() === "true";
+const configuredOperationalMode = process.env.PRG32_NEXT_RUNTIME_MODE?.trim().toLowerCase() === "operational";
 const configuredDualOriginIntegration = process.env.PRG32_DUAL_ORIGIN_INTEGRATION_ENABLED?.trim().toLowerCase() === "true";
 const configuredPublicApiOrigin = process.env.NEXT_PUBLIC_PRG32_API_ORIGIN?.trim();
+const configuredDistDir = process.env.PRG32_NEXT_DIST_DIR?.trim();
 const isProductionBuild = process.env.NODE_ENV === "production";
 const configuredAuthUi = configuredAuthIntegration || configuredDualOriginIntegration;
 
-if (isProductionBuild && !configuredFlaskTarget) {
-  throw new Error(
-    "FLASK_PROXY_TARGET is required for production builds; set it to the reachable Flask service URL.",
-  );
-}
-
-if (isProductionBuild && configuredAdminFastifyTarget) {
+if (isProductionBuild && configuredAdminFastifyTarget && !configuredOperationalMode) {
   throw new Error(
     "PRG32_ADMIN_FASTIFY_TARGET is development/test-only and must not be configured for production builds.",
   );
 }
 
-if (isProductionBuild && configuredWorkflowFastifyTarget) {
+if (isProductionBuild && configuredWorkflowFastifyTarget && !configuredOperationalMode) {
   throw new Error(
     "PRG32_WORKFLOW_FASTIFY_TARGET is development/test-only and must not be configured for production builds.",
   );
 }
 
-if (isProductionBuild && (configuredFederationAdminIntegration || configuredFederationAdminFastifyTarget)) {
+if (isProductionBuild && (configuredFederationAdminIntegration || configuredFederationAdminFastifyTarget) && !configuredOperationalMode) {
   throw new Error(
     "PRG32_FEDERATION_ADMIN_INTEGRATION_ENABLED and PRG32_FEDERATION_ADMIN_FASTIFY_TARGET are development/test-only and must not be configured for production builds.",
   );
@@ -48,7 +44,7 @@ if (configuredFederationAdminIntegration && !configuredAuthIntegration) {
   throw new Error("PRG32_AUTH_INTEGRATION_ENABLED=true is required when federation administration integration is enabled.");
 }
 
-if (isProductionBuild && (configuredAuthIntegration || configuredAuthFastifyTarget)) {
+if (isProductionBuild && (configuredAuthIntegration || configuredAuthFastifyTarget) && !configuredOperationalMode) {
   throw new Error(
     "PRG32_AUTH_INTEGRATION_ENABLED and PRG32_AUTH_FASTIFY_TARGET are development/test-only and must not be configured for production builds.",
   );
@@ -80,6 +76,10 @@ if (configuredPublicApiOrigin) {
   }
 }
 
+if (configuredDistDir && (!/^\.next-[A-Za-z0-9._-]+$/u.test(configuredDistDir) || configuredDistDir.includes(".."))) {
+  throw new Error("PRG32_NEXT_DIST_DIR must be an isolated .next-* directory name.");
+}
+
 if (configuredAuthIntegration && !configuredAuthFastifyTarget) {
   throw new Error("PRG32_AUTH_FASTIFY_TARGET is required when PRG32_AUTH_INTEGRATION_ENABLED=true.");
 }
@@ -88,21 +88,8 @@ if (!configuredAuthIntegration && configuredAuthFastifyTarget) {
   throw new Error("PRG32_AUTH_INTEGRATION_ENABLED=true is required when PRG32_AUTH_FASTIFY_TARGET is configured.");
 }
 
-const flaskTarget = configuredFlaskTarget || "http://127.0.0.1:5080";
-const parsedFlaskTarget = new URL(flaskTarget);
-const loopbackHosts = new Set(["127.0.0.1", "localhost", "::1", "[::1]"]);
-
-if (parsedFlaskTarget.protocol !== "http:" && parsedFlaskTarget.protocol !== "https:") {
-  throw new Error("FLASK_PROXY_TARGET must use http:// or https://.");
-}
-
-if (isProductionBuild && loopbackHosts.has(parsedFlaskTarget.hostname)) {
-  throw new Error(
-    "FLASK_PROXY_TARGET cannot point to loopback in a production build; use the deployed Flask service hostname.",
-  );
-}
-
-const normalizedFlaskTarget = flaskTarget.replace(/\/$/, "");
+const apiUpstream = resolveApiUpstream(process.env, { production: isProductionBuild });
+const normalizedApiUpstream = apiUpstream.target;
 
 if (configuredAdminFastifyTarget) {
   const parsedAdminTarget = new URL(configuredAdminFastifyTarget);
@@ -161,7 +148,6 @@ const proxyPaths = [
     : ["/api/:path*", "/auth/:path*"]),
   "/admin/:path*",
   "/editor/:path*",
-  "/users/:path*",
   "/publish/:path*",
   "/setup/:path*",
   "/scores/:path*",
@@ -184,25 +170,26 @@ const nextConfig: NextConfig = {
     ...(configuredPublicApiOrigin ? { NEXT_PUBLIC_PRG32_API_ORIGIN: configuredPublicApiOrigin } : {}),
   },
   output: "standalone",
+  ...(configuredDistDir ? { distDir: configuredDistDir } : {}),
   async rewrites() {
-    const flaskRewrites = configuredAuthIntegration
+    const apiRewrites = configuredAuthIntegration
       ? [
           {
             source: "/api/:path((?!auth(?:/|$)|admin/federation(?:/|$)).*)",
-            destination: `${normalizedFlaskTarget}/api/:path*`,
+            destination: `${normalizedApiUpstream}/api/:path*`,
           },
           {
             source: "/auth/:path((?!auth(?:/|$)).*)",
-            destination: `${normalizedFlaskTarget}/auth/:path*`,
+            destination: `${normalizedApiUpstream}/auth/:path*`,
           },
           ...proxyPaths.filter((source) => !source.startsWith("/api/") && !source.startsWith("/auth/")).map((source) => ({
             source,
-            destination: `${normalizedFlaskTarget}${source}`,
+            destination: `${normalizedApiUpstream}${source}`,
           })),
         ]
       : proxyPaths.map((source) => ({
           source,
-          destination: `${normalizedFlaskTarget}${source}`,
+          destination: `${normalizedApiUpstream}${source}`,
         }));
     const adminRewrites = normalizedAdminFastifyTarget
       ? [{
@@ -224,9 +211,16 @@ const nextConfig: NextConfig = {
       : [];
     const authRewrites = normalizedAuthFastifyTarget
       ? [
-          // Canonical authentication paths are temporarily owned by Fastify
-          // only in the explicit isolated integration mode. The catch-all
-          // Flask rewrites remain the owner everywhere else.
+          // Local session routes keep their established /auth/* backend
+          // contract. Provider discovery and OIDC/SAML callbacks use the
+          // public /api/auth/* namespace. The frontend client intentionally
+          // uses the latter namespace in isolated mode, so split the rewrite
+          // boundary explicitly instead of forwarding a non-existent
+          // Fastify /api/auth/login route.
+          {
+            source: "/api/auth/:path((?!providers(?:/|$)|oidc(?:/|$)|saml(?:/|$)).*)",
+            destination: `${normalizedAuthFastifyTarget}/auth/:path*`,
+          },
           {
             source: "/auth/:path*",
             destination: `${normalizedAuthFastifyTarget}/auth/:path*`,
@@ -237,7 +231,7 @@ const nextConfig: NextConfig = {
           },
         ]
       : [];
-    return [...adminRewrites, ...workflowRewrites, ...federationAdminRewrites, ...authRewrites, ...flaskRewrites];
+    return [...adminRewrites, ...workflowRewrites, ...federationAdminRewrites, ...authRewrites, ...apiRewrites];
   },
 };
 

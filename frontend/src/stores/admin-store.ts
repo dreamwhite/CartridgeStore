@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-export type AdminSection = "settings" | "users" | "groups" | "roles" | "tokens" | "catalog" | "backup";
+export type AdminSection = "settings" | "users" | "groups" | "roles" | "tokens" | "catalog" | "audit" | "backup";
 
 type AdminStore = {
   section: AdminSection;

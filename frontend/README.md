@@ -6,7 +6,7 @@ This directory is the isolated Next.js/TypeScript application for the incrementa
 
 - Node.js 24 LTS (`nvm use 24`)
 - pnpm 12.5.1 (the repository package manager)
-- The existing Flask service for compatibility API calls during migration
+- A reachable Fastify API upstream for the standard build, or the existing Flask service when using the explicit legacy compatibility path
 
 ## Development
 
@@ -25,12 +25,18 @@ source "$HOME/.nvm/nvm.sh"
 nvm use 24
 cd frontend
 pnpm install
+FLASK_PROXY_TARGET=http://127.0.0.1:5080 \
 pnpm run dev
 ```
 
-Next.js runs on `http://127.0.0.1:3000` and rewrites the documented HTTP API paths to `FLASK_PROXY_TARGET` (default `http://127.0.0.1:5080`). Browser requests therefore stay same-origin from the Next.js page, while Flask remains available on its normal port and all existing Jinja routes remain unchanged.
+Next.js rewrites the documented HTTP API paths to `PRG32_API_UPSTREAM` (default `http://fastify:5090`). The current Flask deployment remains supported when `FLASK_PROXY_TARGET` is set explicitly and `PRG32_API_UPSTREAM` is absent. Browser requests therefore stay same-origin from the Next.js page, while the selected backend remains authoritative for API behavior.
 
-The Next.js development rewrites do not proxy WebSockets. Multiplayer clients should use `NEXT_PUBLIC_FLASK_WS_URL` during this transition; the Flask WebSocket endpoint remains `ws://127.0.0.1:5080/api/multiplayer`.
+For the transitional Flask development path, set `FLASK_PROXY_TARGET=http://127.0.0.1:5080`. For a Fastify build, set `PRG32_API_UPSTREAM=http://127.0.0.1:5090`. Do not set both variables; the build fails closed rather than choosing an ambiguous upstream.
+
+The Next.js development rewrites do not proxy WebSockets. Configure the
+backend WebSocket URL separately with `NEXT_PUBLIC_PRG32_WS_URL`; the standard
+Fastify endpoint is `ws://127.0.0.1:5090/api/multiplayer`. The transitional
+Flask service remains available through the existing Compose profile.
 
 For the shared Dream Platform Traefik environment, start from the repository root:
 

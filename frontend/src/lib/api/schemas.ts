@@ -51,6 +51,30 @@ export const authLogoutResponseSchema = z
   .object({ ok: z.literal(true) })
   .passthrough();
 
+export const authOperationResponseSchema = z
+  .object({ ok: z.literal(true), message: z.string() })
+  .passthrough();
+
+export const authTokenSchema = z
+  .object({ id: z.number().int().positive(), label: z.string(), created_at: z.string(), last_used: z.string() })
+  .passthrough();
+
+export const authTokensResponseSchema = z
+  .object({ ok: z.literal(true), tokens: z.array(authTokenSchema) })
+  .passthrough();
+
+export const authTokenCreatedResponseSchema = z
+  .object({ ok: z.literal(true), id: z.number().int().positive(), label: z.string(), token: z.string().min(1) })
+  .passthrough();
+
+export const authTokenUpdatedResponseSchema = z
+  .object({ ok: z.literal(true), id: z.number().int().positive(), label: z.string() })
+  .passthrough();
+
+export const registrationRequestedResponseSchema = z
+  .object({ ok: z.literal(true), email: z.string(), message: z.string() })
+  .passthrough();
+
 export const workflowSubmissionSchema = z
   .object({
     id: z.number().int().positive(),
@@ -68,8 +92,17 @@ export const workflowSubmissionSchema = z
     reviewed_at: z.string().nullable(),
     metadata: z.record(z.string(), z.unknown()),
     architectures: z.array(z.record(z.string(), z.unknown())),
+    revision_of_submission_id: z.number().int().nullable().optional(),
+    revision_number: z.number().int().optional(),
+    review_history: z.array(z.record(z.string(), z.unknown())).optional(),
   })
   .passthrough();
+
+export const publisherDraftSchema = z.object({
+  id: z.string(), status: z.enum(["draft", "submitting", "submitted", "abandoned"]), metadata: z.record(z.string(), z.unknown()), has_artifact: z.boolean(), source_submission_id: z.number().int().nullable(), submitted_submission_id: z.number().int().nullable(), created_at: z.string(), updated_at: z.string(), submitted_at: z.string().nullable(),
+}).passthrough();
+export const draftResponseSchema = z.object({ ok: z.literal(true), draft: publisherDraftSchema }).passthrough();
+export const draftListResponseSchema = z.object({ ok: z.literal(true), drafts: z.array(publisherDraftSchema) }).passthrough();
 
 export const workflowSubmissionListResponseSchema = z
   .object({ ok: z.literal(true), submissions: z.array(workflowSubmissionSchema) })
@@ -85,7 +118,9 @@ export const workflowSubmissionResultSchema = z
     ok: z.literal(true),
     review_required: z.literal(true),
     submission_id: z.number().int().positive(),
-    id: z.number().int().positive(),
+    // Legacy submission responses used a numeric database id while the
+    // canonical storage-v2 workflow returns the stable cartridge id.
+    id: z.union([z.string().min(1), z.number().int().positive()]),
     version: z.string(),
     submitted: z.array(z.object({ architecture: z.string(), file: z.string() }).passthrough()),
   })
@@ -258,4 +293,16 @@ export const metricsSummarySchema = z
 
 export const metricsRunDetailSchema = z
   .object({ ok: z.literal(true), run: metricsRunSchema, summary: metricsSummarySchema })
+  .passthrough();
+
+export const userProfileResponseSchema = z
+  .object({ ok: z.literal(true), user: z.object({ username: z.string(), role: z.string(), created_at: z.string() }).passthrough(), run_count: z.number().int().nonnegative(), can_view_runs: z.boolean() })
+  .passthrough();
+
+export const userRunsResponseSchema = z
+  .object({ ok: z.literal(true), user: z.object({ username: z.string() }).passthrough(), runs: z.array(metricsRunSchema.extend({ mean_frame_us: z.number(), p95_frame_us: z.number() })), pagination: z.object({ page: z.number().int(), per_page: z.number().int(), total: z.number().int(), pages: z.number().int(), has_next: z.boolean(), has_prev: z.boolean() }).passthrough() })
+  .passthrough();
+
+export const userRunResponseSchema = z
+  .object({ ok: z.literal(true), user: z.object({ username: z.string() }).passthrough(), run: metricsRunSchema, summary: metricsSummarySchema })
   .passthrough();

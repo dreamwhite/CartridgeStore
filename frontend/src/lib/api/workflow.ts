@@ -4,6 +4,8 @@ import type {
   WorkflowSubmissionListResponse,
   WorkflowSubmissionResponse,
   WorkflowSubmissionResult,
+  DraftListResponse,
+  DraftResponse,
 } from "./contracts";
 import type { ZodType } from "zod";
 import { ApiRequestError, requestJson, withCsrfToken } from "./client";
@@ -14,6 +16,8 @@ import {
   workflowSubmissionListResponseSchema,
   workflowSubmissionResponseSchema,
   workflowSubmissionResultSchema,
+  draftListResponseSchema,
+  draftResponseSchema,
 } from "./schemas";
 
 export const WORKFLOW_PROXY_PREFIX = "/__workflow-fastify";
@@ -83,6 +87,14 @@ export function listMySubmissions(status?: string, page?: number, perPage?: numb
   return workflowRequest(`/api/submissions/mine${query ? `?${query}` : ""}`, undefined, ownedSubmissionListResponseSchema);
 }
 
+export function listDrafts(): Promise<DraftListResponse> { return workflowRequest("/api/drafts", undefined, draftListResponseSchema); }
+export async function createDraft(metadata: Record<string, unknown> = {}): Promise<DraftResponse> { return workflowRequest("/api/drafts", { method: "POST", headers: withCsrfToken(await workflowCsrf(), { "content-type": "application/json" }), body: JSON.stringify({ metadata }) }, draftResponseSchema); }
+export async function updateDraft(id: string, metadata: Record<string, unknown>): Promise<DraftResponse> { return workflowRequest(`/api/drafts/${encodeURIComponent(id)}`, { method: "PATCH", headers: withCsrfToken(await workflowCsrf(), { "content-type": "application/json" }), body: JSON.stringify({ metadata }) }, draftResponseSchema); }
+export async function deleteDraft(id: string): Promise<{ ok: true }> { return workflowRequest(`/api/drafts/${encodeURIComponent(id)}`, { method: "DELETE", headers: withCsrfToken(await workflowCsrf()) }); }
+export async function attachDraftArtifact(id: string, file: File): Promise<DraftResponse> { const form = new FormData(); form.set("bundle", file, file.name); return workflowRequest(`/api/drafts/${encodeURIComponent(id)}/artifact`, { method: "POST", headers: withCsrfToken(await workflowCsrf()), body: form }, draftResponseSchema); }
+export async function submitDraft(id: string): Promise<WorkflowSubmissionResult> { return workflowRequest(`/api/drafts/${encodeURIComponent(id)}/submit`, { method: "POST", headers: withCsrfToken(await workflowCsrf()) }, workflowSubmissionResultSchema); }
+export async function resubmitSubmission(id: number): Promise<DraftResponse> { return workflowRequest(`/api/submissions/${id}/resubmit`, { method: "POST", headers: withCsrfToken(await workflowCsrf()) }, draftResponseSchema); }
+
 export async function submitBundle(file: File): Promise<WorkflowSubmissionResult> {
   const form = new FormData();
   form.set("bundle", file, file.name);
@@ -100,22 +112,22 @@ export async function submitBundle(file: File): Promise<WorkflowSubmissionResult
   }
 }
 
-export async function approveSubmission(id: number, metadata: Record<string, unknown>): Promise<WorkflowSubmissionResponse> {
+export async function approveSubmission(id: number, metadata: Record<string, unknown>, note = ""): Promise<WorkflowSubmissionResponse> {
   return workflowRequest(
     `/api/submissions/${id}/verify`,
     {
       method: "POST",
       headers: withCsrfToken(await workflowCsrf(), { "content-type": "application/json" }),
-      body: JSON.stringify({ metadata }),
+      body: JSON.stringify({ metadata, note }),
     },
     workflowSubmissionResponseSchema,
   );
 }
 
-export async function rejectSubmission(id: number): Promise<WorkflowSubmissionResponse> {
+export async function rejectSubmission(id: number, note = ""): Promise<WorkflowSubmissionResponse> {
   return workflowRequest(
     `/api/submissions/${id}/reject`,
-    { method: "POST", headers: withCsrfToken(await workflowCsrf()) },
+    { method: "POST", headers: withCsrfToken(await workflowCsrf(), { "content-type": "application/json" }), body: JSON.stringify({ note }) },
     workflowSubmissionResponseSchema,
   );
 }

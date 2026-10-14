@@ -13,6 +13,7 @@
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
+    "test:e2e": "playwright test -c playwright.config.mjs",
     "test:watch": "vitest",
     "test:hmr": "node scripts/verify-hmr.mjs",
     "check": "pnpm run typecheck && pnpm run lint && pnpm run test && pnpm run build"
@@ -28,6 +29,7 @@
     "zustand": "^5.0.15"
   },
   "devDependencies": {
+    "@playwright/test": "^1.64.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.3",

@@ -9,6 +9,7 @@ vi.mock("../../lib/auth/config", () => ({ authIntegrationEnabled: true }));
 vi.mock("../../lib/api/workflow", () => ({
   getWorkflowPrincipal: vi.fn(),
   listMySubmissions: vi.fn(),
+  resubmitSubmission: vi.fn(),
   workflowErrorMessage: () => "Workflow unavailable."
 }));
 

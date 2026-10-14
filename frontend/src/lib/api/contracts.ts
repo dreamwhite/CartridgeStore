@@ -41,6 +41,19 @@ export type AuthUserResponse = {
 export type AuthLogoutResponse = {
   ok: true;
 };
+export type AuthOperationResponse = { ok: true; message: string };
+
+export type AuthToken = {
+  id: number;
+  label: string;
+  created_at: string;
+  last_used: string;
+};
+
+export type AuthTokensResponse = { ok: true; tokens: AuthToken[] };
+export type AuthTokenCreatedResponse = { ok: true; id: number; label: string; token: string };
+export type AuthTokenUpdatedResponse = { ok: true; id: number; label: string };
+export type RegistrationRequestedResponse = { ok: true; email: string; message: string };
 
 export type WorkflowSubmission = {
   id: number;
@@ -58,6 +71,9 @@ export type WorkflowSubmission = {
   reviewed_at: string | null;
   metadata: Record<string, unknown>;
   architectures: Array<Record<string, unknown>>;
+  revision_of_submission_id?: number | null;
+  revision_number?: number;
+  review_history?: Array<Record<string, unknown>>;
 };
 
 export type WorkflowSubmissionListResponse = { ok: true; submissions: WorkflowSubmission[] };
@@ -67,7 +83,7 @@ export type WorkflowSubmissionResult = {
   ok: true;
   review_required: true;
   submission_id: number;
-  id: number;
+  id: string | number;
   version: string;
   submitted: Array<{ architecture: string; file: string }>;
 };
@@ -87,6 +103,20 @@ export type OwnedSubmissionListResponse = {
   submissions: OwnedSubmissionSummary[];
   pagination: Pagination;
 };
+
+export type PublisherDraft = {
+  id: string;
+  status: "draft" | "submitting" | "submitted" | "abandoned";
+  metadata: Record<string, unknown>;
+  has_artifact: boolean;
+  source_submission_id: number | null;
+  submitted_submission_id: number | null;
+  created_at: string;
+  updated_at: string;
+  submitted_at: string | null;
+};
+export type DraftResponse = { ok: true; draft: PublisherDraft };
+export type DraftListResponse = { ok: true; drafts: PublisherDraft[] };
 
 export type Pagination = {
   page: number;
@@ -207,6 +237,27 @@ export type MetricsSummary = {
 
 export type MetricsRunDetail = {
   ok: true;
+  run: MetricsRun;
+  summary: MetricsSummary;
+};
+
+export type UserProfileResponse = {
+  ok: true;
+  user: { username: string; role: string; created_at: string };
+  run_count: number;
+  can_view_runs: boolean;
+};
+
+export type UserRunsResponse = {
+  ok: true;
+  user: { username: string };
+  runs: Array<MetricsRun & { mean_frame_us: number; p95_frame_us: number }>;
+  pagination: Pick<Pagination, "page" | "per_page" | "total" | "pages" | "has_next" | "has_prev">;
+};
+
+export type UserRunResponse = {
+  ok: true;
+  user: { username: string };
   run: MetricsRun;
   summary: MetricsSummary;
 };

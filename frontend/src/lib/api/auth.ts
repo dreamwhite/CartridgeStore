@@ -1,11 +1,16 @@
 import { ApiRequestError, requestApiJson, withCsrfToken } from "./client";
 import { publicApiPath } from "./origin";
-import type { AuthLogoutResponse, AuthProvider, AuthProvidersResponse, AuthUserResponse } from "./contracts";
+import type { AuthLogoutResponse, AuthOperationResponse, AuthProvider, AuthProvidersResponse, AuthUserResponse } from "./contracts";
 import {
+  authTokenCreatedResponseSchema,
+  authTokenUpdatedResponseSchema,
+  authTokensResponseSchema,
   authLogoutResponseSchema,
+  authOperationResponseSchema,
   authProvidersResponseSchema,
   authUserResponseSchema,
   csrfResponseSchema,
+  registrationRequestedResponseSchema,
 } from "./schemas";
 import { safeReturnPath } from "../auth/return-path";
 
@@ -14,6 +19,12 @@ export const CURRENT_USER_QUERY_KEY = ["auth", "current-user"] as const;
 function authPath(path: string): string {
   if (!path.startsWith("/") || path.includes("//") || path.includes("..")) {
     throw new Error("Invalid authentication API path");
+  }
+  // The isolated runtime has Next.js compatibility pages at /auth/login and
+  // /auth/register. Route browser API calls through the unambiguous
+  // /api/auth namespace whenever the Fastify auth integration is enabled.
+  if ((process.env.NEXT_PUBLIC_PRG32_CANDIDATE_AUTH_PROXY === "true" || process.env.NEXT_PUBLIC_AUTH_INTEGRATION_ENABLED === "true") && path.startsWith("/auth/")) {
+    return `/api/auth${path.slice("/auth".length)}`;
   }
   return path;
 }
@@ -53,6 +64,69 @@ export async function logoutLocal(): Promise<AuthLogoutResponse> {
     },
     authLogoutResponseSchema,
   );
+}
+
+export function getAuthTokens() {
+  return requestApiJson(authPath("/auth/tokens"), undefined, authTokensResponseSchema);
+}
+
+export async function createAuthToken(label: string) {
+  const csrf = await getAuthCsrf();
+  return requestApiJson(authPath("/auth/tokens"), {
+    method: "POST",
+    headers: withCsrfToken(csrf.csrf_token, { "content-type": "application/json" }),
+    body: JSON.stringify({ label }),
+  }, authTokenCreatedResponseSchema);
+}
+
+export async function updateAuthToken(id: number, label: string) {
+  const csrf = await getAuthCsrf();
+  return requestApiJson(authPath(`/auth/tokens/${encodeURIComponent(String(id))}`), {
+    method: "PATCH",
+    headers: withCsrfToken(csrf.csrf_token, { "content-type": "application/json" }),
+    body: JSON.stringify({ label }),
+  }, authTokenUpdatedResponseSchema);
+}
+
+export async function revokeAuthToken(id: number) {
+  const csrf = await getAuthCsrf();
+  return requestApiJson(authPath(`/auth/tokens/${encodeURIComponent(String(id))}`), {
+    method: "DELETE",
+    headers: withCsrfToken(csrf.csrf_token),
+  }, authLogoutResponseSchema);
+}
+
+export async function requestRegistration(username: string, email: string, password: string, passwordConfirm: string) {
+  const csrf = await getAuthCsrf();
+  return requestApiJson(authPath("/auth/register"), {
+    method: "POST",
+    headers: withCsrfToken(csrf.csrf_token, { "content-type": "application/json" }),
+    body: JSON.stringify({ username, email, password, password_confirm: passwordConfirm }),
+  }, registrationRequestedResponseSchema);
+}
+
+export async function completeRegistration(token: string, password = "", passwordConfirm = "") {
+  const csrf = await getAuthCsrf();
+  return requestApiJson(authPath("/auth/register/complete"), {
+    method: "POST",
+    headers: withCsrfToken(csrf.csrf_token, { "content-type": "application/json" }),
+    body: JSON.stringify({ token, ...(password ? { password, password_confirm: passwordConfirm } : {}) }),
+  }, authUserResponseSchema);
+}
+
+export async function changePassword(currentPassword: string, password: string, passwordConfirm: string): Promise<AuthOperationResponse> {
+  const csrf = await getAuthCsrf();
+  return requestApiJson(authPath("/auth/password/change"), { method: "POST", headers: withCsrfToken(csrf.csrf_token, { "content-type": "application/json" }), body: JSON.stringify({ current_password: currentPassword, password, password_confirm: passwordConfirm }) }, authOperationResponseSchema);
+}
+
+export async function requestPasswordReset(identifier: string): Promise<AuthOperationResponse> {
+  const csrf = await getAuthCsrf();
+  return requestApiJson(authPath("/auth/password/reset/request"), { method: "POST", headers: withCsrfToken(csrf.csrf_token, { "content-type": "application/json" }), body: JSON.stringify({ identifier }) }, authOperationResponseSchema);
+}
+
+export async function completePasswordReset(token: string, password: string, passwordConfirm: string): Promise<AuthOperationResponse> {
+  const csrf = await getAuthCsrf();
+  return requestApiJson(authPath("/auth/password/reset/complete"), { method: "POST", headers: withCsrfToken(csrf.csrf_token, { "content-type": "application/json" }), body: JSON.stringify({ token, password, password_confirm: passwordConfirm }) }, authOperationResponseSchema);
 }
 
 export function federatedLoginUrl(provider: AuthProvider, returnTo: string | null | undefined): string {
