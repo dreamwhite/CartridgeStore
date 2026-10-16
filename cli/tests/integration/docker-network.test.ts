@@ -176,14 +176,20 @@ function cliDockerArgs(command: readonly string[], options: { readonly token?: s
 }
 
 async function waitForBackend(): Promise<void> {
+  const startedAt = Date.now();
   const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
     const result = await run("docker", ["exec", backendContainer, "node", "-e", "fetch('http://127.0.0.1:5080/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"], { maxBuffer: 64 * 1024 });
     if (result.code === 0) return;
     await new Promise((resolve) => setTimeout(resolve, 250));
   }
+  const state = await run("docker", ["inspect", backendContainer, "--format", "{{json .State}}"], { maxBuffer: 64 * 1024 });
   const logs = await run("docker", ["logs", backendContainer], { maxBuffer: 256 * 1024 });
-  throw new Error(`disposable Fastify container did not become ready: ${logs.stdout} ${logs.stderr}`.replace(/(?:token|secret|password)=[^\s]+/giu, "$1=<redacted>"));
+  const elapsedMs = Date.now() - startedAt;
+  const diagnostics = `${state.stdout.trim()} ${state.stderr.trim()} ${logs.stdout} ${logs.stderr}`
+    .replace(/(?:token|secret|password)=[^\s]+/giu, "$1=<redacted>")
+    .trim();
+  throw new Error(`disposable Fastify container did not become ready after ${elapsedMs}ms: ${diagnostics}`);
 }
 
 beforeAll(async () => {
