@@ -1,22 +1,60 @@
-import type { ReactNode } from "react";
+"use client";
+
+import { useState, type ReactNode } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 
 import { AuthNavigation } from "../auth/AuthNavigation";
+import { SiteFooter } from "./SiteFooter";
 import { ThemeToggle } from "./ThemeToggle";
+import { navigationIsActive, PUBLIC_NAVIGATION } from "./navigation";
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "../ui/dialog";
 
 export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
+  const pathname = usePathname();
+  const [mobileOpen, setMobileOpen] = useState(false);
+
   return (
-    <div className="min-h-screen bg-[var(--color-bg)] text-[var(--color-text)]">
-      <header className="border-b border-[var(--color-border)] bg-[var(--color-surface)]">
-        <div className="mx-auto flex min-h-14 max-w-6xl flex-wrap items-center justify-between gap-3 px-4 py-2 sm:px-6">
-          <Link className="flex items-center gap-2 font-bold tracking-tight" href="/"><span aria-hidden="true" className="grid size-7 place-items-center rounded-md bg-violet-700 text-sm text-white">P</span><span>PRG32 <span className="hidden font-medium text-[var(--color-text-muted)] sm:inline">Cartridge Store</span></span></Link>
-          <div className="flex items-center gap-5">
-            <nav aria-label="Primary navigation" className="flex max-w-full items-center gap-4 overflow-x-auto whitespace-nowrap"><Link className="text-sm font-semibold text-[var(--color-text-muted)] hover:text-[var(--color-text)] focus-visible:outline-2 focus-visible:outline-violet-600" href="/">Store</Link><Link className="text-sm font-semibold text-[var(--color-text-muted)] hover:text-[var(--color-text)] focus-visible:outline-2 focus-visible:outline-violet-600" href="/stats">Statistics</Link><Link className="text-sm font-semibold text-[var(--color-text-muted)] hover:text-[var(--color-text)] focus-visible:outline-2 focus-visible:outline-violet-600" href="/scores">Scores</Link><Link className="text-sm font-semibold text-[var(--color-text-muted)] hover:text-[var(--color-text)] focus-visible:outline-2 focus-visible:outline-violet-600" href="/docs">Docs</Link><Link className="text-sm font-semibold text-[var(--color-text-muted)] hover:text-[var(--color-text)] focus-visible:outline-2 focus-visible:outline-violet-600" href="/workspace">Workspace</Link><Link className="text-sm font-semibold text-[var(--color-text-muted)] hover:text-[var(--color-text)] focus-visible:outline-2 focus-visible:outline-violet-600" href="/publish">Publish</Link><Link className="text-sm font-semibold text-[var(--color-text-muted)] hover:text-[var(--color-text)] focus-visible:outline-2 focus-visible:outline-violet-600" href="/review">Review</Link></nav>
-            <div className="flex items-center gap-2"><ThemeToggle /><AuthNavigation /></div>
+    <div className="flex min-h-screen flex-col bg-[var(--color-bg)] text-[var(--color-text)]">
+      <header className="sticky top-0 z-40 border-b border-[var(--color-border)] bg-[var(--color-surface)]/95 shadow-[var(--shadow-header)] backdrop-blur">
+        <div className="page-gutter flex min-h-16 items-center justify-between gap-4 py-3">
+          <Link className="flex min-w-0 items-center gap-2.5 rounded-lg font-bold tracking-tight focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--color-ring)]" href="/" onClick={() => setMobileOpen(false)}>
+            <span aria-hidden="true" className="grid size-8 shrink-0 place-items-center rounded-md bg-[var(--color-primary)] text-sm text-white shadow-[var(--shadow-brand)]">P</span>
+            <span className="truncate">PRG32 <span className="hidden font-medium text-[var(--color-text-muted)] sm:inline">Cartridge Store</span></span>
+          </Link>
+          <div className="flex items-center gap-2 sm:gap-3">
+            <nav aria-label="Primary navigation" className="hidden items-center gap-1 md:flex">
+              {PUBLIC_NAVIGATION.map((item) => {
+                const active = navigationIsActive(pathname, item.href);
+                return <Link key={item.href} aria-current={active ? "page" : undefined} className={`rounded-md px-3 py-2 text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ring)] ${active ? "bg-[var(--color-primary-soft)] text-[var(--color-primary-strong)]" : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-text)]"}`} href={item.href}>{item.label}</Link>;
+              })}
+            </nav>
+            <ThemeToggle />
+            <AuthNavigation />
+            <Dialog open={mobileOpen} onOpenChange={setMobileOpen}>
+              <DialogTrigger asChild>
+                <button type="button" aria-label={mobileOpen ? "Close navigation" : "Open navigation"} className="grid size-10 place-items-center rounded-lg border border-[var(--color-border)] text-[var(--color-text)] transition-colors hover:bg-[var(--color-surface-muted)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ring)] md:hidden">
+                  <span aria-hidden="true" className="text-lg leading-none">{mobileOpen ? "×" : "☰"}</span>
+                </button>
+              </DialogTrigger>
+              <DialogContent aria-describedby="mobile-navigation-description" className="inset-x-0 top-16 max-h-[calc(100vh-4rem)] translate-y-0 rounded-none border-x-0 border-t-0 p-0 md:hidden">
+                <DialogHeader className="border-b border-[var(--color-border)] px-5 py-4 pr-14">
+                  <DialogTitle>Navigate the Store</DialogTitle>
+                  <DialogDescription id="mobile-navigation-description">Explore published cartridges, public telemetry, and documentation.</DialogDescription>
+                </DialogHeader>
+                <nav aria-label="Mobile primary navigation" className="page-gutter grid gap-1 py-3">
+                  {PUBLIC_NAVIGATION.map((item) => {
+                    const active = navigationIsActive(pathname, item.href);
+                    return <Link key={item.href} aria-current={active ? "page" : undefined} className={`rounded-md px-3 py-3 text-sm font-semibold ${active ? "bg-[var(--color-primary-soft)] text-[var(--color-primary-strong)]" : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-text)]"}`} href={item.href} onClick={() => setMobileOpen(false)}>{item.label}</Link>;
+                  })}
+                </nav>
+              </DialogContent>
+            </Dialog>
           </div>
         </div>
       </header>
-      {children}
+      <div className="min-h-0 flex-1">{children}</div>
+      <SiteFooter />
     </div>
   );
 }

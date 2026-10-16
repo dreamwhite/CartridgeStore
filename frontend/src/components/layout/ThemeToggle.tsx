@@ -1,5 +1,7 @@
 "use client";
 
+import { Moon, Sun } from "lucide-react";
+
 import { useThemeStore } from "../../stores/theme-store";
 
 export function ThemeToggle() {
@@ -12,11 +14,11 @@ export function ThemeToggle() {
       type="button"
       aria-label={`Switch to ${nextTheme} theme`}
       title={`Switch to ${nextTheme} theme`}
-      className="inline-flex min-h-9 items-center gap-2 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 text-xs font-semibold text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-text)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600"
+      aria-pressed={theme === "dark"}
+      className="inline-flex size-9 items-center justify-center rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-text)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ring)]"
       onClick={() => setTheme(nextTheme)}
     >
-      <span aria-hidden="true">{theme === "dark" ? "☀" : "☾"}</span>
-      <span className="hidden sm:inline">{theme === "dark" ? "Light" : "Dark"}</span>
+      {theme === "dark" ? <Sun aria-hidden="true" className="size-4" /> : <Moon aria-hidden="true" className="size-4" />}
     </button>
   );
 }
