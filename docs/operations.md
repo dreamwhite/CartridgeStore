@@ -3,6 +3,50 @@
 This page collects day-to-day operational notes for running PRG32 Cartridge
 Store in a lab or classroom.
 
+## Unified management interface
+
+The supported Fastify + Next.js operator entry point is the repository-root
+`./manage.sh`. Use Node.js 24 (`source "$HOME/.nvm/nvm.sh" && nvm use 24`) and
+Docker Compose v2. The default profile is the infrastructure-independent
+`standalone` profile; `candidate` and `operational` must be selected
+explicitly.
+
+```bash
+./manage.sh install
+./manage.sh config check
+./manage.sh setup
+./manage.sh start
+./manage.sh status
+./manage.sh health
+./manage.sh doctor
+```
+
+Lifecycle commands use Compose `up`, `stop` and `restart` for the selected
+project. They never run `down -v`, Docker prune commands, volume deletion or
+network deletion. The optional backup scheduler is selected explicitly with
+`--with-scheduler`.
+
+The management interface also exposes `backup create|list|verify|status`,
+`db check`, `update check`, fail-closed `update apply --dry-run`,
+`deploy --dry-run|--apply`, `build`, `test`, and `ci check`. JSON is available
+with `--json`; diagnostics go to stderr and secret values are redacted.
+
+For a fresh standalone installation, provide the existing Compose contract
+through an operator-controlled env file. Required values include
+`PRG32_DATA_DIR`, `PRG32_KEY_REGISTRY_FILE`, the canonical authorization
+values, session/bootstrap secrets, trusted-proxy setting, public origins and
+the public WebSocket URL. The env file must not be committed and must not be
+group/world-readable.
+
+`update apply` remains intentionally fail-closed in M5.5.4 because a trusted
+image source, schema compatibility proof and rollback policy are not inferred
+from Git or a remote registry. `deploy --apply` requires the explicit
+disposable authorization `PRG32_MANAGE_DEPLOY_AUTHORIZATION=I_UNDERSTAND_DISPOSABLE_DEPLOYMENT` and is not allowed for the operational profile.
+
+The older Flask/PWA commands below are retained as historical compatibility
+notes. They are not the lifecycle path for the Fastify + Next.js runtime and
+must not be used to perform an operational cutover.
+
 ## Backups
 
 Administrators can download a full backup from `/admin/backup`. The ZIP

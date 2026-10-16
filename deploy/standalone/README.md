@@ -108,9 +108,11 @@ policy. mDNS remains disabled by default and does not require UDP 5353.
 ## Backup and upgrades
 
 Use the existing encrypted authenticated backup-v4 tooling with an external key
-registry and an operator-controlled archive destination. Backups require a
-quiesced canonical writer; restore always targets a fresh root and must be
-verified before use. Public backup HTTP routes are not enabled by Compose.
+registry and an operator-controlled archive destination. The Docker scheduler
+uses SQLite's online backup API and mounts the canonical root read-only; the
+explicit `exclusive` CLI mode remains available when an operator has separately
+quiesced the writer. Restore always targets a fresh root and must be verified
+before use. Public backup HTTP routes are not enabled by Compose.
 
 For upgrades, build the same operational images, keep the canonical root and
 key registry outside the image, run the read-only readiness/integrity checks,
