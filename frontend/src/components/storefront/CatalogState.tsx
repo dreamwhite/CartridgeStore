@@ -1,12 +1,14 @@
+import { PackageOpen, SearchX, TriangleAlert } from "lucide-react";
 import Link from "next/link";
 
 import { Button } from "../ui/button";
+import { StatusMessage } from "../ui/status";
 
 export function CatalogLoading() {
   return (
-    <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3" aria-busy="true" aria-label="Loading cartridges">
+    <div className="card-grid" aria-busy="true" aria-label="Loading cartridges">
       {Array.from({ length: 6 }, (_, index) => (
-        <div key={index} className="h-72 animate-pulse rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface-muted)]" />
+        <div key={index} className="h-64 animate-pulse rounded-md border border-[var(--color-border)] bg-[var(--color-surface-muted)]" />
       ))}
     </div>
   );
@@ -14,31 +16,34 @@ export function CatalogLoading() {
 
 export function CatalogEmpty({ filtered }: { filtered: boolean }) {
   return (
-    <div className="rounded-2xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-14 text-center">
-      <p className="text-lg font-semibold">{filtered ? "No cartridges match this search." : "The catalog is empty."}</p>
+    <div className="flex items-start gap-3 border-y border-dashed border-[var(--color-border)] px-1 py-8">
+      {filtered ? <SearchX aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-[var(--color-primary)]" /> : <PackageOpen aria-hidden="true" className="mt-0.5 size-5 shrink-0 text-[var(--color-primary)]" />}
+      <div>
+        <p className="font-semibold">{filtered ? "No cartridges match this search." : "The catalog is empty."}</p>
       <p className="mt-2 text-sm text-[var(--color-text-muted)]">
         {filtered ? "Try a different title, author, tag, or game identifier." : "Published cartridges will appear here when they are available."}
       </p>
+      </div>
     </div>
   );
 }
 
 export function CatalogError({ onRetry }: { onRetry: () => void }) {
   return (
-    <div className="rounded-2xl border border-rose-200 bg-rose-50 px-6 py-10 text-center text-rose-950 dark:border-rose-900 dark:bg-rose-950/30 dark:text-rose-100" role="alert">
-      <p className="text-lg font-semibold">The catalog could not be loaded.</p>
-      <p className="mt-2 text-sm">The Store API may be unavailable. Try again in a moment.</p>
-      <Button type="button" variant="secondary" className="mt-5" onClick={onRetry}>Try again</Button>
-    </div>
+    <StatusMessage tone="danger" className="flex flex-wrap items-center gap-3 rounded-none border-x-0 border-y px-1 py-4">
+      <TriangleAlert aria-hidden="true" className="size-5 shrink-0" />
+      <div className="min-w-0 flex-1"><p className="font-semibold">The catalog could not be loaded.</p><p className="mt-1 text-sm">The Store API may be unavailable. Try again in a moment.</p></div>
+      <Button type="button" variant="secondary" size="sm" onClick={onRetry}>Try again</Button>
+    </StatusMessage>
   );
 }
 
 export function DetailMissing() {
   return (
-    <div className="mx-auto max-w-3xl rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-14 text-center">
+    <div className="mx-auto max-w-3xl rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-6 py-10 text-center">
       <p className="text-lg font-semibold">Cartridge not found</p>
       <p className="mt-2 text-sm text-[var(--color-text-muted)]">This cartridge may be unpublished or no longer available.</p>
-      <Link className="mt-5 inline-flex min-h-10 items-center rounded-md bg-violet-700 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600" href="/">Back to the catalog</Link>
+      <Button asChild className="mt-5" size="default"><Link href="/">Back to the catalog</Link></Button>
     </div>
   );
 }

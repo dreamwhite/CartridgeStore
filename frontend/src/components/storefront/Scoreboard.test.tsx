@@ -50,7 +50,8 @@ describe("Scoreboard", () => {
 
     await user.type(await screen.findByLabelText("Filter scores by game"), "pong");
     await user.type(screen.getByLabelText("Filter scores by player"), "Ada");
-    await user.selectOptions(screen.getByLabelText("Scoreboard rows"), "50");
+    await user.click(screen.getByRole("combobox", { name: "Rows" }));
+    await user.click(await screen.findByRole("option", { name: "50" }));
     await user.click(screen.getByRole("button", { name: "Apply filters" }));
 
     expect(navigation.push).toHaveBeenCalledWith("/scores?game=pong&player=Ada&limit=50");

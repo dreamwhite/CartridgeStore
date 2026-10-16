@@ -61,9 +61,11 @@ describe("GameDetail", () => {
     expect(screen.getByText("genre")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Download qemu" })).toHaveAttribute("href", "/api/games/org.example.pong/download?version=1.0.0&architecture=qemu");
 
-    await user.click(screen.getByRole("button", { name: "Select architecture esp32c6" }));
+    await user.click(screen.getByRole("combobox", { name: "Architecture" }));
+    await user.click(await screen.findByRole("option", { name: "esp32c6" }));
     expect(screen.getByRole("link", { name: "Download esp32c6" })).toHaveAttribute("href", "/api/games/org.example.pong/download?version=1.0.0&architecture=esp32c6");
-    await user.click(screen.getByRole("button", { name: "v0.9.0" }));
+    await user.click(screen.getByRole("combobox", { name: "Version" }));
+    await user.click(await screen.findByRole("option", { name: "0.9.0" }));
     expect(navigation.push).toHaveBeenCalledWith("/games/org.example.pong?version=0.9.0");
   });
 

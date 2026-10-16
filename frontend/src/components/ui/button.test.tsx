@@ -13,3 +13,14 @@ test("renders an accessible button and forwards interaction", async () => {
 
   expect(onClick).toHaveBeenCalledOnce();
 });
+
+test("uses the semantic danger variant", () => {
+  render(<Button variant="danger">Delete</Button>);
+  expect(screen.getByRole("button", { name: "Delete" })).toHaveClass("bg-[var(--color-danger)]");
+});
+
+test("communicates loading state and disables interaction", () => {
+  render(<Button loading>Saving</Button>);
+  expect(screen.getByRole("button", { name: "Saving" })).toHaveAttribute("aria-busy", "true");
+  expect(screen.getByRole("button", { name: "Saving" })).toBeDisabled();
+});

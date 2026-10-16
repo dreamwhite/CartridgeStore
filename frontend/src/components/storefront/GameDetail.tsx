@@ -1,13 +1,19 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { ArrowLeft, Download, FileCode2, Tag } from "lucide-react";
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
 
 import { ApiRequestError, ApiResponseValidationError } from "../../lib/api/client";
 import { catalogDownloadPath, getGame } from "../../lib/api/catalog";
+import { catalogQueryKeys } from "../../lib/api/query-keys";
 import type { Game } from "../../lib/api/contracts";
+import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
+import { Card, CardContent, CardHeader, MetadataRow } from "../ui/card";
+import { SelectField, SelectItem } from "../ui/select";
 import { CartridgeArtwork } from "./CartridgeArtwork";
 import { CatalogError, DetailMissing } from "./CatalogState";
 
@@ -20,69 +26,39 @@ function scalarEntries(value: Record<string, unknown> | null): Array<[string, st
   return Object.entries(value).filter(([, item]) => ["string", "number", "boolean"].includes(typeof item)).map(([key, item]) => [key, String(item)]);
 }
 
+function formatSize(value: unknown): string | null {
+  if (typeof value !== "number" || !Number.isFinite(value)) return null;
+  return value >= 1024 * 1024 ? `${(value / (1024 * 1024)).toFixed(1)} MB` : `${Math.ceil(value / 1024)} KB`;
+}
+
 export function GameDetail() {
   const params = useParams<{ gameId: string }>();
   const router = useRouter();
   const searchParams = useSearchParams();
   const requestedVersion = searchParams.get("version") ?? undefined;
   const [architectureOverride, setArchitectureOverride] = useState<string | null>(null);
-  const query = useQuery({
-    queryKey: ["game", params.gameId, requestedVersion],
-    queryFn: () => getGame(params.gameId, requestedVersion),
-    staleTime: 30_000,
-  });
-
+  const query = useQuery({ queryKey: catalogQueryKeys.game(params.gameId, requestedVersion), queryFn: () => getGame(params.gameId, requestedVersion), staleTime: 30_000 });
   const game = query.data?.game;
   const architecture = architectureOverride && game?.architectures.includes(architectureOverride) ? architectureOverride : game?.architectures[0];
   const variant = architecture && game ? game.variants[architecture] : undefined;
   const downloadUrl = game && architecture ? catalogDownloadPath(game.id, game.selected_version, architecture) : undefined;
   const metadata = useMemo(() => scalarEntries(game?.metadata ?? null), [game?.metadata]);
   const authors = game ? authorNames(game) : [];
+  const hasScreenshot = Boolean(game && architecture && game.variants[architecture]?.has_screenshot === true);
 
-  if (query.isPending) return <main className="mx-auto max-w-6xl px-6 py-14"><div className="h-96 animate-pulse rounded-2xl bg-[var(--color-surface-muted)]" aria-busy="true" aria-label="Loading cartridge details" /></main>;
+  if (query.isPending) return <main className="page-gutter py-14"><div className="h-96 animate-pulse rounded-xl bg-[var(--color-surface-muted)]" aria-busy="true" aria-label="Loading cartridge details" />;</main>;
   if (query.isError) {
-    if (query.error instanceof ApiRequestError && query.error.status === 404) return <main className="mx-auto max-w-6xl px-6 py-14"><DetailMissing /></main>;
-    if (query.error instanceof ApiResponseValidationError) return <main className="mx-auto max-w-6xl px-6 py-14"><CatalogError onRetry={() => void query.refetch()} /></main>;
-    return <main className="mx-auto max-w-6xl px-6 py-14"><CatalogError onRetry={() => void query.refetch()} /></main>;
+    if (query.error instanceof ApiRequestError && query.error.status === 404) return <main className="page-gutter py-14"><DetailMissing /></main>;
+    if (query.error instanceof ApiResponseValidationError) return <main className="page-gutter py-14"><CatalogError onRetry={() => void query.refetch()} /></main>;
+    return <main className="page-gutter py-14"><CatalogError onRetry={() => void query.refetch()} /></main>;
   }
-  if (!game) return <main className="mx-auto max-w-6xl px-6 py-14"><DetailMissing /></main>;
+  if (!game) return <main className="page-gutter py-14"><DetailMissing /></main>;
   const currentGame = game;
 
   function chooseVersion(version: string) {
-    const query = new URLSearchParams({ version });
-    router.push(`/games/${encodeURIComponent(currentGame.id)}?${query.toString()}`);
+    router.push(`/games/${encodeURIComponent(currentGame.id)}?${new URLSearchParams({ version }).toString()}`);
     setArchitectureOverride(null);
   }
 
-  return (
-    <main className="mx-auto max-w-6xl px-6 py-10">
-      <Link href="/" className="text-sm font-semibold text-violet-700 underline-offset-4 hover:underline focus-visible:outline-2 focus-visible:outline-violet-600">← Back to catalog</Link>
-      <section className="mt-6 grid gap-8 lg:grid-cols-[minmax(0,1fr)_20rem] lg:items-start">
-        <div className="space-y-6">
-          <div className="flex flex-col gap-5 sm:flex-row">
-            <CartridgeArtwork gameId={game.id} version={game.selected_version} kind="icon" alt={`${game.title} icon`} className="h-32 w-32 shrink-0 rounded-2xl" />
-            <div>
-              <p className="text-sm font-semibold uppercase tracking-[0.16em] text-violet-700">Cartridge details</p>
-              <h1 className="mt-2 text-4xl font-bold tracking-tight">{game.title}</h1>
-              <p className="mt-3 max-w-2xl text-base leading-7 text-[var(--color-text-muted)]">{game.summary || "No description published."}</p>
-              <div className="mt-4 flex flex-wrap gap-2 text-xs text-[var(--color-text-muted)]"><span className="rounded-full border border-[var(--color-border)] px-2 py-1">{game.id}</span><span className="rounded-full border border-[var(--color-border)] px-2 py-1">v{game.selected_version}</span>{game.publisher && <span className="rounded-full border border-[var(--color-border)] px-2 py-1">{game.publisher}</span>}</div>
-            </div>
-          </div>
-          {game.tags.length > 0 && <div className="flex flex-wrap gap-2">{game.tags.map((tag) => <span key={tag} className="rounded-full bg-[var(--color-surface-muted)] px-3 py-1 text-xs">#{tag}</span>)}</div>}
-          {variant?.has_screenshot === true && architecture && <CartridgeArtwork gameId={game.id} version={game.selected_version} kind="screenshot" architecture={architecture} alt={`${game.title} screenshot`} className="aspect-video w-full rounded-2xl" />}
-          <div className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-6">
-            <h2 className="text-xl font-bold">Download this cartridge</h2>
-            <p className="mt-2 text-sm leading-6 text-[var(--color-text-muted)]">Choose a version and architecture. Downloads are served by the existing Store API and retain its download accounting.</p>
-            <div className="mt-5 flex flex-wrap gap-2" aria-label="Available versions">{game.versions.map((version) => <button key={version} type="button" onClick={() => chooseVersion(version)} aria-pressed={version === game.selected_version} className="min-h-10 rounded-md border border-[var(--color-border)] px-3 text-sm font-semibold aria-pressed:border-violet-700 aria-pressed:bg-violet-50 aria-pressed:text-violet-800 dark:aria-pressed:bg-violet-950/30">v{version}</button>)}</div>
-              <div className="mt-4 grid gap-3 sm:grid-cols-2">{game.architectures.map((item) => <button key={item} type="button" aria-label={`Select architecture ${item}`} onClick={() => setArchitectureOverride(item)} aria-pressed={item === architecture} className="flex min-h-16 items-center justify-between rounded-xl border border-[var(--color-border)] px-4 text-left hover:border-violet-600 aria-pressed:border-violet-700 aria-pressed:bg-violet-50 dark:aria-pressed:bg-violet-950/30"><span><span className="block font-semibold">{item}</span><span className="text-xs text-[var(--color-text-muted)]">{typeof game.variants[item]?.size === "number" ? `${Math.ceil(Number(game.variants[item]?.size) / 1024)} KB` : "Binary available"}</span></span><span aria-hidden="true">→</span></button>)}</div>
-            {downloadUrl ? <a className="mt-5 inline-flex min-h-10 items-center justify-center rounded-md bg-violet-700 px-4 py-2 text-sm font-semibold text-white hover:bg-violet-800 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet-600" href={downloadUrl}>Download {architecture}</a> : <p className="mt-5 text-sm text-[var(--color-text-muted)]" role="status">No downloadable architecture is available for this version.</p>}
-          </div>
-        </div>
-        <aside className="space-y-5">
-          <section className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5"><h2 className="font-bold">Published information</h2>{authors.length > 0 || game.updated_at ? <dl>{authors.length > 0 && <div className="mt-4"><dt className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Authors</dt><dd className="mt-1 text-sm">{authors.join(", ")}</dd></div>}{game.updated_at && <div className="mt-4"><dt className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Updated</dt><dd className="mt-1 text-sm">{game.updated_at}</dd></div>}</dl> : <p className="mt-3 text-sm text-[var(--color-text-muted)]">No additional publication metadata is available.</p>}</section>
-          <section className="rounded-2xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5"><h2 className="font-bold">Metadata</h2>{metadata.length > 0 ? <dl className="mt-4 space-y-3">{metadata.map(([key, value]) => <div key={key}><dt className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">{key.replaceAll("_", " ")}</dt><dd className="mt-1 break-words text-sm">{value}</dd></div>)}</dl> : <p className="mt-3 text-sm text-[var(--color-text-muted)]">No additional metadata published.</p>}</section>
-        </aside>
-      </section>
-    </main>
-  );
+  return <main className="page-gutter py-7 sm:py-9"><Link href="/explore" className="inline-flex items-center gap-2 text-sm font-semibold text-[var(--color-primary-strong)] hover:underline"><ArrowLeft aria-hidden="true" className="size-4" />Back to Explore</Link><div className="mt-5 grid gap-6 lg:grid-cols-[minmax(0,1fr)_19rem] lg:items-start"><div className="min-w-0 space-y-5"><header className="flex flex-wrap items-start justify-between gap-4"><div><p className="technical-label text-[var(--color-primary)]">Cartridge detail</p><div className="mt-2 flex flex-wrap items-center gap-2"><h1 className="text-3xl font-bold tracking-tight sm:text-4xl">{game.title}</h1><Badge variant="published">Published</Badge></div><p className="mt-2 text-sm text-[var(--color-text-muted)]">{game.summary || "No description published."}</p></div><Badge variant="version">v{game.selected_version}</Badge></header><div className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]"><div className="aspect-video bg-[var(--color-surface-muted)]">{hasScreenshot && architecture ? <CartridgeArtwork key={`${game.id}-${game.selected_version}-${architecture}`} gameId={game.id} version={game.selected_version} kind="screenshot" architecture={architecture} alt={`${game.title} screenshot`} className="h-full w-full" /> : <CartridgeArtwork gameId={game.id} version={game.selected_version} kind="icon" alt={`${game.title} artwork`} className="h-full w-full" />}</div><div className="flex flex-wrap items-center gap-2 border-t border-[var(--color-border)] px-4 py-3"><span className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">Available targets</span>{game.architectures.map((item) => <Badge key={item} variant={item === architecture ? "game" : "architecture"}>{item}</Badge>)}</div></div><Card><CardHeader><h2 className="font-bold">About this cartridge</h2></CardHeader><CardContent><p className="text-sm leading-6 text-[var(--color-text-muted)]">{game.summary || "No additional description was published for this cartridge."}</p>{game.tags.length > 0 && <div className="mt-5 flex flex-wrap gap-2" aria-label="Cartridge tags">{game.tags.map((tag) => <Badge key={tag} variant="utility"><Tag aria-hidden="true" className="mr-1 size-3" />#{tag}</Badge>)}</div>}</CardContent></Card></div><aside className="space-y-5 lg:sticky lg:top-6"><Card><CardHeader><h2 className="font-bold">Download cartridge</h2><p className="mt-1 text-xs text-[var(--color-text-muted)]">Select the exact published binary for your target.</p></CardHeader><CardContent className="space-y-4"><SelectField label="Version" name="detail-version" value={game.selected_version} onValueChange={chooseVersion}><SelectItem value={game.selected_version}>{game.selected_version}</SelectItem>{game.versions.filter((version) => version !== game.selected_version).map((version) => <SelectItem key={version} value={version}>{version}</SelectItem>)}</SelectField><SelectField label="Architecture" name="detail-architecture" value={architecture ?? "__none__"} onValueChange={(value) => setArchitectureOverride(value === "__none__" ? null : value)} disabled={game.architectures.length === 0}><SelectItem value="__none__" disabled>No architecture</SelectItem>{game.architectures.map((item) => <SelectItem key={item} value={item}>{item}</SelectItem>)}</SelectField>{downloadUrl ? <Button asChild className="w-full"><a href={downloadUrl}><Download aria-hidden="true" className="size-4" />Download {architecture}</a></Button> : <p className="text-sm text-[var(--color-text-muted)]" role="status">No downloadable architecture is available for this version.</p>}<p className="text-xs leading-5 text-[var(--color-text-muted)]">The existing Store API serves the binary and retains its download accounting.</p></CardContent></Card><Card><CardHeader><h2 className="font-bold">Published information</h2></CardHeader><CardContent><dl><MetadataRow label="Author" value={authors.join(", ") || "Not specified"} />{game.publisher && <MetadataRow label="Publisher" value={game.publisher} />}<MetadataRow label="Version" value={game.selected_version} />{formatSize(variant?.size) && <MetadataRow label="File size" value={formatSize(variant?.size) ?? ""} />}</dl></CardContent></Card></aside></div><Card className="mt-6"><CardHeader><div className="flex items-center gap-2"><FileCode2 aria-hidden="true" className="size-4 text-[var(--color-primary)]" /><h2 className="font-bold">Technical metadata</h2></div></CardHeader><CardContent>{metadata.length > 0 ? <dl>{metadata.map(([key, value]) => <MetadataRow key={key} label={key.replaceAll("_", " ")} value={value} />)}</dl> : <p className="text-sm text-[var(--color-text-muted)]">No additional metadata published.</p>}</CardContent></Card></main>;
 }

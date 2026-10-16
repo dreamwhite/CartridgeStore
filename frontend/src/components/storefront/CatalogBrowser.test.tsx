@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen, waitFor } from "@testing-library/react";
+import { render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
@@ -11,7 +11,7 @@ const navigation = vi.hoisted(() => ({ push: vi.fn(), searchParams: new URLSearc
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: navigation.push }),
-  usePathname: () => "/",
+  usePathname: () => "/explore",
   useSearchParams: () => navigation.searchParams,
 }));
 
@@ -60,8 +60,8 @@ describe("CatalogBrowser", () => {
 
     renderBrowser();
 
-    expect(await screen.findByRole("heading", { name: "PRG32 Pong" })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Open PRG32 Tetris" })).toHaveAttribute("href", "/games/org.example.tetris");
+    expect((await screen.findAllByRole("heading", { name: "PRG32 Pong" })).length).toBeGreaterThan(0);
+    expect(screen.getAllByRole("link", { name: "Open PRG32 Tetris" })[0]).toHaveAttribute("href", "/games/org.example.tetris");
     expect(screen.getAllByRole("link", { name: "Download" })[0]).toHaveAttribute("href", "/api/games/org.example.pong/download?version=1.0.0&architecture=qemu");
     expect(screen.getByLabelText("Search cartridges")).toBeInTheDocument();
   });
@@ -73,10 +73,23 @@ describe("CatalogBrowser", () => {
 
     await user.type(await screen.findByLabelText("Search cartridges"), "pong");
     await user.click(screen.getByRole("button", { name: "Search" }));
-    expect(navigation.push).toHaveBeenCalledWith("/?q=pong");
+    expect(navigation.push).toHaveBeenCalledWith("/explore?q=pong");
 
-    await user.selectOptions(screen.getByLabelText("Filter by architecture"), "esp32c6");
-    expect(navigation.push).toHaveBeenLastCalledWith("/?architecture=esp32c6");
+    await user.click(screen.getByRole("radio", { name: "esp32c6" }));
+    expect(navigation.push).toHaveBeenLastCalledWith("/explore?architecture=esp32c6");
+  });
+
+  test("provides an accessible mobile filter dialog with apply and clear actions", async () => {
+    const user = userEvent.setup();
+    vi.mocked(getCatalog).mockResolvedValue(response([game()]));
+    renderBrowser();
+
+    await user.click(await screen.findByRole("button", { name: /Filters/ }));
+    const dialog = await screen.findByRole("dialog", { name: "Filter cartridges" });
+    await user.click(within(dialog).getByRole("radio", { name: "esp32c6" }));
+    await user.click(within(dialog).getByRole("button", { name: "Apply filters" }));
+
+    expect(navigation.push).toHaveBeenLastCalledWith("/explore?architecture=esp32c6");
   });
 
   test("renders explicit empty and API failure states", async () => {
