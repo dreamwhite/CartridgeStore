@@ -6,6 +6,7 @@ import { encodePythonJson } from "../compatibility/serialization.js";
 import type { BackendConfig } from "../config/env.js";
 import { parseCookies, serializeSessionCookie } from "../auth/session.js";
 import { SetupError, SetupService } from "./service.js";
+import { BoundedRateLimiter } from "../security/rate-limiter.js";
 
 interface SetupRouteOptions {
   readonly config: BackendConfig;
@@ -72,17 +73,11 @@ function errorResponse(reply: FastifyReply, request: FastifyRequest, error: unkn
 }
 
 export function registerSetupRoutes(app: FastifyInstance, options: SetupRouteOptions): void {
-  const attempts = new Map<string, { count: number; startedAt: number }>();
-  const allowAuthorization = (key: string): boolean => {
-    const now = Date.now();
-    const current = attempts.get(key);
-    if (!current || now - current.startedAt >= options.config.authRateLimitWindowSeconds * 1000) {
-      attempts.set(key, { count: 1, startedAt: now });
-      return true;
-    }
-    current.count += 1;
-    return current.count <= options.config.authRateLimitMax;
-  };
+  const authorizationLimiter = new BoundedRateLimiter(
+    options.config.authRateLimitMax,
+    options.config.authRateLimitWindowSeconds,
+    options.config.authRateLimitMaxClients
+  );
 
   app.get("/api/setup/status", async (_request, reply) => {
     try {
@@ -93,7 +88,7 @@ export function registerSetupRoutes(app: FastifyInstance, options: SetupRouteOpt
 
   app.post<{ Body: Body }>("/api/setup/authorize", async (request, reply) => {
     if (!sameOrigin(request, options.config)) return json(reply, { ok: false, error: "origin is not allowed", code: "setup_origin_denied" }, 403);
-    if (!allowAuthorization(request.ip || "unknown")) return json(reply, { ok: false, error: "too many requests", code: "rate_limited" }, 429);
+    if (!authorizationLimiter.allow(request.ip || "unknown")) return json(reply, { ok: false, error: "too many requests", code: "rate_limited" }, 429);
     try {
       const input = body(request);
       const token = typeof input.bootstrap_token === "string" ? input.bootstrap_token.trim() : "";

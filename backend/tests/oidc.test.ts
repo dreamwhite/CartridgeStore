@@ -227,6 +227,39 @@ afterEach(() => {
 });
 
 describe("M6.3d.2h.3 OIDC protocol implementation", () => {
+  it("supports the legacy providerless aliases only for one enabled provider", async () => {
+    const test = await fixture();
+    const login = await test.app.inject({ method: "GET", url: "/auth/oidc/login?return_to=/legacy" });
+    expect(login.statusCode).toBe(302);
+    expect(responseHeader(login, "location")).toContain("client_id=prg32-client");
+    const authorization = await fetch(responseHeader(login, "location"), { redirect: "manual" });
+    const callback = new URL(authorization.headers.get("location") ?? "");
+    callback.pathname = "/auth/oidc/callback";
+    const completed = await test.app.inject({ method: "GET", url: callback.pathname + callback.search, headers: { cookie: cookie(login, "prg32_oidc_correlation") } });
+    expect(completed.statusCode).toBe(302);
+    expect(responseHeader(completed, "location")).toBe("/legacy");
+
+    const database = new Database(test.databasePath);
+    const providers = new FederationProviderService(database);
+    providers.create({
+      providerId: "other",
+      protocol: "oidc",
+      displayName: "Other OIDC",
+      issuer: "https://other.example.test/",
+      clientId: "other-client",
+      clientAuthMethod: "none",
+      redirectUri: "http://127.0.0.1:5090/api/auth/oidc/other/callback",
+      scopes: ["openid"]
+    }, undefined, true);
+    providers.setEnabled("other", true);
+    database.close();
+    const ambiguous = await test.app.inject({ method: "GET", url: "/auth/oidc/login" });
+    expect(ambiguous.statusCode).toBe(409);
+    expect(ambiguous.json()).toMatchObject({ ok: false, code: "oidc_provider_alias_ambiguous" });
+    await test.app.close();
+    await test.provider.close();
+  });
+
   it("executes discovery, PKCE, nonce validation, identity resolution, and session rotation", async () => {
     const test = await fixture();
     const login = await test.app.inject({ method: "GET", url: "/api/auth/oidc/school/login?return_to=/catalog" });

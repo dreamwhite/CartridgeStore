@@ -1,3 +1,4 @@
+import net from "node:net";
 import path from "node:path";
 
 import { parseLegacyConfiguredUsers, type LegacyConfiguredUser } from "../auth/tokens.js";
@@ -9,6 +10,8 @@ export interface BackendConfig {
   readonly port: number;
   readonly logLevel: string;
   readonly trustProxy: boolean;
+  readonly trustProxyHops: number;
+  readonly trustedProxyCidrs: readonly string[];
   readonly databasePath: string;
   readonly storeDataDirectory: string;
   readonly storePortOverride: string | undefined;
@@ -21,6 +24,24 @@ export interface BackendConfig {
   readonly mdnsInterface: string;
   readonly busyTimeoutMs: number;
   readonly multiplayerMaxPeers: number;
+  readonly multiplayerMaxConnections: number;
+  readonly multiplayerMaxConnectionsPerSource: number;
+  readonly multiplayerMaxConnectionsPerIdentity: number;
+  readonly multiplayerMaxUnjoinedConnections: number;
+  readonly multiplayerMessageRatePerSecond: number;
+  readonly multiplayerMessageBurst: number;
+  readonly multiplayerStateRatePerSecond: number;
+  readonly multiplayerStateBurst: number;
+  readonly multiplayerJoinRateMax: number;
+  readonly multiplayerJoinRateWindowSeconds: number;
+  readonly multiplayerSourceMessageRatePerSecond: number;
+  readonly multiplayerSourceMessageBurst: number;
+  readonly multiplayerIdentityMessageRatePerSecond: number;
+  readonly multiplayerIdentityMessageBurst: number;
+  readonly multiplayerHeartbeatIntervalSeconds: number;
+  readonly multiplayerHeartbeatGraceSeconds: number;
+  readonly multiplayerUnjoinedTimeoutSeconds: number;
+  readonly multiplayerMaxBufferedBytes: number;
   readonly legacyConfiguredUsers: readonly LegacyConfiguredUser[];
   readonly authWriteEnabled: boolean;
   readonly authWriteMode: string | undefined;
@@ -43,6 +64,13 @@ export interface BackendConfig {
   readonly setupNetworkTestAllowlist: readonly string[];
   readonly authRateLimitMax: number;
   readonly authRateLimitWindowSeconds: number;
+  readonly authRateLimitMaxClients: number;
+  readonly httpRequestTimeoutMs: number;
+  readonly httpKeepAliveTimeoutMs: number;
+  readonly httpCatalogRateLimitMax: number;
+  readonly httpDownloadRateLimitMax: number;
+  readonly httpRateLimitWindowSeconds: number;
+  readonly httpRateLimitMaxClients: number;
   readonly emailTransport: "disabled" | "memory" | "smtp";
   readonly emailFrom: string;
   readonly emailPublicOrigin: string | undefined;
@@ -132,6 +160,23 @@ function booleanValue(name: string, value: string | undefined, fallback: boolean
 function optionalNonEmpty(value: string | undefined): string | undefined {
   const candidate = value?.trim();
   return candidate ? candidate : undefined;
+}
+
+function proxyCidrs(value: string | undefined): string[] {
+  const entries = (value ?? "").split(",").map((item) => item.trim()).filter(Boolean);
+  for (const entry of entries) {
+    const [address, prefix] = entry.split("/", 2);
+    const family = net.isIP(address ?? "");
+    if (family === 0) throw new Error("PRG32_BACKEND_TRUST_PROXY_CIDRS contains an invalid address");
+    if (prefix !== undefined) {
+      const parsed = Number(prefix);
+      const maximum = family === 4 ? 32 : 128;
+      if (!Number.isInteger(parsed) || parsed < 0 || parsed > maximum) {
+        throw new Error("PRG32_BACKEND_TRUST_PROXY_CIDRS contains an invalid prefix");
+      }
+    }
+  }
+  return entries;
 }
 
 function looksLikeSqliteUri(value: string): boolean {
@@ -427,6 +472,10 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
   }
   const mdnsEnabled = booleanValue("PRG32_BACKEND_MDNS_ENABLED", environment.PRG32_BACKEND_MDNS_ENABLED, false);
   const trustProxy = booleanValue("PRG32_BACKEND_TRUST_PROXY", environment.PRG32_BACKEND_TRUST_PROXY, false);
+  const trustProxyHops = positiveInteger("PRG32_BACKEND_TRUST_PROXY_HOPS", environment.PRG32_BACKEND_TRUST_PROXY_HOPS, 1);
+  if (trustProxyHops > 4) throw new Error("PRG32_BACKEND_TRUST_PROXY_HOPS must not exceed 4");
+  const trustedProxyCidrs = proxyCidrs(environment.PRG32_BACKEND_TRUST_PROXY_CIDRS);
+  if (!trustProxy && trustedProxyCidrs.length > 0) throw new Error("PRG32_BACKEND_TRUST_PROXY_CIDRS requires PRG32_BACKEND_TRUST_PROXY=true");
   const mdnsInterface = optionalNonEmpty(environment.PRG32_BACKEND_MDNS_INTERFACE);
   if (mdnsEnabled && (environment.NODE_ENV ?? "").trim().toLowerCase() === "production") {
     throw new Error("PRG32_BACKEND_MDNS_ENABLED is disabled in production until the advertised endpoint is explicitly reviewed");
@@ -487,6 +536,8 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
     port: positiveInteger("PRG32_BACKEND_PORT", environment.PRG32_BACKEND_PORT, 5090),
     logLevel: nonEmpty("PRG32_BACKEND_LOG_LEVEL", environment.PRG32_BACKEND_LOG_LEVEL, "info"),
     trustProxy,
+    trustProxyHops,
+    trustedProxyCidrs,
     databasePath: path.resolve(configuredDatabase),
     storeDataDirectory: path.resolve(configuredStoreData),
     storePortOverride: environment.PRG32_STORE_PORT?.trim() || undefined,
@@ -501,6 +552,96 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
       "PRG32_MP_MAX_PEERS",
       environment.PRG32_MP_MAX_PEERS,
       8
+    ),
+    multiplayerMaxConnections: positiveInteger(
+      "PRG32_BACKEND_MP_MAX_CONNECTIONS",
+      environment.PRG32_BACKEND_MP_MAX_CONNECTIONS,
+      256
+    ),
+    multiplayerMaxConnectionsPerSource: positiveInteger(
+      "PRG32_BACKEND_MP_MAX_CONNECTIONS_PER_SOURCE",
+      environment.PRG32_BACKEND_MP_MAX_CONNECTIONS_PER_SOURCE,
+      32
+    ),
+    multiplayerMaxConnectionsPerIdentity: positiveInteger(
+      "PRG32_BACKEND_MP_MAX_CONNECTIONS_PER_IDENTITY",
+      environment.PRG32_BACKEND_MP_MAX_CONNECTIONS_PER_IDENTITY,
+      4
+    ),
+    multiplayerMaxUnjoinedConnections: positiveInteger(
+      "PRG32_BACKEND_MP_MAX_UNJOINED_CONNECTIONS",
+      environment.PRG32_BACKEND_MP_MAX_UNJOINED_CONNECTIONS,
+      64
+    ),
+    multiplayerMessageRatePerSecond: positiveInteger(
+      "PRG32_BACKEND_MP_MESSAGE_RATE",
+      environment.PRG32_BACKEND_MP_MESSAGE_RATE,
+      60
+    ),
+    multiplayerMessageBurst: positiveInteger(
+      "PRG32_BACKEND_MP_MESSAGE_BURST",
+      environment.PRG32_BACKEND_MP_MESSAGE_BURST,
+      120
+    ),
+    multiplayerStateRatePerSecond: positiveInteger(
+      "PRG32_BACKEND_MP_STATE_RATE",
+      environment.PRG32_BACKEND_MP_STATE_RATE,
+      30
+    ),
+    multiplayerStateBurst: positiveInteger(
+      "PRG32_BACKEND_MP_STATE_BURST",
+      environment.PRG32_BACKEND_MP_STATE_BURST,
+      60
+    ),
+    multiplayerJoinRateMax: positiveInteger(
+      "PRG32_BACKEND_MP_JOIN_MAX",
+      environment.PRG32_BACKEND_MP_JOIN_MAX,
+      4
+    ),
+    multiplayerJoinRateWindowSeconds: positiveInteger(
+      "PRG32_BACKEND_MP_JOIN_WINDOW_SECONDS",
+      environment.PRG32_BACKEND_MP_JOIN_WINDOW_SECONDS,
+      10
+    ),
+    multiplayerSourceMessageRatePerSecond: positiveInteger(
+      "PRG32_BACKEND_MP_SOURCE_MESSAGE_RATE",
+      environment.PRG32_BACKEND_MP_SOURCE_MESSAGE_RATE,
+      300
+    ),
+    multiplayerSourceMessageBurst: positiveInteger(
+      "PRG32_BACKEND_MP_SOURCE_MESSAGE_BURST",
+      environment.PRG32_BACKEND_MP_SOURCE_MESSAGE_BURST,
+      600
+    ),
+    multiplayerIdentityMessageRatePerSecond: positiveInteger(
+      "PRG32_BACKEND_MP_IDENTITY_MESSAGE_RATE",
+      environment.PRG32_BACKEND_MP_IDENTITY_MESSAGE_RATE,
+      120
+    ),
+    multiplayerIdentityMessageBurst: positiveInteger(
+      "PRG32_BACKEND_MP_IDENTITY_MESSAGE_BURST",
+      environment.PRG32_BACKEND_MP_IDENTITY_MESSAGE_BURST,
+      240
+    ),
+    multiplayerHeartbeatIntervalSeconds: positiveInteger(
+      "PRG32_BACKEND_MP_HEARTBEAT_INTERVAL_SECONDS",
+      environment.PRG32_BACKEND_MP_HEARTBEAT_INTERVAL_SECONDS,
+      30
+    ),
+    multiplayerHeartbeatGraceSeconds: positiveInteger(
+      "PRG32_BACKEND_MP_HEARTBEAT_GRACE_SECONDS",
+      environment.PRG32_BACKEND_MP_HEARTBEAT_GRACE_SECONDS,
+      10
+    ),
+    multiplayerUnjoinedTimeoutSeconds: positiveInteger(
+      "PRG32_BACKEND_MP_UNJOINED_TIMEOUT_SECONDS",
+      environment.PRG32_BACKEND_MP_UNJOINED_TIMEOUT_SECONDS,
+      30
+    ),
+    multiplayerMaxBufferedBytes: positiveInteger(
+      "PRG32_BACKEND_MP_MAX_BUFFERED_BYTES",
+      environment.PRG32_BACKEND_MP_MAX_BUFFERED_BYTES,
+      256 * 1024
     ),
     legacyConfiguredUsers,
     busyTimeoutMs: positiveInteger(
@@ -544,6 +685,41 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
       "PRG32_BACKEND_AUTH_RATE_LIMIT_WINDOW_SECONDS",
       environment.PRG32_BACKEND_AUTH_RATE_LIMIT_WINDOW_SECONDS,
       60
+    ),
+    authRateLimitMaxClients: positiveInteger(
+      "PRG32_BACKEND_AUTH_RATE_LIMIT_MAX_CLIENTS",
+      environment.PRG32_BACKEND_AUTH_RATE_LIMIT_MAX_CLIENTS,
+      4096
+    ),
+    httpRequestTimeoutMs: positiveInteger(
+      "PRG32_BACKEND_HTTP_REQUEST_TIMEOUT_MS",
+      environment.PRG32_BACKEND_HTTP_REQUEST_TIMEOUT_MS,
+      120_000
+    ),
+    httpKeepAliveTimeoutMs: positiveInteger(
+      "PRG32_BACKEND_HTTP_KEEPALIVE_TIMEOUT_MS",
+      environment.PRG32_BACKEND_HTTP_KEEPALIVE_TIMEOUT_MS,
+      5_000
+    ),
+    httpCatalogRateLimitMax: positiveInteger(
+      "PRG32_BACKEND_HTTP_CATALOG_RATE_LIMIT_MAX",
+      environment.PRG32_BACKEND_HTTP_CATALOG_RATE_LIMIT_MAX,
+      120
+    ),
+    httpDownloadRateLimitMax: positiveInteger(
+      "PRG32_BACKEND_HTTP_DOWNLOAD_RATE_LIMIT_MAX",
+      environment.PRG32_BACKEND_HTTP_DOWNLOAD_RATE_LIMIT_MAX,
+      60
+    ),
+    httpRateLimitWindowSeconds: positiveInteger(
+      "PRG32_BACKEND_HTTP_RATE_LIMIT_WINDOW_SECONDS",
+      environment.PRG32_BACKEND_HTTP_RATE_LIMIT_WINDOW_SECONDS,
+      60
+    ),
+    httpRateLimitMaxClients: positiveInteger(
+      "PRG32_BACKEND_HTTP_RATE_LIMIT_MAX_CLIENTS",
+      environment.PRG32_BACKEND_HTTP_RATE_LIMIT_MAX_CLIENTS,
+      4096
     ),
     emailTransport,
     emailFrom,

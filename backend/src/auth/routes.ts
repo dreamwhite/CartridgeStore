@@ -11,6 +11,7 @@ import type { AuthorizationService } from "../authorization/service.js";
 import { permissionGuard } from "../authorization/guards.js";
 import { PERMISSIONS } from "../authorization/permissions.js";
 import { EmailDeliveryError, type EmailService } from "../email/service.js";
+import { BoundedRateLimiter } from "../security/rate-limiter.js";
 
 const SESSION_COOKIE = "prg32_ts_session";
 
@@ -123,20 +124,6 @@ function clientKey(request: FastifyRequest): string {
   return request.ip || "unknown";
 }
 
-class RateLimiter {
-  private readonly attempts = new Map<string, { count: number; startedAt: number }>();
-  constructor(private readonly max: number, private readonly windowSeconds: number) {}
-  allow(key: string, now = Date.now()): boolean {
-    const current = this.attempts.get(key);
-    if (!current || now - current.startedAt >= this.windowSeconds * 1000) {
-      this.attempts.set(key, { count: 1, startedAt: now });
-      return true;
-    }
-    current.count += 1;
-    return current.count <= this.max;
-  }
-}
-
 export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptions): void {
   const { auth, config, authorization } = options;
   if (!app.hasContentTypeParser("application/x-www-form-urlencoded")) {
@@ -144,7 +131,7 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptio
       done(null, payload);
     });
   }
-  const limiter = new RateLimiter(config.authRateLimitMax, config.authRateLimitWindowSeconds);
+  const limiter = new BoundedRateLimiter(config.authRateLimitMax, config.authRateLimitWindowSeconds, config.authRateLimitMaxClients);
   const localAuthPaths = (path: string): string[] => [path, `/api${path}`];
 
   for (const path of localAuthPaths("/auth/csrf")) app.get(path, async (request, reply) => {

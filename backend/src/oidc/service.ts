@@ -11,7 +11,9 @@ import type { BackendConfig } from "../config/env.js";
 import { FederationIdentityError, type FederationIdentityService, ValidatedExternalIdentity } from "../federation/identity.js";
 import { FederationProviderError, type FederationProviderService, type FederationProviderConfig } from "../federation/provider.js";
 import { FederationTransactionError, type FederationTransactionStore } from "../federation/transaction.js";
+import type { FederationLinkChallengeService } from "../federation/link-challenges.js";
 import { SecretStorageError, type SecretStore } from "../secrets/service.js";
+import { BoundedRateLimiter } from "../security/rate-limiter.js";
 import { createCorrelation, parseCorrelation } from "./correlation.js";
 
 const OIDC_CACHE_TTL_MS = 5 * 60 * 1000;
@@ -21,7 +23,7 @@ const OIDC_TIMEOUT_SECONDS = 5;
 const OIDC_TRANSACTION_TTL_SECONDS = 300;
 const OIDC_MAX_PENDING_TRANSACTIONS = 4096;
 export class OidcError extends Error {
-  constructor(readonly code: string, readonly statusCode: number, message: string) {
+  constructor(readonly code: string, readonly statusCode: number, message: string, readonly details?: { readonly link_challenge?: string }) {
     super(message);
     this.name = "OidcError";
   }
@@ -92,26 +94,6 @@ function assertBoundEndpoint(value: unknown, issuer: URL, allowHttp: boolean): s
   return endpoint.toString();
 }
 
-class BoundedRateLimiter {
-  private readonly values = new Map<string, { count: number; startedAt: number }>();
-
-  constructor(private readonly max: number, private readonly windowSeconds: number, private readonly maxEntries: number) {}
-
-  allow(key: string, now = Date.now()): boolean {
-    if (this.values.size >= this.maxEntries && !this.values.has(key)) {
-      const oldest = this.values.keys().next().value;
-      if (oldest !== undefined) this.values.delete(oldest);
-    }
-    const current = this.values.get(key);
-    if (!current || now - current.startedAt >= this.windowSeconds * 1000) {
-      this.values.set(key, { count: 1, startedAt: now });
-      return true;
-    }
-    current.count += 1;
-    return current.count <= this.max;
-  }
-}
-
 export class OidcService {
   private readonly cache = new Map<string, CacheEntry>();
   private readonly inFlight = new Map<string, Promise<Configuration>>();
@@ -126,14 +108,36 @@ export class OidcService {
     private readonly identities: FederationIdentityService,
     private readonly transactions: FederationTransactionStore,
     private readonly secrets: SecretStore,
-    private readonly audit: AdminAuditLog
+    private readonly audit: AdminAuditLog,
+    private readonly linkChallenges: FederationLinkChallengeService
   ) {
-    this.loginLimiter = new BoundedRateLimiter(config.authRateLimitMax, config.authRateLimitWindowSeconds, OIDC_MAX_PENDING_TRANSACTIONS);
-    this.callbackLimiter = new BoundedRateLimiter(config.authRateLimitMax * 2, config.authRateLimitWindowSeconds, OIDC_MAX_PENDING_TRANSACTIONS);
+    this.loginLimiter = new BoundedRateLimiter(config.authRateLimitMax, config.authRateLimitWindowSeconds, Math.min(config.authRateLimitMaxClients, OIDC_MAX_PENDING_TRANSACTIONS));
+    this.callbackLimiter = new BoundedRateLimiter(config.authRateLimitMax * 2, config.authRateLimitWindowSeconds, Math.min(config.authRateLimitMaxClients, OIDC_MAX_PENDING_TRANSACTIONS));
   }
 
   publicProviders(): readonly { provider_id: string; protocol: "oidc" | "saml"; display_name: string; enabled: boolean }[] {
     return this.providers.publicList();
+  }
+
+  /** Resolve the legacy providerless alias only when it is unambiguous. */
+  providerlessProviderId(): string {
+    const enabled = this.providers.list().filter((provider) => provider.protocol === "oidc" && provider.enabled);
+    if (enabled.length === 1 && enabled[0]) return enabled[0].providerId;
+    if (enabled.length === 0) throw new OidcError("oidc_provider_alias_unavailable", 404, "OIDC provider alias is unavailable");
+    throw new OidcError("oidc_provider_alias_ambiguous", 409, "OIDC provider alias is ambiguous");
+  }
+
+  /**
+   * The legacy callback path is not the registered redirect URI. Preserve the
+   * provider's exact origin/path and copy only callback query parameters so
+   * token exchange remains bound to the configured redirect URI.
+   */
+  providerlessCallbackUrl(providerId: string, requestUrl: string): string {
+    const provider = this.requireProvider(providerId);
+    const incoming = new URL(requestUrl, provider.redirectUri);
+    const canonical = new URL(provider.redirectUri);
+    canonical.search = incoming.search;
+    return canonical.toString();
   }
 
   async start(providerId: string, returnTo: string | null, context: OidcRequestContext): Promise<OidcLoginResult> {
@@ -237,7 +241,10 @@ export class OidcService {
     let resolved;
     try { resolved = this.identities.resolve(externalIdentity); }
     catch (error) {
-      if (error instanceof FederationIdentityError && error.code === "federation_identity_unknown") throw new OidcError("oidc_identity_link_required", 401, "OIDC identity is not linked");
+      if (error instanceof FederationIdentityError && error.code === "federation_identity_unknown") {
+        const linkChallenge = this.linkChallenges.stage(externalIdentity);
+        throw new OidcError("oidc_identity_link_required", 401, "OIDC identity is not linked", { link_challenge: linkChallenge });
+      }
       if (error instanceof FederationIdentityError && error.code === "federation_identity_email_required") throw new OidcError("oidc_identity_email_required", 401, "OIDC identity did not provide a usable email");
       if (error instanceof FederationIdentityError && error.code === "federation_identity_conflict") throw new OidcError("oidc_identity_conflict", 409, "OIDC identity requires an explicit account link");
       if (error instanceof FederationIdentityError && error.code === "federation_account_disabled") throw new OidcError("oidc_account_disabled", 403, "OIDC authentication is unavailable");

@@ -27,7 +27,7 @@ function operationFailure(reply: FastifyReply, request: FastifyRequest, error: u
   reply.header("set-cookie", clearSamlCorrelationCookie(config));
   if (error instanceof SamlError) {
     request.log.warn({ code: error.code, requestId: request.id }, "SAML request rejected");
-    return json(reply, { ok: false, error: error.message, code: error.code }, error.statusCode);
+    return json(reply, { ok: false, error: error.message, code: error.code, ...(error.details ?? {}) }, error.statusCode);
   }
   request.log.warn({ code: "saml_internal_error", requestId: request.id }, "SAML request rejected");
   return json(reply, { ok: false, error: "SAML authentication is unavailable", code: "saml_unavailable" }, 503);
@@ -51,32 +51,51 @@ function formValue(request: FastifyRequest, key: string, maxBytes: number, requi
 }
 
 export function registerSamlRoutes(app: FastifyInstance, options: SamlRouteOptions): void {
-  app.get<{ Params: ProviderParams }>("/api/auth/saml/:providerId/login", async (request, reply) => {
+  const login = async (request: FastifyRequest, reply: FastifyReply, providerId: string): Promise<FastifyReply> => {
     try {
-      const result = await options.saml.start(request.params.providerId, returnTo(request), { requestId: request.id, ip: requestIp(request) });
+      const result = await options.saml.start(providerId, returnTo(request), { requestId: request.id, ip: requestIp(request) });
       reply.header("cache-control", "no-store");
       setCookies(reply, [serializeSamlCorrelationCookie(options.config, result.correlationCookie)]);
       return reply.redirect(result.location);
     } catch (error) { return operationFailure(reply, request, error, options.config); }
-  });
+  };
 
-  app.post<{ Params: ProviderParams }>("/api/auth/saml/:providerId/acs", async (request, reply) => {
+  const acs = async (request: FastifyRequest, reply: FastifyReply, providerId: string): Promise<FastifyReply> => {
     try {
       const samlResponse = formValue(request, "SAMLResponse", options.config.samlMaxResponseBytes, true);
       const relayState = formValue(request, "RelayState", options.config.samlMaxRelayStateBytes, true);
       const cookies = parseCookies(request.headers.cookie);
-      const result = await options.saml.complete(request.params.providerId, samlResponse as string, relayState, cookies.get(SAML_CORRELATION_COOKIE), cookies.get(SESSION_COOKIE), { requestId: request.id, ip: requestIp(request) });
+      const result = await options.saml.complete(providerId, samlResponse as string, relayState, cookies.get(SAML_CORRELATION_COOKIE), cookies.get(SESSION_COOKIE), { requestId: request.id, ip: requestIp(request) });
       const sessionCookie = serializeSessionCookie({ name: SESSION_COOKIE, secure: options.config.authCookieSecure, sameSite: options.config.authCookieSameSite, domain: options.config.authCookieDomain, maxAgeSeconds: options.sessionLifetimeSeconds() }, result.sessionCookie);
       setCookies(reply, [sessionCookie, clearSamlCorrelationCookie(options.config)]);
       reply.header("cache-control", "no-store");
       return reply.redirect(browserReturnLocation(options.config, result.returnPath));
     } catch (error) { return operationFailure(reply, request, error, options.config); }
-  });
+  };
 
-  app.get<{ Params: ProviderParams }>("/api/auth/saml/:providerId/metadata", async (request, reply) => {
+  const metadata = async (request: FastifyRequest, reply: FastifyReply, providerId: string): Promise<FastifyReply> => {
     try {
-      const metadata = await options.saml.metadata(request.params.providerId);
-      return reply.code(200).header("content-type", "application/samlmetadata+xml").header("cache-control", "no-store").send(metadata);
+      const document = await options.saml.metadata(providerId);
+      return reply.code(200).header("content-type", "application/samlmetadata+xml").header("cache-control", "no-store").send(document);
     } catch (error) { return operationFailure(reply, request, error, options.config); }
+  };
+
+  app.get<{ Params: ProviderParams }>("/api/auth/saml/:providerId/login", async (request, reply) => login(request, reply, request.params.providerId));
+  app.post<{ Params: ProviderParams }>("/api/auth/saml/:providerId/acs", async (request, reply) => acs(request, reply, request.params.providerId));
+  app.get<{ Params: ProviderParams }>("/api/auth/saml/:providerId/metadata", async (request, reply) => metadata(request, reply, request.params.providerId));
+
+  // Flask exposed providerless aliases. They remain compatibility-only and
+  // fail closed when configuration cannot identify exactly one provider.
+  app.get("/auth/saml/login", async (request, reply) => {
+    try { return login(request, reply, options.saml.providerlessProviderId()); }
+    catch (error) { return operationFailure(reply, request, error, options.config); }
+  });
+  app.post("/auth/saml/acs", async (request, reply) => {
+    try { return acs(request, reply, options.saml.providerlessProviderId()); }
+    catch (error) { return operationFailure(reply, request, error, options.config); }
+  });
+  app.get("/auth/saml/metadata", async (request, reply) => {
+    try { return metadata(request, reply, options.saml.providerlessProviderId()); }
+    catch (error) { return operationFailure(reply, request, error, options.config); }
   });
 }

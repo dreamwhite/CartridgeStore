@@ -199,6 +199,9 @@ importers:
       openid-client:
         specifier: 6.8.8
         version: 6.8.8
+      xml-crypto:
+        specifier: 6.3.3
+        version: 6.3.3
     devDependencies:
       '@eslint/js':
         specifier: ^9.22.0
@@ -233,9 +236,6 @@ importers:
       ws:
         specifier: 8.18.3
         version: 8.18.3
-      xml-crypto:
-        specifier: 6.3.3
-        version: 6.3.3
     optionalDependencies:
       multicast-dns:
         specifier: 7.2.5

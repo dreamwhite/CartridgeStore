@@ -7,6 +7,7 @@ import type { BackendConfig } from "../config/env.js";
 import { parseCookies } from "../auth/session.js";
 import type { AuthRequestContext, AuthService } from "../auth/service.js";
 import { permissionGuard } from "../authorization/guards.js";
+import { BoundedRateLimiter } from "../security/rate-limiter.js";
 import type { AuthorizationService } from "../authorization/service.js";
 import type { Permission } from "../authorization/permissions.js";
 import type { AdminAuditLog } from "../admin/audit.js";
@@ -14,6 +15,7 @@ import { AuditUnavailableError } from "../admin/audit.js";
 import { FederationIdentityError, ValidatedExternalIdentity, type FederationIdentityService } from "./identity.js";
 import { FederationProviderError, type FederationProviderService, type FederationProtocol, type ProviderInput } from "./provider.js";
 import type { FederationProviderOperations } from "./operations.js";
+import { FederationLinkChallengeError, type FederationLinkChallengeService } from "./link-challenges.js";
 import type { FederationSecretPurpose } from "../secrets/service.js";
 
 const SESSION_COOKIE = "prg32_ts_session";
@@ -36,6 +38,7 @@ interface FederationAdminRouteOptions {
   readonly identities: FederationIdentityService;
   readonly operations: FederationProviderOperations;
   readonly audit: AdminAuditLog;
+  readonly linkChallenges: FederationLinkChallengeService;
 }
 
 function json(reply: FastifyReply, body: unknown, status = 200): FastifyReply {
@@ -223,7 +226,7 @@ function safeProvider(provider: ReturnType<FederationProviderService["get"]>, op
 
 function operationError(reply: FastifyReply, request: FastifyRequest, error: unknown): FastifyReply {
   request.log.warn({ err: error, requestId: request.id }, "federation administration request rejected");
-  if (error instanceof FederationProviderError || error instanceof FederationIdentityError) return json(reply, { ok: false, error: error.message, code: error.code }, error.statusCode);
+  if (error instanceof FederationProviderError || error instanceof FederationIdentityError || error instanceof FederationLinkChallengeError) return json(reply, { ok: false, error: error.message, code: error.code }, error.statusCode ?? 400);
   if (error instanceof AuditUnavailableError) return json(reply, { ok: false, error: "administrative audit storage is unavailable", code: error.code }, error.statusCode);
   return json(reply, { ok: false, error: "federation administration operation failed", code: "federation_admin_failed" }, 500);
 }
@@ -236,18 +239,11 @@ function mutationContext(current: AuthRequestContext, request: FastifyRequest) {
 export function registerFederationAdminRoutes(app: FastifyInstance, options: FederationAdminRouteOptions): void {
   const listPermission: Permission = "federation:read";
   const mutationPermission: Permission = "federation:manage";
-  const reauthAttempts = new Map<string, { count: number; startedAt: number }>();
-
-  function allowReauthentication(key: string): boolean {
-    const now = Date.now();
-    const current = reauthAttempts.get(key);
-    if (!current || now - current.startedAt >= options.config.authRateLimitWindowSeconds * 1000) {
-      reauthAttempts.set(key, { count: 1, startedAt: now });
-      return true;
-    }
-    current.count += 1;
-    return current.count <= options.config.authRateLimitMax;
-  }
+  const reauthLimiter = new BoundedRateLimiter(
+    options.config.authRateLimitMax,
+    options.config.authRateLimitWindowSeconds,
+    options.config.authRateLimitMaxClients
+  );
 
   app.post("/api/admin/federation/reauthenticate", async (request, reply) => {
     const current = requireAdmin(request, reply, options, mutationPermission, true, false);
@@ -256,13 +252,12 @@ export function registerFederationAdminRoutes(app: FastifyInstance, options: Fed
       const input = body(request);
       assertFields(input, ["password"]);
       const password = text(input.password, "password", 512, true) as string;
-      if (!allowReauthentication(`${current.principal.id}:${request.ip}`)) {
+      if (!reauthLimiter.allow(`${current.principal.id}:${request.ip}`)) {
         return json(reply, { ok: false, error: "too many requests", code: "rate_limited" }, 429);
       }
       if (!options.auth.recentAdminReauthenticate(current.session as NonNullable<typeof current.session>, password)) {
         return json(reply, { ok: false, error: "local administrator reauthentication failed", code: "reauthentication_failed" }, 403);
       }
-      reauthAttempts.delete(`${current.principal.id}:${request.ip}`);
       options.audit.ensureReady();
       options.audit.append({ actor_user_id: current.principal.id as number, target_type: "admin_session", target_id: "reauthentication", action: "federation.admin.reauthenticated", outcome: "committed", request_id: request.id });
       return json(reply, { ok: true, expires_in_seconds: options.config.authRecentReauthSeconds });
@@ -363,6 +358,41 @@ export function registerFederationAdminRoutes(app: FastifyInstance, options: Fed
     if (!current) return reply;
     try { return json(reply, { ok: true, identities: options.identities.list({ includeRetired: true }) }); }
     catch (error) { return operationError(reply, request, error); }
+  });
+
+  app.get("/api/admin/federation/link-challenges", async (request, reply) => {
+    const current = requireAdmin(request, reply, options, listPermission, false, false);
+    if (!current) return reply;
+    return json(reply, { ok: true, challenges: options.linkChallenges.list() });
+  });
+
+  app.post("/api/admin/federation/identities/from-challenge", async (request, reply) => {
+    const current = requireAdmin(request, reply, options, mutationPermission, true, true);
+    if (!current) return reply;
+    try {
+      const input = body(request);
+      assertFields(input, ["challenge_id", "user_id"]);
+      const challengeId = text(input.challenge_id, "challenge_id", 128, true) as string;
+      const identity = options.linkChallenges.get(challengeId);
+      const linked = options.identities.link(identity, userId(input.user_id), {
+        actorUserId: current.principal.id as number,
+        actorRole: current.principal.role,
+        reauthenticatedAt: current.session?.reauthenticatedAt ?? 0,
+        requestId: request.id
+      });
+      options.linkChallenges.remove(challengeId);
+      return json(reply, {
+        ok: true,
+        identity: {
+          identityId: linked.identityId,
+          userId: linked.userId,
+          protocol: linked.protocol,
+          providerId: linked.providerId,
+          issuer: linked.issuer,
+          lastLoginAt: linked.lastLoginAt
+        }
+      }, 201);
+    } catch (error) { return operationError(reply, request, error); }
   });
 
   app.post("/api/admin/federation/identities", async (request, reply) => {

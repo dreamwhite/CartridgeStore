@@ -20,6 +20,7 @@
     "storage:migrate": "tsx src/storage-v2/migration/cli.ts migrate",
     "storage:resume": "tsx src/storage-v2/migration/cli.ts resume",
     "storage:verify": "tsx src/storage-v2/migration/cli.ts verify",
+    "storage:integrity": "tsx src/storage-v2/integrity-cli.ts",
     "storage:status": "tsx src/storage-v2/migration/cli.ts status",
     "storage:dispose": "tsx src/storage-v2/migration/cli.ts dispose",
     "storage:parity": "tsx src/storage-v2/differential/cli.ts",
@@ -50,7 +51,8 @@
     "fastify": "^5.3.0",
     "fflate": "^0.8.3",
     "jose": "6.2.12",
-    "openid-client": "6.8.8"
+    "openid-client": "6.8.8",
+    "xml-crypto": "6.3.3"
   },
   "optionalDependencies": {
     "multicast-dns": "7.2.5"
@@ -66,7 +68,6 @@
     "typescript": "^5.8.2",
     "typescript-eslint": "^8.26.0",
     "vitest": "^3.0.8",
-    "ws": "8.18.3",
-    "xml-crypto": "6.3.3"
+    "ws": "8.18.3"
   }
 }

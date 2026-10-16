@@ -11,6 +11,7 @@ import { FederationTransactionStore } from "./transaction.js";
 import { OidcService } from "../oidc/service.js";
 import { SamlService } from "../saml/service.js";
 import type { SecretStore } from "../secrets/service.js";
+import { FederationLinkChallengeService } from "./link-challenges.js";
 
 export interface FederationRuntime {
   readonly providers: FederationProviderService;
@@ -19,6 +20,7 @@ export interface FederationRuntime {
   readonly oidc: OidcService;
   readonly saml: SamlService;
   readonly operations: FederationProviderOperations;
+  readonly linkChallenges: FederationLinkChallengeService;
 }
 
 export interface FederationRuntimeOptions {
@@ -44,13 +46,15 @@ export function createFederationRuntime(options: FederationRuntimeOptions): Fede
   });
   identities.migrateLegacyMappings();
   const transactions = new FederationTransactionStore(writer, options.config.authSessionSecret, providers);
+  const linkChallenges = new FederationLinkChallengeService();
 
   return {
     providers,
     identities,
     audit,
-    oidc: new OidcService(options.config, writer, options.auth, providers, identities, transactions, options.secrets, audit),
-    saml: new SamlService(options.config, writer, options.auth, providers, identities, transactions, options.secrets, audit),
-    operations: new FederationProviderOperations(writer, providers, transactions, identities, options.secrets, audit)
+    oidc: new OidcService(options.config, writer, options.auth, providers, identities, transactions, options.secrets, audit, linkChallenges),
+    saml: new SamlService(options.config, writer, options.auth, providers, identities, transactions, options.secrets, audit, linkChallenges),
+    operations: new FederationProviderOperations(writer, providers, transactions, identities, options.secrets, audit),
+    linkChallenges
   };
 }

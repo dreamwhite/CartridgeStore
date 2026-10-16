@@ -135,6 +135,48 @@ afterEach(() => {
 });
 
 describe("M6.3d.2h.4 SAML service provider", () => {
+  it("supports the legacy providerless aliases for one enabled provider", async () => {
+    const test = fixture();
+    const metadata = await test.app.inject({ method: "GET", url: "/auth/saml/metadata" });
+    expect(metadata.statusCode).toBe(200);
+    expect(metadata.body).toContain("https://store.example.test/sp");
+
+    const login = await test.app.inject({ method: "GET", url: "/auth/saml/login?return_to=/legacy" });
+    expect(login.statusCode).toBe(302);
+    const request = decodeRedirectRequest(login.headers.location as string);
+    const response = signedResponse(request.requestId, "http://127.0.0.1:5090/api/auth/saml/school-saml/acs", test.idpIssuer, test.privateKey, "saml-subject");
+    const completed = await test.app.inject({
+      method: "POST",
+      url: "/auth/saml/acs",
+      headers: { "content-type": "application/x-www-form-urlencoded", cookie: cookie(login, "prg32_saml_correlation") },
+      payload: new URLSearchParams({ SAMLResponse: Buffer.from(response, "utf8").toString("base64"), RelayState: request.relayState }).toString()
+    });
+    expect(completed.statusCode).toBe(302);
+    expect(completed.headers.location).toBe("/legacy");
+    const database = new Database(test.databasePath);
+    const providers = new FederationProviderService(database);
+    providers.create({
+      providerId: "other-saml",
+      protocol: "saml",
+      displayName: "Other SAML",
+      issuer: "https://other.example.test/saml",
+      idpEntityId: "https://other.example.test/saml",
+      spEntityId: "https://store.example.test/other-sp",
+      acsUrl: "http://127.0.0.1:5090/api/auth/saml/other-saml/acs",
+      samlEntryPoint: "https://other.example.test/sso",
+      samlNameIdFormat: persistentNameId,
+      samlIdpCertificatePem: test.publicKey,
+      samlWantAssertionsSigned: true,
+      samlWantAuthnResponseSigned: true
+    }, undefined, true);
+    providers.setEnabled("other-saml", true);
+    database.close();
+    const ambiguous = await test.app.inject({ method: "GET", url: "/auth/saml/login" });
+    expect(ambiguous.statusCode).toBe(409);
+    expect(ambiguous.json()).toMatchObject({ ok: false, code: "saml_provider_alias_ambiguous" });
+    await test.app.close();
+  });
+
   it("generates SP metadata and completes signed SP-initiated HTTP-Redirect/POST SSO", async () => {
     const test = fixture();
     const metadata = await test.app.inject({ method: "GET", url: "/api/auth/saml/school-saml/metadata" });

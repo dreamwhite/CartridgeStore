@@ -271,6 +271,35 @@ export function registerCatalogRoutes(app: FastifyInstance, options: CatalogRout
     });
   });
 
+  const apiIndex = (_request: FastifyRequest, reply: FastifyReply) => sendJson(reply, {
+    ok: true,
+    service: catalog.storeName(options.config.storeName),
+    version: options.config.storeVersion,
+    auth_enabled: true,
+    roles: [...ROLE_LEVELS],
+    mdns: {
+      service: "_prg32store._tcp.local.",
+      name: options.config.mdnsName
+    },
+    endpoints: [
+      "GET /api/games",
+      "POST /api/publish",
+      "POST /api/publish/bundle",
+      "GET /api/submissions",
+      "GET /api/scores",
+      "POST /api/scores",
+      "GET /api/metrics",
+      "GET /api/runs",
+      "POST /api/runs",
+      "POST /api/metrics/batch",
+      "GET /api/multiplayer",
+      "GET /api/multiplayer/status"
+    ]
+  });
+
+  app.get("/api", apiIndex);
+  app.get("/api/", apiIndex);
+
   app.get<{ Querystring: CatalogQuery }>("/api/games", async (request, reply) => {
     const query = request.query;
     const games = catalog.listGames(query.q || query.search);

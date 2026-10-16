@@ -55,6 +55,7 @@ import { registerSetupRoutes } from "./setup/routes.js";
 import { SetupService } from "./setup/service.js";
 import { WebAuthnService } from "./auth/webauthn.js";
 import { registerWebAuthnRoutes } from "./auth/webauthn-routes.js";
+import { BoundedRateLimiter } from "./security/rate-limiter.js";
 
 export interface AppOptions {
   readonly config: BackendConfig;
@@ -86,8 +87,27 @@ export function buildApp(options: AppOptions): FastifyInstance {
   // database open merely to build the app or to report an unavailable target.
   runtimeDatabase = canonicalDatabaseForReads ?? null;
   const canonicalMode = canonicalWorkflow !== null || canonicalReadResource !== null;
+  const multiplayerLimits = {
+    maxConnections: options.config.multiplayerMaxConnections,
+    maxConnectionsPerSource: options.config.multiplayerMaxConnectionsPerSource,
+    maxConnectionsPerIdentity: options.config.multiplayerMaxConnectionsPerIdentity,
+    maxUnjoinedConnections: options.config.multiplayerMaxUnjoinedConnections,
+    messageRatePerSecond: options.config.multiplayerMessageRatePerSecond,
+    messageBurst: options.config.multiplayerMessageBurst,
+    stateRatePerSecond: options.config.multiplayerStateRatePerSecond,
+    stateBurst: options.config.multiplayerStateBurst,
+    joinRateMax: options.config.multiplayerJoinRateMax,
+    joinRateWindowSeconds: options.config.multiplayerJoinRateWindowSeconds,
+    sourceMessageRatePerSecond: options.config.multiplayerSourceMessageRatePerSecond,
+    sourceMessageBurst: options.config.multiplayerSourceMessageBurst,
+    identityMessageRatePerSecond: options.config.multiplayerIdentityMessageRatePerSecond,
+    identityMessageBurst: options.config.multiplayerIdentityMessageBurst,
+    maxMessageBytes: 64 * 1024,
+    maxBufferedBytes: options.config.multiplayerMaxBufferedBytes
+  } as const;
   const multiplayer = new MultiplayerHub({
     maxPeers: options.config.multiplayerMaxPeers,
+    limits: multiplayerLimits,
     authenticationEnabled: options.config.legacyConfiguredUsers.length > 0 || auth.isWriteEnabled(),
     authenticate: (token) => {
       if (options.config.legacyConfiguredUsers.length > 0) {
@@ -202,11 +222,20 @@ export function buildApp(options: AppOptions): FastifyInstance {
       ? auth.writableDatabase()
       : () => (auth.isWriteEnabled() ? auth.writableDatabase() : database.get().sqlite))
   });
+  const trustProxyPolicy = !options.config.trustProxy
+    ? false
+    : options.config.trustedProxyCidrs.length > 0
+      ? [...options.config.trustedProxyCidrs]
+      : (_address: string, hop: number) => hop < options.config.trustProxyHops;
   const app = Fastify({
     logger: options.logger ?? { level: options.config.logLevel },
-    trustProxy: options.config.trustProxy
+    trustProxy: trustProxyPolicy,
+    requestTimeout: options.config.httpRequestTimeoutMs,
+    keepAliveTimeout: options.config.httpKeepAliveTimeoutMs
   });
   const discovery = createDiscoveryService(options.config);
+  const catalogRateLimiter = new BoundedRateLimiter(options.config.httpCatalogRateLimitMax, options.config.httpRateLimitWindowSeconds, options.config.httpRateLimitMaxClients);
+  const downloadRateLimiter = new BoundedRateLimiter(options.config.httpDownloadRateLimitMax, options.config.httpRateLimitWindowSeconds, options.config.httpRateLimitMaxClients);
 
   // Credentialed browser access is opt-in and exact-origin only. The default
   // empty allowlist preserves the existing same-origin behaviour.
@@ -233,6 +262,23 @@ export function buildApp(options: AppOptions): FastifyInstance {
     });
   }
 
+  app.addHook("onRequest", async (request, reply) => {
+    const pathOnly = request.url.split("?", 1)[0] ?? "";
+    const limiter = request.method === "GET" && pathOnly === "/api/games"
+      ? catalogRateLimiter
+      : request.method === "GET" && /^\/api\/games\/[^/]+\/download$/u.test(pathOnly)
+        ? downloadRateLimiter
+        : null;
+    if (limiter === null) return;
+    const key = request.ip || "unknown";
+    if (limiter.allow(key)) return;
+    return reply
+      .code(429)
+      .header("retry-after", String(options.config.httpRateLimitWindowSeconds))
+      .header("content-type", "application/json")
+      .send(Buffer.from(`${encodePythonJson({ ok: false, error: "too many requests", code: "rate_limited" })}\n`, "utf8"));
+  });
+
   app.addContentTypeParser("application/x-www-form-urlencoded", { parseAs: "string", bodyLimit: options.config.samlMaxPostBytes }, (_request, body, done) => {
     try { done(null, new URLSearchParams(String(body))); }
     catch { done(new Error("invalid form body")); }
@@ -257,7 +303,8 @@ export function buildApp(options: AppOptions): FastifyInstance {
       providers: federation.providers,
       identities: federation.identities,
       operations: federation.operations,
-      audit: federation.audit
+      audit: federation.audit,
+      linkChallenges: federation.linkChallenges
     });
     if (options.config.federationLifecycleTestEnabled) {
       registerFederationLifecycleTestRoutes(app, { token: options.config.federationLifecycleTestToken, operations: federation.operations });
@@ -272,8 +319,15 @@ export function buildApp(options: AppOptions): FastifyInstance {
     }
   });
   const multiplayerPublicOrigin = options.config.federationPublicOrigin ?? options.config.frontendPublicOrigin;
-  if (multiplayerPublicOrigin) registerMultiplayerRoutes(app, { hub: multiplayer, publicOrigin: multiplayerPublicOrigin });
-  else registerMultiplayerRoutes(app, { hub: multiplayer });
+  const multiplayerRouteOptions = {
+    hub: multiplayer,
+    limits: multiplayerLimits,
+    heartbeatIntervalSeconds: options.config.multiplayerHeartbeatIntervalSeconds,
+    heartbeatGraceSeconds: options.config.multiplayerHeartbeatGraceSeconds,
+    unjoinedTimeoutSeconds: options.config.multiplayerUnjoinedTimeoutSeconds
+  } as const;
+  if (multiplayerPublicOrigin) registerMultiplayerRoutes(app, { ...multiplayerRouteOptions, publicOrigin: multiplayerPublicOrigin });
+  else registerMultiplayerRoutes(app, multiplayerRouteOptions);
   registerSettingsRoutes(app, { config: options.config, auth, authorization, settings });
   registerAdminRoutes(app, { auth, authorization, identity, tokens: adminTokens, catalog: catalogAdmin });
   registerBackupRoutes(app, { config: options.config, auth, authorization, backup });

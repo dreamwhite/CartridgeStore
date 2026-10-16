@@ -10,15 +10,17 @@ import type { BackendConfig } from "../config/env.js";
 import { FederationIdentityError, type FederationIdentityService, ValidatedExternalIdentity } from "../federation/identity.js";
 import { FederationProviderError, type FederationProviderConfig, type FederationProviderService } from "../federation/provider.js";
 import { FederationTransactionError, type FederationTransactionStore } from "../federation/transaction.js";
+import type { FederationLinkChallengeService } from "../federation/link-challenges.js";
 import { SecretStorageError, type SecretStore } from "../secrets/service.js";
+import { BoundedRateLimiter } from "../security/rate-limiter.js";
 import { createSamlCorrelation, parseSamlCorrelation } from "./correlation.js";
+import { signatureDiagnosticCode } from "./signature-diagnostics.js";
 
 const SAML_TRANSACTION_TTL_SECONDS = 300;
-const MAX_PENDING_KEYS = 4096;
 const PERSISTENT_NAME_ID = "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent";
 
 export class SamlError extends Error {
-  constructor(readonly code: string, readonly statusCode: number, message: string) {
+  constructor(readonly code: string, readonly statusCode: number, message: string, readonly details?: { readonly link_challenge?: string }) {
     super(message);
     this.name = "SamlError";
   }
@@ -63,6 +65,42 @@ function hasControlCharacter(value: string): boolean {
 function bounded(value: string | null | undefined, max: number): string | null {
   if (!value || value.length > max || hasControlCharacter(value)) return null;
   return value;
+}
+
+class SamlEnvelopeError extends Error {
+  constructor(readonly category: "parse" | "root" | "id" | "destination") {
+    super("SAML response envelope is invalid");
+    this.name = "SamlEnvelopeError";
+  }
+}
+
+function validationCategory(error: unknown): string {
+  const message = error instanceof Error ? error.message : "";
+  if (/multiple assertions/i.test(message)) return "multiple_assertions";
+  if (/cannot obtain assertion/i.test(message)) return "assertion_signature";
+  if (/invalid signature on documentelement/i.test(message)) return "document_element_signature";
+  if (/invalid document signature/i.test(message)) return "document_signature";
+  if (/signature|signed data/i.test(message)) return "signature";
+  if (/audience/i.test(message)) return "audience";
+  if (/inresponseto|subjectinresponseto|cache/i.test(message)) return "in_response_to";
+  if (/destination/i.test(message)) return "destination";
+  if (/recipient/i.test(message)) return "recipient";
+  if (/issuer/i.test(message)) return "issuer";
+  if (/notbefore|notonorafter|expired|clock|time/i.test(message)) return "time";
+  if (/assertion|subject confirmation/i.test(message)) return "assertion";
+  return "other";
+}
+
+function embeddedCertificateFingerprint(value: string): string | null {
+  try {
+    const xml = Buffer.from(value, "base64").toString("utf8");
+    const match = /<[^>]*X509Certificate[^>]*>\s*([^<]+?)\s*<\//i.exec(xml);
+    if (!match?.[1]) return null;
+    const der = Buffer.from(match[1].replace(/\s+/g, ""), "base64");
+    return der.length === 0 ? null : crypto.createHash("sha256").update(der).digest("hex").slice(0, 32);
+  } catch {
+    return null;
+  }
 }
 
 function profileAttribute(profile: Profile, names: readonly string[], max: number): string | null {
@@ -126,12 +164,13 @@ function responseEnvelope(value: string, acsUrl: string): { readonly responseId:
     const localName = root?.localName ?? root?.nodeName.split(":").pop();
     const responseId = root?.getAttribute("ID") ?? "";
     const destination = root?.getAttribute("Destination") ?? "";
-    if (localName !== "Response" || responseId.length < 1 || responseId.length > 512 || destination !== acsUrl) {
-      throw new Error("SAML response envelope is invalid");
-    }
+    if (localName !== "Response") throw new SamlEnvelopeError("root");
+    if (responseId.length < 1 || responseId.length > 512) throw new SamlEnvelopeError("id");
+    if (destination !== acsUrl) throw new SamlEnvelopeError("destination");
     return { responseId };
-  } catch {
-    throw new SamlError("saml_response_invalid", 401, "SAML authentication response is invalid");
+  } catch (error) {
+    if (error instanceof SamlEnvelopeError) throw error;
+    throw new SamlEnvelopeError("parse");
   }
 }
 
@@ -179,23 +218,6 @@ function samlProvider(provider: FederationProviderConfig, config: BackendConfig)
   return provider;
 }
 
-class BoundedRateLimiter {
-  private readonly values = new Map<string, { count: number; startedAt: number }>();
-
-  constructor(private readonly max: number, private readonly windowSeconds: number) {}
-
-  allow(key: string, now = Date.now()): boolean {
-    if (this.values.size >= MAX_PENDING_KEYS && !this.values.has(key)) this.values.delete(this.values.keys().next().value as string);
-    const current = this.values.get(key);
-    if (!current || now - current.startedAt >= this.windowSeconds * 1000) {
-      this.values.set(key, { count: 1, startedAt: now });
-      return true;
-    }
-    current.count += 1;
-    return current.count <= this.max;
-  }
-}
-
 /**
  * Node-SAML exposes get/remove rather than an atomic consume hook. This cache
  * therefore reads only the durable pending transaction; the SAML service
@@ -236,10 +258,19 @@ export class SamlService {
     private readonly identities: FederationIdentityService,
     private readonly transactions: FederationTransactionStore,
     private readonly secrets: SecretStore,
-    private readonly audit: AdminAuditLog
+    private readonly audit: AdminAuditLog,
+    private readonly linkChallenges: FederationLinkChallengeService
   ) {
-    this.loginLimiter = new BoundedRateLimiter(config.authRateLimitMax, config.authRateLimitWindowSeconds);
-    this.callbackLimiter = new BoundedRateLimiter(config.authRateLimitMax * 2, config.authRateLimitWindowSeconds);
+    this.loginLimiter = new BoundedRateLimiter(config.authRateLimitMax, config.authRateLimitWindowSeconds, config.authRateLimitMaxClients);
+    this.callbackLimiter = new BoundedRateLimiter(config.authRateLimitMax * 2, config.authRateLimitWindowSeconds, config.authRateLimitMaxClients);
+  }
+
+  /** Resolve the legacy providerless alias only when it is unambiguous. */
+  providerlessProviderId(): string {
+    const enabled = this.providers.list().filter((provider) => provider.protocol === "saml" && provider.enabled);
+    if (enabled.length === 1 && enabled[0]) return enabled[0].providerId;
+    if (enabled.length === 0) throw new SamlError("saml_provider_alias_unavailable", 404, "SAML provider alias is unavailable");
+    throw new SamlError("saml_provider_alias_ambiguous", 409, "SAML provider alias is ambiguous");
   }
 
   async start(providerId: string, returnTo: string | null, context: SamlRequestContext): Promise<SamlLoginResult> {
@@ -284,14 +315,27 @@ export class SamlService {
     if (Buffer.byteLength(samlResponse, "utf8") > this.config.samlMaxResponseBytes || !/^[A-Za-z0-9+/=_-]+$/.test(samlResponse)) {
       throw new SamlError("saml_response_too_large", 413, "SAML response is too large");
     }
-    const envelope = responseEnvelope(samlResponse, provider.acsUrl as string);
+    let envelope: { readonly responseId: string };
+    try {
+      envelope = responseEnvelope(samlResponse, provider.acsUrl as string);
+    } catch (error) {
+      const category = error instanceof SamlEnvelopeError ? `envelope_${error.category}` : "envelope";
+      this.auditEvent("federation.saml.validation_failed", provider.providerId, context.requestId, "rejected", "validation:" + category);
+      this.auditEvent("federation.saml.rejected", provider.providerId, context.requestId, "rejected", "validation:" + category);
+      throw new SamlError("saml_response_invalid", 401, "SAML authentication response is invalid");
+    }
     let profile: Profile | null;
     try {
       const strategy = this.strategy(provider, pendingWithRequestId);
       const result = await strategy.validatePostResponseAsync({ SAMLResponse: samlResponse });
       profile = result.profile;
     } catch (error) {
-      this.auditEvent("federation.saml.rejected", provider.providerId, context.requestId, "rejected");
+      const category = validationCategory(error);
+      const embeddedCertificate = embeddedCertificateFingerprint(samlResponse);
+      const signatureDiagnostic = signatureDiagnosticCode(samlResponse, provider.samlTrustedCertificatesPem);
+      const diagnosticTarget = "validation:" + category + (embeddedCertificate === null ? ":certificate:none" : ":certificate:" + embeddedCertificate) + (signatureDiagnostic === null ? "" : ":" + signatureDiagnostic);
+      this.auditEvent("federation.saml.validation_failed", provider.providerId, context.requestId, "rejected", diagnosticTarget);
+      this.auditEvent("federation.saml.rejected", provider.providerId, context.requestId, "rejected", diagnosticTarget);
       if (error instanceof SamlError) throw error;
       throw new SamlError("saml_response_invalid", 401, "SAML authentication response is invalid");
     }
@@ -326,7 +370,10 @@ export class SamlService {
     let resolved;
     try { resolved = this.identities.resolve(externalIdentity); }
     catch (error) {
-      if (error instanceof FederationIdentityError && error.code === "federation_identity_unknown") throw new SamlError("saml_identity_link_required", 401, "SAML identity is not linked");
+      if (error instanceof FederationIdentityError && error.code === "federation_identity_unknown") {
+        const linkChallenge = this.linkChallenges.stage(externalIdentity);
+        throw new SamlError("saml_identity_link_required", 401, "SAML identity is not linked", { link_challenge: linkChallenge });
+      }
       if (error instanceof FederationIdentityError && error.code === "federation_identity_email_required") throw new SamlError("saml_identity_email_required", 401, "SAML identity did not provide a usable email");
       if (error instanceof FederationIdentityError && error.code === "federation_identity_conflict") throw new SamlError("saml_identity_conflict", 409, "SAML identity requires an explicit account link");
       if (error instanceof FederationIdentityError && error.code === "federation_account_disabled") throw new SamlError("saml_account_disabled", 403, "SAML authentication is unavailable");

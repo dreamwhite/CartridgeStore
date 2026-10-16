@@ -34,7 +34,7 @@ function operationFailure(reply: FastifyReply, request: FastifyRequest, error: u
   if (clear) reply.header("set-cookie", clearCorrelationCookie(config));
   if (error instanceof OidcError) {
     request.log.warn({ code: error.code, requestId: request.id }, "OIDC request rejected");
-    return json(reply, { ok: false, error: error.message, code: error.code }, error.statusCode);
+    return json(reply, { ok: false, error: error.message, code: error.code, ...(error.details ?? {}) }, error.statusCode);
   }
   request.log.warn({ code: "oidc_internal_error", requestId: request.id }, "OIDC request rejected");
   return json(reply, { ok: false, error: "OIDC authentication is unavailable", code: "oidc_unavailable" }, 503);
@@ -47,21 +47,22 @@ function setCookies(reply: FastifyReply, values: readonly string[]): void {
 export function registerOidcRoutes(app: FastifyInstance, options: OidcRouteOptions): void {
   app.get("/api/auth/providers", async (_request, reply) => json(reply, { ok: true, providers: options.oidc.publicProviders() }));
 
-  app.get<{ Params: ProviderParams }>("/api/auth/oidc/:providerId/login", async (request, reply) => {
+  const login = async (request: FastifyRequest, reply: FastifyReply, providerId: string): Promise<FastifyReply> => {
     try {
       const params = query(request);
       for (const key of params.keys()) if (key !== "return_to") throw new OidcError("oidc_unknown_parameter", 400, "OIDC request contains an unknown parameter");
-      const result = await options.oidc.start(request.params.providerId, params.get("return_to"), { requestId: request.id, ip: requestIp(request) });
+      const result = await options.oidc.start(providerId, params.get("return_to"), { requestId: request.id, ip: requestIp(request) });
       reply.header("cache-control", "no-store");
       setCookies(reply, [serializeCorrelationCookie(options.config, result.correlationCookie)]);
       return reply.redirect(result.location);
     } catch (error) { return operationFailure(reply, request, error, options.config); }
-  });
+  };
 
-  app.get<{ Params: ProviderParams }>("/api/auth/oidc/:providerId/callback", async (request, reply) => {
+  const callback = async (request: FastifyRequest, reply: FastifyReply, providerId: string, providerless: boolean): Promise<FastifyReply> => {
     try {
       const cookies = parseCookies(request.headers.cookie);
-      const result = await options.oidc.complete(request.params.providerId, request.url, cookies.get(OIDC_CORRELATION_COOKIE), cookies.get(SESSION_COOKIE), { requestId: request.id, ip: requestIp(request) });
+      const callbackUrl = providerless ? options.oidc.providerlessCallbackUrl(providerId, request.url) : request.url;
+      const result = await options.oidc.complete(providerId, callbackUrl, cookies.get(OIDC_CORRELATION_COOKIE), cookies.get(SESSION_COOKIE), { requestId: request.id, ip: requestIp(request) });
       const sessionCookie = serializeSessionCookie({ name: SESSION_COOKIE, secure: options.config.authCookieSecure, sameSite: options.config.authCookieSameSite, domain: options.config.authCookieDomain, maxAgeSeconds: options.sessionLifetimeSeconds() }, result.sessionCookie);
       setCookies(reply, [sessionCookie, clearCorrelationCookie(options.config)]);
       reply.header("cache-control", "no-store");
@@ -70,5 +71,21 @@ export function registerOidcRoutes(app: FastifyInstance, options: OidcRouteOptio
       setCookies(reply, [clearCorrelationCookie(options.config)]);
       return operationFailure(reply, request, error, options.config, true);
     }
+  };
+
+  app.get<{ Params: ProviderParams }>("/api/auth/oidc/:providerId/login", async (request, reply) => login(request, reply, request.params.providerId));
+  app.get<{ Params: ProviderParams }>("/api/auth/oidc/:providerId/callback", async (request, reply) => callback(request, reply, request.params.providerId, false));
+
+  // Flask exposed providerless aliases. They remain compatibility-only and
+  // fail closed when configuration cannot identify exactly one provider.
+  app.get("/auth/oidc/login", async (request, reply) => {
+    try { return login(request, reply, options.oidc.providerlessProviderId()); }
+    catch (error) { return operationFailure(reply, request, error, options.config); }
+  });
+  app.get("/auth/oidc/callback", async (request, reply) => {
+    try {
+      const providerId = options.oidc.providerlessProviderId();
+      return callback(request, reply, providerId, true);
+    } catch (error) { return operationFailure(reply, request, error, options.config, true); }
   });
 }
