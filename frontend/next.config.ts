@@ -166,6 +166,7 @@ const nextConfig: NextConfig = {
     // Dual-origin mode keeps the Next proxy disabled, but the browser UI must
     // still expose the login/provider controls and call the API origin.
     NEXT_PUBLIC_AUTH_INTEGRATION_ENABLED: configuredAuthUi ? "true" : "false",
+    NEXT_PUBLIC_PRG32_UI93_AUTHENTICATED: process.env.PRG32_UI93_AUTHENTICATED === "1" ? "true" : "false",
     NEXT_PUBLIC_PRG32_DUAL_ORIGIN_ENABLED: configuredDualOriginIntegration ? "true" : "false",
     ...(configuredPublicApiOrigin ? { NEXT_PUBLIC_PRG32_API_ORIGIN: configuredPublicApiOrigin } : {}),
   },

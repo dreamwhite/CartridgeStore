@@ -165,7 +165,11 @@
     ".next-m52g14-17619-54654/types/**/*.ts",
     ".next-m52g14-17619-54654/dev/types/**/*.ts",
     ".next-m52g14-18275-54706/types/**/*.ts",
-    ".next-m52g14-18275-54706/dev/types/**/*.ts"
+    ".next-m52g14-18275-54706/dev/types/**/*.ts",
+    ".next-ui92/types/**/*.ts",
+    ".next-ui92/dev/types/**/*.ts",
+    ".next-ui93/types/**/*.ts",
+    ".next-ui93/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules"
