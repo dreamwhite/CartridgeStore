@@ -6,6 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { authErrorMessage } from "../../lib/api/auth";
 import { authIntegrationEnabled } from "../../lib/auth/config";
 import { useCurrentUser } from "../../lib/auth/use-current-user";
+import { StatusMessage } from "../ui/status";
 
 export function ProtectedRoute({ children }: Readonly<{ children: React.ReactNode }>) {
   const router = useRouter();
@@ -25,7 +26,7 @@ export function ProtectedRoute({ children }: Readonly<{ children: React.ReactNod
     return <main className="mx-auto max-w-3xl px-6 py-12" aria-busy="true">Checking your session…</main>;
   }
   if (current.error) {
-    return <main className="mx-auto max-w-3xl px-6 py-12"><p className="rounded-md border border-rose-300 bg-rose-50 p-6 text-rose-900" role="alert">{authErrorMessage(current.error, "session")}</p></main>;
+    return <main className="mx-auto max-w-3xl px-6 py-12"><StatusMessage tone="danger" className="p-6">{authErrorMessage(current.error, "session")}</StatusMessage></main>;
   }
   if (!current.user) return <main className="mx-auto max-w-3xl px-6 py-12">Redirecting to sign in…</main>;
   return children;

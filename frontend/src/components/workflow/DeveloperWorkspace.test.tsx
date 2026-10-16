@@ -2,7 +2,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { DeveloperWorkspace } from "./DeveloperWorkspace";
+import { CreatorWorkspace } from "./creator/CreatorWorkspace";
 import { getWorkflowPrincipal, listMySubmissions } from "../../lib/api/workflow";
 
 vi.mock("../../lib/auth/config", () => ({ authIntegrationEnabled: true }));
@@ -18,7 +18,7 @@ const pagination = { page: 1, per_page: 25, total: 1, pages: 1, has_next: false,
 
 function renderWorkspace() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={queryClient}><DeveloperWorkspace /></QueryClientProvider>);
+  return render(<QueryClientProvider client={queryClient}><CreatorWorkspace /></QueryClientProvider>);
 }
 
 describe("DeveloperWorkspace ownership view", () => {

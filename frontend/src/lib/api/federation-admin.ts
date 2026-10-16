@@ -155,10 +155,3 @@ export function federationErrorMessage(error: unknown): string {
   if (error instanceof Error) return error.message;
   return "The federation administration operation failed.";
 }
-
-export const federationQueryKeys = {
-  providers: ["federation", "providers"] as const,
-  provider: (id: string) => ["federation", "provider", id] as const,
-  status: (id: string) => ["federation", "status", id] as const,
-  identities: ["federation", "identities"] as const,
-};

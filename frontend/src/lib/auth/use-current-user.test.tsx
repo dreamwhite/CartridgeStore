@@ -9,6 +9,12 @@ function wrapper({ children }: Readonly<{ children: React.ReactNode }>) {
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
 }
 
+function wrapperFor(client: QueryClient) {
+  return function QueryClientWrapper({ children }: Readonly<{ children: React.ReactNode }>) {
+    return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+  };
+}
+
 const anonymous = {
   id: null,
   name: "Anonymous",
@@ -41,5 +47,20 @@ describe("useCurrentUser", () => {
     const result = renderHook(() => useCurrentUser(true), { wrapper });
     await waitFor(() => expect(result.result.current.isSuccess).toBe(true));
     expect(result.result.current.user).toMatchObject({ username: "ada", role: "admin" });
+  });
+
+  test("removes private cache data when an authenticated query becomes anonymous", async () => {
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    client.setQueryData(["auth", "tokens"], { tokens: [{ id: 1 }] });
+    client.setQueryData(["workflow", "drafts"], { drafts: [{ id: "private" }] });
+    client.setQueryData(["catalog", "", 1, 100], { games: [{ id: "public" }] });
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(JSON.stringify({ ok: false, error: "login required", user: anonymous }), { status: 401 }));
+
+    const result = renderHook(() => useCurrentUser(true), { wrapper: wrapperFor(client) });
+    await waitFor(() => expect(result.result.current.isSuccess).toBe(true));
+
+    expect(client.getQueryData(["auth", "tokens"])).toBeUndefined();
+    expect(client.getQueryData(["workflow", "drafts"])).toBeUndefined();
+    expect(client.getQueryData(["catalog", "", 1, 100])).toEqual({ games: [{ id: "public" }] });
   });
 });

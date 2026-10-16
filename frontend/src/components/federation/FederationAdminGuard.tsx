@@ -7,6 +7,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { authErrorMessage } from "../../lib/api/auth";
 import { authIntegrationEnabled } from "../../lib/auth/config";
 import { useCurrentUser } from "../../lib/auth/use-current-user";
+import { StatusMessage } from "../ui/status";
 
 export function hasFederationPermission(user: { permissions?: string[] } | null, permission: "federation:read" | "federation:manage") {
   return user?.permissions?.includes(permission) ?? false;
@@ -34,5 +35,5 @@ export function FederationAdminGuard({ children }: Readonly<{ children: ReactNod
 }
 
 function Message({ title, detail, error = false }: { title: string; detail?: string; error?: boolean }) {
-  return <main className="mx-auto max-w-6xl px-6 py-12"><section className={`rounded-xl border p-6 ${error ? "border-rose-300 bg-rose-50 text-rose-950" : "border-[var(--color-border)] bg-[var(--color-surface)]"}`}><h1 className="text-xl font-semibold">{title}</h1>{detail && <p className="mt-2 text-sm opacity-80">{detail}</p>}</section></main>;
+  return <main className="mx-auto max-w-6xl px-6 py-12"><StatusMessage tone={error ? "danger" : "muted"} className="rounded-xl p-6"><h1 className="text-xl font-semibold">{title}</h1>{detail && <p className="mt-2 text-sm opacity-80">{detail}</p>}</StatusMessage></main>;
 }

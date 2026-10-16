@@ -1,10 +1,13 @@
 "use client";
 
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect } from "react";
 
 import { ApiRequestError } from "../api/client";
-import { CURRENT_USER_QUERY_KEY, getCurrentUser } from "../api/auth";
+import { getCurrentUser } from "../api/auth";
+import { authQueryKeys } from "../api/query-keys";
 import { authIntegrationEnabled } from "./config";
+import { removeSensitiveQueryData } from "./query-cache";
 
 async function currentUserOrAnonymous() {
   try {
@@ -16,13 +19,20 @@ async function currentUserOrAnonymous() {
 }
 
 export function useCurrentUser(enabled = authIntegrationEnabled) {
+  const queryClient = useQueryClient();
   const query = useQuery({
-    queryKey: CURRENT_USER_QUERY_KEY,
+    queryKey: authQueryKeys.currentUser(),
     queryFn: currentUserOrAnonymous,
     enabled,
     retry: false,
     staleTime: 30_000,
   });
+
+  useEffect(() => {
+    if (enabled && query.isFetched && query.data === null) {
+      removeSensitiveQueryData(queryClient);
+    }
+  }, [enabled, query.data, query.isFetched, queryClient]);
 
   return {
     ...query,

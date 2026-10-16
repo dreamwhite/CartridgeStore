@@ -2,7 +2,7 @@ import type { z } from "zod";
 
 import { ApiRequestError, requestJson, withCsrfToken } from "./client";
 import type { Principal } from "./contracts";
-import { csrfResponseSchema } from "./schemas";
+import { adminResponseSchema, csrfResponseSchema } from "./schemas";
 
 /** The only browser-visible route to the transitional Fastify admin surface. */
 export const ADMIN_PROXY_PREFIX = "/__admin-fastify";
@@ -32,7 +32,7 @@ function unavailable(error: unknown): never {
 
 async function adminRequest<T>(path: string, init?: RequestInit, schema?: z.ZodType<T>): Promise<T> {
   try {
-    return await requestJson(adminPath(path), init, schema);
+    return await requestJson(adminPath(path), init, schema ?? adminResponseSchema as z.ZodType<T>);
   } catch (error) {
     return unavailable(error);
   }

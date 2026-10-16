@@ -1,20 +1,21 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { AlertTriangle, ChevronDown, LogOut, UserRound } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import { ApiRequestError } from "../../lib/api/client";
-import { CURRENT_USER_QUERY_KEY, logoutLocal } from "../../lib/api/auth";
+import { logoutLocal } from "../../lib/api/auth";
+import { authQueryKeys } from "../../lib/api/query-keys";
+import { removeSensitiveQueryData } from "../../lib/auth/query-cache";
 import { authErrorMessage } from "../../lib/api/auth";
 import { authIntegrationEnabled } from "../../lib/auth/config";
 import { useCurrentUser } from "../../lib/auth/use-current-user";
+import { accountNavigation } from "../layout/navigation";
 import { Button } from "../ui/button";
-
-function FederationLink({ permissions }: { permissions?: string[] }) {
-  if (!permissions?.includes("federation:read")) return null;
-  return <Link className="font-semibold text-violet-700 hover:underline" href="/admin/federation">Federation admin</Link>;
-}
+import { StatusMessage } from "../ui/status";
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "../ui/dropdown-menu";
 
 export function AuthNavigation() {
   const router = useRouter();
@@ -23,12 +24,14 @@ export function AuthNavigation() {
   const logout = useMutation({
     mutationFn: logoutLocal,
     onSuccess: () => {
-      queryClient.setQueryData(CURRENT_USER_QUERY_KEY, null);
+      removeSensitiveQueryData(queryClient);
+      queryClient.setQueryData(authQueryKeys.currentUser(), null);
       router.replace("/login");
     },
     onError: (error) => {
       if (error instanceof ApiRequestError && error.status === 401) {
-        queryClient.setQueryData(CURRENT_USER_QUERY_KEY, null);
+        removeSensitiveQueryData(queryClient);
+        queryClient.setQueryData(authQueryKeys.currentUser(), null);
         router.replace("/login?reason=expired");
       }
     },
@@ -36,17 +39,39 @@ export function AuthNavigation() {
 
   if (!authIntegrationEnabled) return null;
   if (current.isPending) return <span className="text-sm text-[var(--color-text-muted)]" role="status">Checking session…</span>;
-  if (current.error) return <span className="flex items-center gap-2 text-xs text-rose-700" role="alert">{authErrorMessage(current.error, "session")} <Link className="font-semibold underline" href="/login">Retry</Link></span>;
-  if (!current.user) return <Link className="text-sm font-semibold text-violet-700 hover:underline" href="/login">Sign in</Link>;
+  if (current.error) {
+    const message = authErrorMessage(current.error, "session");
+    return <span className="inline-flex min-w-0 items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300" role="alert" title={message}><AlertTriangle aria-hidden="true" className="size-3.5 shrink-0" /><span aria-hidden="true" className="hidden sm:inline">Auth unavailable</span><span className="sr-only">{message}. </span><Link aria-label="Retry authentication" className="shrink-0 font-semibold underline underline-offset-2" href="/login">Retry</Link></span>;
+  }
+  if (!current.user) return <Button asChild size="sm" className="px-3"><Link href="/login">Sign in</Link></Button>;
+
+  const contextualLinks = accountNavigation(current.user.permissions).filter((item) => item.href !== "/account");
 
   return (
-    <div className="flex items-center gap-3 text-sm">
-      <FederationLink permissions={current.user.permissions} />
-      <Link className="font-semibold text-violet-700 hover:underline" href="/account">{current.user.username}</Link>
-      <Button type="button" variant="secondary" className="min-h-9 px-3 py-1 text-xs" onClick={() => logout.mutate()} disabled={logout.isPending}>
-        {logout.isPending ? "Signing out…" : "Sign out"}
-      </Button>
-      {logout.error && <span className="text-xs text-rose-700" role="alert">{authErrorMessage(logout.error, "logout")}</span>}
+    <div className="flex items-center gap-2 text-sm">
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button type="button" variant="ghost" size="sm" className="max-w-48 px-2" aria-label={`Open account menu for ${current.user.username}`}>
+            <UserRound aria-hidden="true" className="size-4" />
+            <span className="truncate">{current.user.username}</span>
+            <ChevronDown aria-hidden="true" className="size-3.5 text-[var(--color-text-muted)]" />
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end">
+          <DropdownMenuLabel>Account</DropdownMenuLabel>
+          <DropdownMenuItem asChild><Link href="/account">Your account</Link></DropdownMenuItem>
+          {contextualLinks.map((item) => <DropdownMenuItem key={item.href} asChild><Link href={item.href}>{item.label}</Link></DropdownMenuItem>)}
+          {current.user.permissions?.includes("federation:read") && <DropdownMenuItem asChild><Link href="/admin/federation">Federation</Link></DropdownMenuItem>}
+          <DropdownMenuSeparator />
+          <DropdownMenuItem asChild><Link href={`/users/${encodeURIComponent(current.user.username)}`}>Public profile</Link></DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => logout.mutate()}>
+            <LogOut aria-hidden="true" className="mr-2 size-3.5" />
+            Sign out
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+      {logout.isPending && <span className="sr-only" role="status">Signing out…</span>}
+      {logout.error && <StatusMessage tone="danger" className="px-2 py-1">{authErrorMessage(logout.error, "logout")}</StatusMessage>}
     </div>
   );
 }

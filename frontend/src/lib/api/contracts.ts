@@ -1,263 +1,84 @@
-export type Principal = {
-  id: number | null;
-  name: string;
-  username: string;
-  email: string;
-  role: string;
-  groups: string[];
-  authenticated: boolean;
-  permissions?: string[];
-};
+import type { z } from "zod";
+import type {
+  apiErrorSchema,
+  authLogoutResponseSchema,
+  authOperationResponseSchema,
+  authProvidersResponseSchema,
+  authTokenCreatedResponseSchema,
+  authTokenSchema,
+  authTokenUpdatedResponseSchema,
+  authTokensResponseSchema,
+  authUserResponseSchema,
+  csrfResponseSchema,
+  gameSchema,
+  gamesResponseSchema,
+  paginationSchema,
+  principalSchema,
+  registrationRequestedResponseSchema,
+  passkeyOptionsResponseSchema,
+  metricsRunSchema,
+  metricsSummarySchema,
+  metricsRunDetailSchema,
+  userProfileResponseSchema,
+  userRunsResponseSchema,
+  userRunResponseSchema,
+  scoreRecordSchema,
+  scoreStatsSchema,
+  runStatsSchema,
+  discoveryDocumentSchema,
+  downloadSeriesPointSchema,
+  downloadStatsSchema,
+  gameDownloadStatsSchema,
+  workflowSubmissionSchema,
+  workflowSubmissionListResponseSchema,
+  workflowSubmissionResponseSchema,
+  workflowSubmissionResultSchema,
+  ownedSubmissionSummarySchema,
+  ownedSubmissionListResponseSchema,
+  publisherDraftSchema,
+  draftResponseSchema,
+  draftListResponseSchema,
+} from "./schemas";
 
-export type ApiError = {
-  ok: false;
-  error: string;
-  code?: string;
-  user?: Principal;
-};
+export type Principal = z.infer<typeof principalSchema>;
+export type ApiError = z.infer<typeof apiErrorSchema>;
+export type CsrfResponse = z.infer<typeof csrfResponseSchema>;
+export type AuthProvider = z.infer<typeof authProvidersResponseSchema>["providers"][number];
+export type AuthProvidersResponse = z.infer<typeof authProvidersResponseSchema>;
+export type AuthUserResponse = z.infer<typeof authUserResponseSchema>;
+export type AuthLogoutResponse = z.infer<typeof authLogoutResponseSchema>;
+export type AuthOperationResponse = z.infer<typeof authOperationResponseSchema>;
+export type AuthToken = z.infer<typeof authTokenSchema>;
+export type AuthTokensResponse = z.infer<typeof authTokensResponseSchema>;
+export type AuthTokenCreatedResponse = z.infer<typeof authTokenCreatedResponseSchema>;
+export type AuthTokenUpdatedResponse = z.infer<typeof authTokenUpdatedResponseSchema>;
+export type RegistrationRequestedResponse = z.infer<typeof registrationRequestedResponseSchema>;
+export type PasskeyOptionsResponse = z.infer<typeof passkeyOptionsResponseSchema>;
 
-export type CsrfResponse = {
-  ok: true;
-  csrf_token: string;
-};
+export type WorkflowSubmission = z.infer<typeof workflowSubmissionSchema>;
+export type WorkflowSubmissionListResponse = z.infer<typeof workflowSubmissionListResponseSchema>;
+export type WorkflowSubmissionResponse = z.infer<typeof workflowSubmissionResponseSchema>;
+export type WorkflowSubmissionResult = z.infer<typeof workflowSubmissionResultSchema>;
+export type OwnedSubmissionSummary = z.infer<typeof ownedSubmissionSummarySchema>;
+export type OwnedSubmissionListResponse = z.infer<typeof ownedSubmissionListResponseSchema>;
+export type PublisherDraft = z.infer<typeof publisherDraftSchema>;
+export type DraftResponse = z.infer<typeof draftResponseSchema>;
+export type DraftListResponse = z.infer<typeof draftListResponseSchema>;
 
-export type AuthProvider = {
-  provider_id: string;
-  protocol: "oidc" | "saml";
-  display_name: string;
-  enabled: boolean;
-};
+export type Pagination = z.infer<typeof paginationSchema>;
+export type Game = z.infer<typeof gameSchema>;
+export type GamesResponse = z.infer<typeof gamesResponseSchema>;
 
-export type AuthProvidersResponse = {
-  ok: true;
-  providers: AuthProvider[];
-};
-
-export type AuthUserResponse = {
-  ok: true;
-  user: Principal;
-};
-
-export type AuthLogoutResponse = {
-  ok: true;
-};
-export type AuthOperationResponse = { ok: true; message: string };
-
-export type AuthToken = {
-  id: number;
-  label: string;
-  created_at: string;
-  last_used: string;
-};
-
-export type AuthTokensResponse = { ok: true; tokens: AuthToken[] };
-export type AuthTokenCreatedResponse = { ok: true; id: number; label: string; token: string };
-export type AuthTokenUpdatedResponse = { ok: true; id: number; label: string };
-export type RegistrationRequestedResponse = { ok: true; email: string; message: string };
-
-export type WorkflowSubmission = {
-  id: number;
-  game_id: string;
-  version: string;
-  status: string;
-  submitted_by_user_id: number | null;
-  submitted_by: string;
-  reviewed_by_user_id: number | null;
-  reviewed_by: string | null;
-  pending_dir: string | null;
-  metadata_json: string;
-  architectures_json: string;
-  created_at: string;
-  reviewed_at: string | null;
-  metadata: Record<string, unknown>;
-  architectures: Array<Record<string, unknown>>;
-  revision_of_submission_id?: number | null;
-  revision_number?: number;
-  review_history?: Array<Record<string, unknown>>;
-};
-
-export type WorkflowSubmissionListResponse = { ok: true; submissions: WorkflowSubmission[] };
-export type WorkflowSubmissionResponse = { ok: true; submission: WorkflowSubmission };
-export type WorkflowSubmissionResult = {
-  status: "pending";
-  ok: true;
-  review_required: true;
-  submission_id: number;
-  id: string | number;
-  version: string;
-  submitted: Array<{ architecture: string; file: string }>;
-};
-
-export type OwnedSubmissionSummary = {
-  id: number;
-  game_id: string;
-  title: string;
-  version: string;
-  status: string;
-  created_at: string;
-  reviewed_at: string | null;
-};
-
-export type OwnedSubmissionListResponse = {
-  ok: true;
-  submissions: OwnedSubmissionSummary[];
-  pagination: Pagination;
-};
-
-export type PublisherDraft = {
-  id: string;
-  status: "draft" | "submitting" | "submitted" | "abandoned";
-  metadata: Record<string, unknown>;
-  has_artifact: boolean;
-  source_submission_id: number | null;
-  submitted_submission_id: number | null;
-  created_at: string;
-  updated_at: string;
-  submitted_at: string | null;
-};
-export type DraftResponse = { ok: true; draft: PublisherDraft };
-export type DraftListResponse = { ok: true; drafts: PublisherDraft[] };
-
-export type Pagination = {
-  page: number;
-  per_page: number;
-  total: number;
-  pages: number;
-  has_next: boolean;
-  has_prev: boolean;
-  next_page: number | null;
-  prev_page: number | null;
-};
-
-export type Game = {
-  id: string;
-  title: string;
-  summary: string;
-  authors: Array<{ name?: string } | string>;
-  tags: string[];
-  latest_version: string | null;
-  selected_version: string;
-  versions: string[];
-  architectures: string[];
-  metadata: Record<string, unknown> | null;
-  colophon: Record<string, unknown> | null;
-  variants: Record<string, Record<string, unknown>>;
-  publisher: string;
-  updated_at: string | null;
-};
-
-export type GamesResponse = {
-  ok: true;
-  games: Game[];
-  pagination: Pagination;
-};
-
-export type DiscoveryDocument = {
-  abi: "prg32-store-discovery-1.0";
-  name: string;
-  api: string;
-  web: string;
-  version: string;
-  auth_enabled: boolean;
-  roles: string[];
-  services: Record<string, string>;
-};
-
-export type DownloadSeriesPoint = {
-  date: string;
-  downloads: number;
-};
-
-export type DownloadedGame = {
-  id: string;
-  title: string;
-  downloads: number;
-  last_published: unknown;
-};
-
-export type DownloadStats = {
-  series: DownloadSeriesPoint[];
-  total: number;
-  top_games: DownloadedGame[];
-};
-
-export type GameDownloadStats = {
-  id: string;
-  total: number;
-  architectures: Array<{ architecture: string; downloads: number }>;
-  series: DownloadSeriesPoint[];
-};
-
-export type ScoreRecord = {
-  game: string;
-  player: string;
-  score: number;
-  created_at: number;
-  submitted_by: string;
-};
-
-export type ScoreStats = { scores: ScoreRecord[] };
-
-export type RunStats = {
-  total: number;
-  finished: number;
-  active_last_7_days: number;
-};
-
-export type MetricsRun = {
-  run_id: string;
-  board_id: string;
-  target: string;
-  display_backend: string;
-  firmware_version: string;
-  firmware_git_sha: string;
-  game_name: string;
-  sample_period_frames: number;
-  started_at: number;
-  finished_at: number | null;
-  dropped_samples: number;
-  created_at: number;
-  submitted_by: string;
-  user_id: number | null;
-  sample_count?: number;
-};
-
-export type MetricsSummary = {
-  sample_count: number;
-  frame_us_avg: number;
-  frame_us_median: number;
-  frame_us_p95: number;
-  frame_us_max: number;
-  update_us_avg: number;
-  draw_us_avg: number;
-  present_us_avg: number;
-  fps_avg: number;
-  deadline_missed: number;
-};
-
-export type MetricsRunDetail = {
-  ok: true;
-  run: MetricsRun;
-  summary: MetricsSummary;
-};
-
-export type UserProfileResponse = {
-  ok: true;
-  user: { username: string; role: string; created_at: string };
-  run_count: number;
-  can_view_runs: boolean;
-};
-
-export type UserRunsResponse = {
-  ok: true;
-  user: { username: string };
-  runs: Array<MetricsRun & { mean_frame_us: number; p95_frame_us: number }>;
-  pagination: Pick<Pagination, "page" | "per_page" | "total" | "pages" | "has_next" | "has_prev">;
-};
-
-export type UserRunResponse = {
-  ok: true;
-  user: { username: string };
-  run: MetricsRun;
-  summary: MetricsSummary;
-};
+export type DiscoveryDocument = z.infer<typeof discoveryDocumentSchema>;
+export type DownloadSeriesPoint = z.infer<typeof downloadSeriesPointSchema>;
+export type DownloadStats = z.infer<typeof downloadStatsSchema>;
+export type GameDownloadStats = z.infer<typeof gameDownloadStatsSchema>;
+export type ScoreRecord = z.infer<typeof scoreRecordSchema>;
+export type ScoreStats = z.infer<typeof scoreStatsSchema>;
+export type RunStats = z.infer<typeof runStatsSchema>;
+export type MetricsRun = z.infer<typeof metricsRunSchema>;
+export type MetricsSummary = z.infer<typeof metricsSummarySchema>;
+export type MetricsRunDetail = z.infer<typeof metricsRunDetailSchema>;
+export type UserProfileResponse = z.infer<typeof userProfileResponseSchema>;
+export type UserRunsResponse = z.infer<typeof userRunsResponseSchema>;
+export type UserRunResponse = z.infer<typeof userRunResponseSchema>;

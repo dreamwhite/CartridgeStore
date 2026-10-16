@@ -1,44 +1,32 @@
 import { requestApiJson, withCsrfToken } from "./client";
+import {
+  setupAuthorizedResponseSchema,
+  setupCompleteResponseSchema,
+  setupProgressResponseSchema,
+  setupResultResponseSchema,
+  setupStatusResponseSchema,
+} from "./schemas";
+import type { z } from "zod";
 
-export type SetupState = "INFRASTRUCTURE_NOT_READY" | "INSTALLATION_REQUIRED" | "INSTALLATION_IN_PROGRESS" | "INSTALLATION_COMPLETE" | "INSTALLATION_RECOVERY_REQUIRED";
-export type SetupStep = "admin" | "store" | "registration" | "security" | "smtp" | "oidc" | "saml" | "mdns" | "review";
-
-export type SetupStatus = {
-  ok: true;
-  state: SetupState;
-  setup_required: boolean;
-  authorization_required: boolean;
-  infrastructure: Record<string, unknown>;
-  public_origins: { store: string | null; api: string | null };
-  mdns: { infrastructure_allowed: boolean; application_enabled: boolean; effective_enabled: boolean; service_type: string; abi: string; port: number; restart_required: boolean };
-};
-
-export type SetupProgress = {
-  ok: true;
-  state: SetupState;
-  completed_steps: SetupStep[];
-  admin_user_id: number | null;
-  started_at: string | null;
-  completed_at: string | null;
-  csrf_token: string;
-  settings: Record<string, unknown>;
-  providers: Array<Record<string, unknown>>;
-};
+export type SetupState = z.infer<typeof setupStatusResponseSchema>["state"];
+export type SetupStep = z.infer<typeof setupProgressResponseSchema>["completed_steps"][number];
+export type SetupStatus = z.infer<typeof setupStatusResponseSchema>;
+export type SetupProgress = z.infer<typeof setupProgressResponseSchema>;
 
 export function getSetupStatus(): Promise<SetupStatus> {
-  return requestApiJson("/api/setup/status");
+  return requestApiJson("/api/setup/status", undefined, setupStatusResponseSchema);
 }
 
-export function authorizeSetup(bootstrapToken: string): Promise<SetupProgress & { authorized: true }> {
+export function authorizeSetup(bootstrapToken: string): Promise<z.infer<typeof setupAuthorizedResponseSchema>> {
   return requestApiJson("/api/setup/authorize", {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({ bootstrap_token: bootstrapToken }),
-  });
+  }, setupAuthorizedResponseSchema);
 }
 
 export function getSetupProgress(): Promise<SetupProgress> {
-  return requestApiJson("/api/setup/progress");
+  return requestApiJson("/api/setup/progress", undefined, setupProgressResponseSchema);
 }
 
 export function saveSetupStep(csrfToken: string, step: SetupStep, payload: Record<string, unknown>): Promise<SetupProgress> {
@@ -46,29 +34,29 @@ export function saveSetupStep(csrfToken: string, step: SetupStep, payload: Recor
     method: "POST",
     headers: withCsrfToken(csrfToken, { "content-type": "application/json" }),
     body: JSON.stringify({ step, payload }),
-  });
+  }, setupProgressResponseSchema);
 }
 
-export function completeSetup(csrfToken: string): Promise<{ ok: true; state: "INSTALLATION_COMPLETE"; redirect: string }> {
+export function completeSetup(csrfToken: string): Promise<z.infer<typeof setupCompleteResponseSchema>> {
   return requestApiJson("/api/setup/complete", {
     method: "POST",
     headers: withCsrfToken(csrfToken),
     body: "{}",
-  });
+  }, setupCompleteResponseSchema);
 }
 
 export function testSetupSmtpConnection(csrfToken: string) {
-  return requestApiJson("/api/setup/smtp/test-connection", { method: "POST", headers: withCsrfToken(csrfToken, { "content-type": "application/json" }), body: "{}" });
+  return requestApiJson("/api/setup/smtp/test-connection", { method: "POST", headers: withCsrfToken(csrfToken, { "content-type": "application/json" }), body: "{}" }, setupResultResponseSchema);
 }
 
 export function testSetupSmtpMessage(csrfToken: string, to: string) {
-  return requestApiJson("/api/setup/smtp/test-message", { method: "POST", headers: withCsrfToken(csrfToken, { "content-type": "application/json" }), body: JSON.stringify({ to }) });
+  return requestApiJson("/api/setup/smtp/test-message", { method: "POST", headers: withCsrfToken(csrfToken, { "content-type": "application/json" }), body: JSON.stringify({ to }) }, setupResultResponseSchema);
 }
 
 export function validateSetupOidc(csrfToken: string, issuer: string) {
-  return requestApiJson("/api/setup/federation/oidc/validate", { method: "POST", headers: withCsrfToken(csrfToken, { "content-type": "application/json" }), body: JSON.stringify({ issuer }) });
+  return requestApiJson("/api/setup/federation/oidc/validate", { method: "POST", headers: withCsrfToken(csrfToken, { "content-type": "application/json" }), body: JSON.stringify({ issuer }) }, setupResultResponseSchema);
 }
 
 export function importSetupSamlMetadata(csrfToken: string, input: { url?: string; xml?: string }) {
-  return requestApiJson("/api/setup/federation/saml/metadata", { method: "POST", headers: withCsrfToken(csrfToken, { "content-type": "application/json" }), body: JSON.stringify(input) });
+  return requestApiJson("/api/setup/federation/saml/metadata", { method: "POST", headers: withCsrfToken(csrfToken, { "content-type": "application/json" }), body: JSON.stringify(input) }, setupResultResponseSchema);
 }

@@ -1,5 +1,5 @@
 import type { ApiError } from "./contracts";
-import { apiErrorSchema, csrfResponseSchema, discoveryDocumentSchema, gamesResponseSchema } from "./schemas";
+import { apiErrorSchema } from "./schemas";
 import type { z } from "zod";
 import { isDualOriginEnabled, resolvePublicApiUrl } from "./origin";
 
@@ -89,22 +89,9 @@ export function requestSameOriginJson<T>(
   }, schema);
 }
 
-export function getDiscoveryDocument() {
-  return requestJson("/.well-known/prg32-store.json", undefined, discoveryDocumentSchema);
-}
-
-/** Obtain the same-origin session CSRF token before cookie-auth mutations. */
-export function getCsrfToken(init?: RequestInit) {
-  return requestApiJson("/auth/csrf", init, csrfResponseSchema);
-}
-
-/** Add the token returned by getCsrfToken to a JSON/form mutation request. */
+/** Add a domain-acquired CSRF token to a JSON/form mutation request. */
 export function withCsrfToken(token: string, headers?: HeadersInit): Headers {
   const result = new Headers(headers);
   result.set("X-CSRFToken", token);
   return result;
-}
-
-export function getGames(init?: RequestInit) {
-  return requestJson("/api/games", init, gamesResponseSchema);
 }

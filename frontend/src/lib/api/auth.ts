@@ -17,8 +17,6 @@ import {
 } from "./schemas";
 import { safeReturnPath } from "../auth/return-path";
 
-export const CURRENT_USER_QUERY_KEY = ["auth", "current-user"] as const;
-
 function authPath(path: string): string {
   if (!path.startsWith("/") || path.includes("//") || path.includes("..")) {
     throw new Error("Invalid authentication API path");
