@@ -7,10 +7,12 @@ import { KeyRegistry, type EncryptionKey } from "../secrets/registry.js";
 import { BackupError } from "../backup/format.js";
 import {
   CANONICAL_BACKUP_AUTHORIZATION,
+  CANONICAL_BACKUP_OPERATIONAL_AUTHORIZATION,
   createCanonicalBackup,
   restoreCanonicalBackup,
   verifyCanonicalBackup,
   type CanonicalBackupLimits,
+  type CanonicalBackupSnapshotMode,
   type CanonicalRestoreFaultPoint,
   type CanonicalRestoreResult
 } from "./backup.js";
@@ -155,6 +157,7 @@ export interface CreateEncryptedBackupOptions {
   readonly authorization: string;
   readonly keyProvider: BackupKeyProvider;
   readonly writerQuiesced: boolean;
+  readonly snapshotMode?: CanonicalBackupSnapshotMode;
   readonly limits?: Partial<EncryptedBackupV4Limits>;
   readonly fault?: (point: EncryptedBackupV4FaultPoint) => void;
 }
@@ -439,15 +442,18 @@ function decryptAndVerify(archivePath: string, provider: BackupKeyProvider, valu
 
 export async function createEncryptedCanonicalBackup(options: CreateEncryptedBackupOptions): Promise<EncryptedBackupV4Result> {
   requireAuthorization(options.authorization);
-  if (!options.writerQuiesced) throw new BackupError("writer quiescence is required for encrypted backup", "backup_v4_writer_not_quiesced", 409);
+  const snapshotMode = options.snapshotMode ?? "exclusive";
+  if (snapshotMode !== "exclusive" && snapshotMode !== "online") throw new BackupError("backup v4 snapshot mode is invalid", "backup_v4_snapshot_mode_invalid", 400);
+  if (snapshotMode === "exclusive" && !options.writerQuiesced) throw new BackupError("writer quiescence is required for encrypted backup", "backup_v4_writer_not_quiesced", 409);
   const sourceRoot = resolved(options.sourceRoot, "source root"); const outputPath = resolved(options.outputPath, "output path"); const value = limits(options.limits);
   const relativeOutput = path.relative(sourceRoot, outputPath);
   if (relativeOutput === "" || (!relativeOutput.startsWith(`..${path.sep}`) && !path.isAbsolute(relativeOutput))) throw new BackupError("encrypted backup output may not be inside the source root", "backup_v4_output_unsafe");
   if (fs.existsSync(outputPath) || fs.existsSync(markerPath(outputPath))) throw new BackupError("completed encrypted backup output already exists", "backup_v4_output_exists", 409);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true, mode: 0o700 });
-  const lease = new CanonicalWriterLease(sourceRoot); const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "prg32-backup-v4-create-")); const payloadPath = path.join(temporaryDirectory, "payload-v3.zip");
+  const lease = snapshotMode === "exclusive" ? new CanonicalWriterLease(sourceRoot) : undefined; const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "prg32-backup-v4-create-")); const payloadPath = path.join(temporaryDirectory, "payload-v3.zip");
   try {
-    const payload = await createCanonicalBackup({ sourceRoot, outputPath: payloadPath, authorization: CANONICAL_BACKUP_AUTHORIZATION, writerQuiesced: true, ...(value.canonical === undefined ? {} : { limits: value.canonical }) });
+    const canonicalAuthorization = options.authorization === ENCRYPTED_BACKUP_V4_OPERATIONAL_AUTHORIZATION ? CANONICAL_BACKUP_OPERATIONAL_AUTHORIZATION : CANONICAL_BACKUP_AUTHORIZATION;
+    const payload = await createCanonicalBackup({ sourceRoot, outputPath: payloadPath, authorization: canonicalAuthorization, writerQuiesced: options.writerQuiesced, snapshotMode, ...(value.canonical === undefined ? {} : { limits: value.canonical }) });
     options.fault?.("after-payload-created");
     const active = options.keyProvider.active(); const dataKey = crypto.randomBytes(KEY_BYTES); const wrapped = wrapDataKey(dataKey, active);
     const header: EncryptedBackupV4Header = {
@@ -460,7 +466,7 @@ export async function createEncryptedCanonicalBackup(options: CreateEncryptedBac
     if (fs.existsSync(outputPath) && !fs.existsSync(markerPath(outputPath))) { try { fs.renameSync(outputPath, `${outputPath}.incomplete-${crypto.randomUUID()}`); } catch { /* preserve the original error */ } }
     if (error instanceof BackupError) throw error;
     throw new BackupError("encrypted backup creation failed", "backup_v4_creation_failed", 500, { cause: error });
-  } finally { lease.close(); fs.rmSync(temporaryDirectory, { recursive: true, force: true }); }
+  } finally { lease?.close(); fs.rmSync(temporaryDirectory, { recursive: true, force: true }); }
 }
 
 export function inspectEncryptedBackup(archivePathValue: string, options: { readonly limits?: Partial<EncryptedBackupV4Limits> } = {}): EncryptedBackupV4Header {

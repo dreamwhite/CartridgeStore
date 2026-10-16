@@ -25,12 +25,20 @@ function provider(): KeyRegistryBackupKeyProvider {
 
 function authorization(): string { return argument("--authorization"); }
 
+function snapshotMode(): "exclusive" | "online" {
+  const online = args.includes("--online");
+  const exclusive = args.includes("--exclusive");
+  if (online && exclusive) throw new Error("--online and --exclusive are mutually exclusive");
+  return online ? "online" : "exclusive";
+}
+
 try {
   const command = args[0];
   if (command === "help" || command === "--help" || command === undefined) {
-    console.log("usage: backup|verify|inspect|restore|retention|rotate-key-registry with explicit paths and authorization; backup/restore never use operational defaults");
+    console.log("usage: backup [--online|--exclusive]|verify|inspect|restore|retention|rotate-key-registry with explicit paths and authorization; backup/restore never use operational defaults");
   } else if (command === "backup") {
-    const result = await createEncryptedCanonicalBackup({ sourceRoot: argument("--source"), outputPath: argument("--output"), authorization: authorization(), keyProvider: provider(), writerQuiesced: true });
+    const mode = snapshotMode();
+    const result = await createEncryptedCanonicalBackup({ sourceRoot: argument("--source"), outputPath: argument("--output"), authorization: authorization(), keyProvider: provider(), writerQuiesced: mode === "exclusive", snapshotMode: mode });
     console.log(JSON.stringify({ command, backup_id: result.backupId, archive: result.archivePath, archive_bytes: result.envelopeBytes, key_id: result.header.key_id, verification_state: "complete" }));
   } else if (command === "verify") {
     const result = verifyEncryptedBackup(argument("--archive"), { keyProvider: provider() });

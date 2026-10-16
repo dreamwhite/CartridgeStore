@@ -158,4 +158,27 @@ describe("M5.2g.8 encrypted backup-v4", () => {
     const restored = new Database(path.join(target, "store.sqlite"), { readonly: true });
     expect((restored.prepare("SELECT state FROM storage_metadata WHERE singleton_id = 1").get() as { state: string }).state).not.toBe("ready"); restored.close();
   });
+
+  it("creates an online snapshot while the application writer lease and a SQLite write transaction remain active", async () => {
+    const workspace = root("prg32-backup-v4-online-"); const source = path.join(workspace, "source"); seed(source); const keys = provider();
+    const lease = new CanonicalWriterLease(source);
+    const writer = new Database(path.join(source, "store.sqlite"));
+    writer.pragma("busy_timeout = 5000");
+    try {
+      writer.exec("BEGIN IMMEDIATE");
+      writer.prepare("INSERT INTO scores(game, player, score, created_at, submitted_by) VALUES (?, ?, ?, ?, ?)").run("fixture", "online-writer", 99, 1767225601, "synthetic");
+      const archive = path.join(workspace, "online.backup4");
+      const creating = createEncryptedCanonicalBackup({ sourceRoot: source, outputPath: archive, authorization: ENCRYPTED_BACKUP_V4_AUTHORIZATION, keyProvider: keys, writerQuiesced: false, snapshotMode: "online" });
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      writer.exec("COMMIT");
+      await creating;
+      const verified = verifyEncryptedBackup(archive, { keyProvider: keys });
+      expect(verified.header.payload_format_version).toBe(3);
+      expect(verified.payloadManifest.verification_state).toBe("complete");
+    } finally {
+      if (writer.inTransaction) writer.exec("ROLLBACK");
+      writer.close();
+      lease.close();
+    }
+  });
 });

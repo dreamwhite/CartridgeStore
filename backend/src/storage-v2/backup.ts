@@ -17,9 +17,11 @@ import type { ObjectKind, StorageDatabase } from "./types.js";
 
 export const CANONICAL_BACKUP_ABI = "prg32-cartridge-store-backup-3.0";
 export const CANONICAL_BACKUP_AUTHORIZATION = "PRG32_STORAGE_V2_DISPOSABLE_BACKUP";
+export const CANONICAL_BACKUP_OPERATIONAL_AUTHORIZATION = "PRG32_STORAGE_V2_OPERATIONAL_BACKUP";
 export const CANONICAL_BACKUP_VERSION = 3;
 
 const CHUNK_BYTES = 1024 * 1024;
+const SQLITE_SNAPSHOT_TIMEOUT_MS = 5 * 60 * 1000;
 const RESTORE_STATE_FILE = ".prg32-storage-v2-restore.json";
 const INCOMPLETE_PUBLICATION_STATES = new Set([
   "prepared", "objects_staged", "objects_verified", "database_committed", "cleanup_pending",
@@ -56,6 +58,8 @@ export type CanonicalBackupFaultPoint =
   | "before-archive-finalization"
   | "after-archive-finalization";
 
+export type CanonicalBackupSnapshotMode = "exclusive" | "online";
+
 export type CanonicalRestoreFaultPoint =
   | "before-target-initialization"
   | "after-sqlite-restore"
@@ -70,6 +74,8 @@ export interface CanonicalBackupOptions {
   readonly outputPath: string;
   readonly authorization: string;
   readonly writerQuiesced: boolean;
+  /** Exclusive is the historical, externally-quiesced path; online never owns the application writer lease. */
+  readonly snapshotMode?: CanonicalBackupSnapshotMode;
   readonly limits?: Partial<CanonicalBackupLimits>;
   readonly fault?: (point: CanonicalBackupFaultPoint) => void;
 }
@@ -172,9 +178,15 @@ function limits(value?: Partial<CanonicalBackupLimits>): CanonicalBackupLimits {
   return result;
 }
 
-function disposableAuthorization(options: { readonly authorization: string; readonly writerQuiesced?: boolean }): void {
-  if (options.authorization !== CANONICAL_BACKUP_AUTHORIZATION) throw new BackupError("explicit disposable authorization is required", "canonical_backup_authorization_required", 403);
-  if (options.writerQuiesced === false) throw new BackupError("writer quiescence is required for canonical backup", "canonical_backup_writer_not_quiesced", 409);
+function validateBackupAuthorization(value: string): "disposable" | "operational" {
+  if (value === CANONICAL_BACKUP_AUTHORIZATION) return "disposable";
+  if (value === CANONICAL_BACKUP_OPERATIONAL_AUTHORIZATION) return "operational";
+  throw new BackupError("explicit backup authorization is required", "canonical_backup_authorization_required", 403);
+}
+
+function snapshotMode(value: CanonicalBackupSnapshotMode | undefined): CanonicalBackupSnapshotMode {
+  if (value === undefined || value === "exclusive" || value === "online") return value ?? "exclusive";
+  throw new BackupError("canonical backup snapshot mode is invalid", "canonical_backup_snapshot_mode_invalid", 400);
 }
 
 function resolved(value: string, label: string): string {
@@ -272,6 +284,96 @@ function collectFiles(root: string, relativeRoot: string, classification: Canoni
     }
   };
   walk(absoluteRoot);
+}
+
+function sameFileIdentity(left: fs.Stats, right: fs.Stats): boolean {
+  return left.dev === right.dev && left.ino === right.ino && left.size === right.size && left.mtimeMs === right.mtimeMs && left.ctimeMs === right.ctimeMs;
+}
+
+/**
+ * Capture one source file through an open descriptor.  This is deliberately
+ * independent of the application writer lease: a staged file may be unlinked
+ * by publication cleanup after the SQLite snapshot, but an already-open
+ * descriptor remains a stable POSIX read view.  Replacement or in-place
+ * mutation is rejected.
+ */
+function captureStableFile(sourcePath: string, targetPath: string, maxEntryBytes: number): void {
+  const sourceBefore = fs.lstatSync(sourcePath);
+  if (sourceBefore.isSymbolicLink() || !sourceBefore.isFile()) throw new BackupError("canonical backup rejects non-regular files", "canonical_backup_file_type_unsupported");
+  if (sourceBefore.size > maxEntryBytes) throw new BackupError("canonical backup entry is too large", "canonical_backup_entry_too_large");
+  fs.mkdirSync(path.dirname(targetPath), { recursive: true, mode: 0o700 });
+  const temporary = `${targetPath}.tmp-${crypto.randomUUID()}`;
+  const inputFd = fs.openSync(sourcePath, fs.constants.O_RDONLY);
+  const outputFd = fs.openSync(temporary, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY, 0o600);
+  const buffer = Buffer.allocUnsafe(CHUNK_BYTES);
+  let copied = 0;
+  try {
+    while (true) {
+      const count = fs.readSync(inputFd, buffer, 0, buffer.length, null);
+      if (count === 0) break;
+      copied += count;
+      if (copied > maxEntryBytes) throw new BackupError("canonical backup entry is too large", "canonical_backup_entry_too_large");
+      fs.writeSync(outputFd, buffer, 0, count);
+    }
+    fs.fsyncSync(outputFd);
+    const sourceAfter = fs.fstatSync(inputFd);
+    if (!sameFileIdentity(sourceBefore, sourceAfter)) throw new BackupError("canonical backup source file changed during snapshot", "canonical_backup_source_changed", 409);
+    try {
+      const currentPath = fs.lstatSync(sourcePath);
+      if (!sameFileIdentity(sourceBefore, currentPath)) throw new BackupError("canonical backup source file was replaced during snapshot", "canonical_backup_source_changed", 409);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+      // An unlink after opening is safe: the descriptor still references the
+      // exact file that belonged to the SQLite snapshot.
+    }
+  } finally {
+    fs.closeSync(inputFd);
+    fs.closeSync(outputFd);
+  }
+  try {
+    if (fs.existsSync(targetPath)) throw new BackupError("canonical backup snapshot contains a duplicate path", "canonical_backup_duplicate_entry");
+    fs.renameSync(temporary, targetPath);
+    fs.chmodSync(targetPath, 0o600);
+  } catch (error) {
+    try { fs.unlinkSync(temporary); } catch { /* preserve the original error */ }
+    throw error;
+  }
+}
+
+function captureDirectory(sourceRoot: string, targetRoot: string, relativeRoot: string, maxEntryBytes: number): void {
+  const sourceDirectory = path.join(sourceRoot, relativeRoot);
+  if (!fs.existsSync(sourceDirectory)) return;
+  const walk = (directory: string): void => {
+    for (const item of fs.readdirSync(directory, { withFileTypes: true })) {
+      const sourcePath = path.join(directory, item.name);
+      const relative = path.relative(sourceRoot, sourcePath);
+      if (item.isSymbolicLink()) throw new BackupError("canonical backup rejects symlinks", "canonical_backup_symlink_rejected");
+      if (item.isDirectory()) { walk(sourcePath); continue; }
+      if (!item.isFile()) throw new BackupError("canonical backup rejects non-regular files", "canonical_backup_file_type_unsupported");
+      captureStableFile(sourcePath, path.join(targetRoot, relative), maxEntryBytes);
+    }
+  };
+  walk(sourceDirectory);
+}
+
+function captureReferencedFiles(snapshot: Database.Database, sourceRoot: string, targetRoot: string, maxEntryBytes: number): void {
+  const keys = new Set<string>();
+  const objects = snapshot.prepare("SELECT storage_key FROM storage_objects ORDER BY object_id").all() as Array<{ storage_key: string }>;
+  for (const row of objects) keys.add(String(row.storage_key));
+  const staging = snapshot.prepare("SELECT staging_key FROM submission_artifacts WHERE validation_state IN ('staged', 'validated') ORDER BY submission_artifact_id").all() as Array<{ staging_key: string }>;
+  for (const row of staging) keys.add(String(row.staging_key));
+  for (const storageKey of keys) {
+    const sourcePath = pathForStorageKey(sourceRoot, storageKey);
+    const targetPath = pathForStorageKey(targetRoot, storageKey);
+    captureStableFile(sourcePath, targetPath, maxEntryBytes);
+  }
+  // Recovery evidence and compatibility files are not derived from directory
+  // enumeration as catalog truth, but they are captured before inventorying so
+  // the archive never mixes a live file with the SQLite snapshot.
+  captureDirectory(sourceRoot, targetRoot, "storage/staging/operations", maxEntryBytes);
+  captureDirectory(sourceRoot, targetRoot, "journal", maxEntryBytes);
+  captureDirectory(sourceRoot, targetRoot, "storage/quarantine", maxEntryBytes);
+  captureDirectory(sourceRoot, targetRoot, "compatibility", maxEntryBytes);
 }
 
 function buildInventory(resource: StorageDatabase, snapshot: Database.Database, backupId: string, sourceRoot: string, maxEntryBytes: number, fault?: (point: CanonicalBackupFaultPoint) => void): { readonly entries: ArchiveEntrySource[]; readonly inventory: CanonicalBackupInventoryEntry[]; readonly objectKinds: Record<ObjectKind, number>; readonly stagingCount: number; readonly recoveryMaterial: readonly string[]; readonly recoveryRequired: boolean } {
@@ -482,6 +584,23 @@ function copyExtractedData(extractedData: string, targetRoot: string, fault?: (p
   walk(extractedData);
 }
 
+/**
+ * Docker bind mounts and tmpfs use different filesystems. Keep the normal
+ * atomic rename when possible, but make restore portable across that
+ * boundary without weakening the fresh-target and recovery-state checks.
+ */
+function promoteRestoredDatabase(source: string, destination: string): void {
+  try {
+    fs.renameSync(source, destination);
+    return;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "EXDEV") throw error;
+  }
+  fs.copyFileSync(source, destination, fs.constants.COPYFILE_EXCL);
+  fs.chmodSync(destination, 0o600);
+  fs.unlinkSync(source);
+}
+
 function prepareVerificationRoot(extracted: ReturnType<typeof extractZipArchive>): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "prg32-backup-verify-"));
   for (const relative of [
@@ -553,11 +672,12 @@ export function verifyCanonicalBackup(archivePathValue: string, options: { reado
 }
 
 export async function createCanonicalBackup(options: CanonicalBackupOptions): Promise<CanonicalBackupResult> {
-  disposableAuthorization(options);
-  if (!options.writerQuiesced) throw new BackupError("writer quiescence is required for canonical backup", "canonical_backup_writer_not_quiesced", 409);
+  const authorizationKind = validateBackupAuthorization(options.authorization);
+  const mode = snapshotMode(options.snapshotMode);
+  if (mode === "exclusive" && !options.writerQuiesced) throw new BackupError("writer quiescence is required for canonical backup", "canonical_backup_writer_not_quiesced", 409);
   const sourceRoot = resolved(options.sourceRoot, "source root");
   const outputPath = resolved(options.outputPath, "output path");
-  if (!isDisposablePath(sourceRoot) || !fs.existsSync(path.join(sourceRoot, ".prg32-storage-v2"))) throw new BackupError("canonical backup source must be an initialized disposable storage root", "canonical_backup_source_not_disposable", 403);
+  if ((authorizationKind === "disposable" && !isDisposablePath(sourceRoot)) || !fs.existsSync(path.join(sourceRoot, ".prg32-storage-v2"))) throw new BackupError("canonical backup source must be an initialized storage root", "canonical_backup_source_not_disposable", 403);
   if (inside(outputPath, sourceRoot)) throw new BackupError("backup output may not be inside the source root", "canonical_backup_output_unsafe");
   if (fs.existsSync(outputPath) || fs.existsSync(`${outputPath}.complete.json`)) throw new BackupError("completed backup output already exists", "canonical_backup_output_exists", 409);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true, mode: 0o700 });
@@ -571,13 +691,21 @@ export async function createCanonicalBackup(options: CanonicalBackupOptions): Pr
     const audit = auditStorage(resource.sqlite, resource.paths);
     if (!audit.ok) throw new BackupError("canonical source storage audit failed", "canonical_backup_source_integrity");
     options.fault?.("before-sqlite-snapshot");
-    await resource.sqlite.backup(snapshotPath);
+    const snapshotDeadline = Date.now() + SQLITE_SNAPSHOT_TIMEOUT_MS;
+    await resource.sqlite.backup(snapshotPath, {
+      progress: () => {
+        if (Date.now() > snapshotDeadline) throw new BackupError("canonical SQLite snapshot exceeded its time bound", "canonical_backup_snapshot_timeout", 503);
+        return 100;
+      }
+    });
     options.fault?.("after-sqlite-snapshot");
     const snapshot = new Database(snapshotPath, { readonly: true, fileMustExist: true });
     try {
       assertDatabase(snapshot);
       const identity = sha256File(snapshotPath);
-      const built = buildInventory(resource, snapshot, backupId, sourceRoot, limitValue.maxEntryBytes, options.fault);
+      const capturedRoot = path.join(snapshotDirectory, "captured");
+      captureReferencedFiles(snapshot, sourceRoot, capturedRoot, limitValue.maxEntryBytes);
+      const built = buildInventory(resource, snapshot, backupId, capturedRoot, limitValue.maxEntryBytes, options.fault);
       const databaseEntry: ArchiveEntrySource = { archivePath: "database.sqlite", sourcePath: snapshotPath, ...identity };
       const allInventory = [{ archivePath: "database.sqlite", sourceKey: "store.sqlite", kind: "sqlite_snapshot" as const, sizeBytes: identity.sizeBytes, sha256: identity.sha256, classification: "required" as const }, ...built.inventory];
       const expanded = allInventory.reduce((total, item) => total + item.sizeBytes, 0);
@@ -621,7 +749,7 @@ export async function createCanonicalBackup(options: CanonicalBackupOptions): Pr
 }
 
 export function restoreCanonicalBackup(options: CanonicalRestoreOptions): CanonicalRestoreResult {
-  disposableAuthorization(options);
+  if (options.authorization !== CANONICAL_BACKUP_AUTHORIZATION) throw new BackupError("explicit disposable restore authorization is required", "canonical_backup_authorization_required", 403);
   const archivePath = resolved(options.archivePath, "archive path");
   const targetRoot = resolved(options.targetRoot, "target root");
   if (!isDisposablePath(targetRoot)) throw new BackupError("canonical restore target must be disposable", "canonical_restore_target_not_disposable", 403);
@@ -640,7 +768,7 @@ export function restoreCanonicalBackup(options: CanonicalRestoreOptions): Canoni
     resource.close(); resource = undefined;
     const extracted = extractZipArchive(archivePath, temporary, backendConfig(limitValue));
     fs.rmSync(path.join(targetRoot, "store.sqlite"), { force: true });
-    fs.renameSync(extracted.databasePath, path.join(targetRoot, "store.sqlite"));
+    promoteRestoredDatabase(extracted.databasePath, path.join(targetRoot, "store.sqlite"));
     const originalDatabaseIdentity = sha256File(targetPaths.databasePath);
     if (originalDatabaseIdentity.sha256 !== verified.manifest.snapshot.sha256) throw new BackupError("restored SQLite snapshot differs from backup", "canonical_restore_database_mismatch");
     writeState(targetRoot, { abi: CANONICAL_BACKUP_ABI, operation_id: operationId, backup_id: verified.manifest.backup_id, archive_sha256: verified.archiveSha256, state: "restoring_database", updated_at: new Date().toISOString() });
