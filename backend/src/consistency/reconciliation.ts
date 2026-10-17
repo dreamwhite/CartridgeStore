@@ -5,7 +5,6 @@ import type Database from "better-sqlite3";
 
 import { safeGameId, safeVersion } from "../catalog/catalog.js";
 import {
-  fail,
   object,
   parseArchitectures,
   parseObjectJson,
@@ -26,12 +25,14 @@ import type {
   ReconciliationFinding,
   ReconciliationReport,
 } from "./publication-contracts.js";
+import {
+  scanPublishedCartridges,
+  scanTemporaryPublicationWorkspaces,
+} from "./reconciliation-files.js";
 
 const JOURNAL_ROOT = "publication-operations";
-const STAGING_ROOT = "publication-staging";
 const PENDING_ROOT = "pending";
 const CARTRIDGE_ROOT = "cartridges";
-const MAX_SCAN_ENTRIES = 4096;
 
 interface SubmissionRow {
   readonly id: number;
@@ -348,50 +349,7 @@ export function reconcilePublication(
           });
         }
       }
-      const cartridges = assertInside(
-        root,
-        path.join(root, CARTRIDGE_ROOT),
-        "cartridge directory",
-      );
-      if (fs.existsSync(cartridges)) {
-        const walk = (directory: string, relative: string, depth: number): void => {
-          if (depth > 4) return;
-          const entries = fs.readdirSync(directory, { withFileTypes: true });
-          if (entries.length > MAX_SCAN_ENTRIES) {
-            fail(
-              "cartridge scan exceeds the reconciliation limit",
-              "scan_limit",
-            );
-          }
-          for (const entry of entries) {
-            if (entry.isSymbolicLink()) {
-              add({
-                code: "UNSAFE_CARTRIDGE_OBJECT",
-                classification: "CORRUPT",
-                message: "published catalog contains a symlink",
-                path: `${relative}/${entry.name}`,
-              });
-            } else if (entry.isDirectory()) {
-              walk(
-                path.join(directory, entry.name),
-                `${relative}/${entry.name}`,
-                depth + 1,
-              );
-            } else if (entry.isFile() && entry.name.endsWith(".prg32")) {
-              const publishedPath = `${relative}/${entry.name}`;
-              if (!indexedFiles.has(publishedPath)) {
-                add({
-                  code: "PUBLISHED_FILE_MISSING_FROM_INDEX",
-                  classification: "AMBIGUOUS",
-                  message: "published cartridge is not referenced by index",
-                  path: publishedPath,
-                });
-              }
-            }
-          }
-        };
-        walk(cartridges, CARTRIDGE_ROOT, 0);
-      }
+      scanPublishedCartridges(root, indexedFiles, { add });
     } catch (error) {
       add({
         code: "INDEX_SCHEMA_CORRUPT",
@@ -536,50 +494,7 @@ export function reconcilePublication(
       };
     }
   }
-  for (const temporaryRoot of [STAGING_ROOT, JOURNAL_ROOT]) {
-    try {
-      const directory = assertInside(
-        root,
-        path.join(root, temporaryRoot),
-        "temporary scan",
-      );
-      if (fs.existsSync(directory)) {
-        const scan = (current: string, relative: string): void => {
-          for (const entry of fs.readdirSync(current, { withFileTypes: true })) {
-            const next = path.join(current, entry.name);
-            const nextRelative = `${relative}/${entry.name}`;
-            if (entry.isSymbolicLink()) {
-              add({
-                code: "UNSAFE_PUBLICATION_OBJECT",
-                classification: "CORRUPT",
-                message: "publication workspace contains a symlink",
-                path: nextRelative,
-              });
-            } else if (entry.isDirectory()) {
-              scan(next, nextRelative);
-            } else if (entry.name.includes(".tmp-")) {
-              add({
-                code: "STALE_TEMPORARY_FILE",
-                classification: "RECOVERABLE",
-                message: "temporary publication file remains",
-                path: nextRelative,
-              });
-            }
-          }
-        };
-        scan(directory, temporaryRoot);
-      }
-    } catch (error) {
-      add({
-        code: "TEMPORARY_SCAN_FAILED",
-        classification: "CORRUPT",
-        message: error instanceof Error
-          ? error.message
-          : "publication temporary area cannot be scanned",
-        path: temporaryRoot,
-      });
-    }
-  }
+  scanTemporaryPublicationWorkspaces(root, { add });
   return {
     status: statusForFindings(findings),
     checkedAt: isoNow(),
