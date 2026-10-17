@@ -11,43 +11,63 @@ import {
   createCanonicalBackup,
   restoreCanonicalBackup,
   verifyCanonicalBackup,
-  type CanonicalBackupLimits,
-  type CanonicalBackupSnapshotMode,
-  type CanonicalRestoreFaultPoint,
   type CanonicalRestoreResult
 } from "./backup.js";
 import { CanonicalWriterLease } from "./writer-lock.js";
 import { TARGET_VERSION_TUPLE } from "./schema.js";
+import {
+  DEFAULT_ENCRYPTED_BACKUP_V4_LIMITS,
+  ENCRYPTED_BACKUP_V4_ABI,
+  ENCRYPTED_BACKUP_V4_AUTHORIZATION,
+  ENCRYPTED_BACKUP_V4_OPERATIONAL_AUTHORIZATION,
+  ENCRYPTED_BACKUP_V4_VERSION,
+  RETENTION_AUTHORIZATION,
+  type BackupKeyProvider,
+  type BackupKeyRecord,
+  type BackupKeyRotationOptions,
+  type CreateEncryptedBackupOptions,
+  type EncryptedBackupV4FaultPoint,
+  type EncryptedBackupV4Header,
+  type EncryptedBackupV4Limits,
+  type EncryptedBackupV4Result,
+  type RetentionOptions,
+  type RetentionResult,
+  type RestoreEncryptedBackupOptions,
+  type VerifiedEncryptedBackupV4,
+  type VerifyEncryptedBackupOptions,
+} from "./backup-v4-contracts.js";
 
-export const ENCRYPTED_BACKUP_V4_ABI = "prg32-cartridge-store-backup-4.0";
-export const ENCRYPTED_BACKUP_V4_AUTHORIZATION = "PRG32_STORAGE_V2_ENCRYPTED_BACKUP_DISPOSABLE";
-export const ENCRYPTED_BACKUP_V4_OPERATIONAL_AUTHORIZATION = "PRG32_STORAGE_V2_ENCRYPTED_BACKUP_OPERATIONAL";
-export const ENCRYPTED_BACKUP_V4_VERSION = 4;
+export {
+  DEFAULT_ENCRYPTED_BACKUP_V4_LIMITS,
+  ENCRYPTED_BACKUP_V4_ABI,
+  ENCRYPTED_BACKUP_V4_AUTHORIZATION,
+  ENCRYPTED_BACKUP_V4_OPERATIONAL_AUTHORIZATION,
+  ENCRYPTED_BACKUP_V4_VERSION,
+  RETENTION_AUTHORIZATION,
+} from "./backup-v4-contracts.js";
+export type {
+  BackupKeyProvider,
+  BackupKeyRecord,
+  BackupKeyRotationOptions,
+  BackupKeyStatus,
+  CreateEncryptedBackupOptions,
+  EncryptedBackupV4FaultPoint,
+  EncryptedBackupV4Header,
+  EncryptedBackupV4Limits,
+  EncryptedBackupV4Result,
+  RetentionOptions,
+  RetentionResult,
+  RestoreEncryptedBackupOptions,
+  VerifiedEncryptedBackupV4,
+  VerifyEncryptedBackupOptions,
+} from "./backup-v4-contracts.js";
 
 const MAGIC = Buffer.from("PRG32-BACKUP-V4\0", "ascii");
-const HEADER_BYTES = 64 * 1024;
 const NONCE_BYTES = 12;
 const KEY_BYTES = 32;
 const TAG_BYTES = 16;
 const CHUNK_BYTES = 1024 * 1024;
 const KEY_ID_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/u;
-const RETENTION_AUTHORIZATION = "PRG32_STORAGE_V2_BACKUP_RETENTION_DISPOSABLE";
-
-export type BackupKeyStatus = "active" | "decrypt-only" | "retired";
-
-export interface BackupKeyRecord {
-  readonly id: string;
-  readonly status: BackupKeyStatus;
-  readonly material: Buffer;
-  readonly createdAt?: string;
-}
-
-/** Provider-neutral boundary. Implementations must keep key material outside the backup archive. */
-export interface BackupKeyProvider {
-  active(): BackupKeyRecord;
-  resolve(keyId: string): BackupKeyRecord | undefined;
-}
-
 export class KeyRegistryBackupKeyProvider implements BackupKeyProvider {
   constructor(private readonly registry: KeyRegistry) {}
 
@@ -105,109 +125,6 @@ export class InMemoryBackupKeyProvider implements BackupKeyProvider {
     if (!record) throw new BackupError("backup key is unavailable", "backup_v4_key_unknown");
     return record;
   }
-}
-
-export interface EncryptedBackupV4Header {
-  readonly abi: typeof ENCRYPTED_BACKUP_V4_ABI;
-  readonly format_version: typeof ENCRYPTED_BACKUP_V4_VERSION;
-  readonly application: "prg32-cartridge-store";
-  readonly backup_id: string;
-  readonly created_at: string;
-  readonly payload_abi: "prg32-cartridge-store-backup-3.0";
-  readonly payload_format_version: 3;
-  readonly versions: typeof TARGET_VERSION_TUPLE;
-  readonly payload_archive_bytes: number;
-  readonly payload_archive_sha256: string;
-  readonly payload_manifest_sha256: string;
-  readonly key_id: string;
-  readonly cipher: "aes-256-gcm";
-  readonly key_wrap: "aes-256-gcm";
-  readonly nonce: string;
-  readonly wrapped_key: string;
-  readonly wrap_nonce: string;
-  readonly wrap_tag: string;
-  readonly tag_bytes: 16;
-}
-
-export interface EncryptedBackupV4Limits {
-  readonly maxEnvelopeBytes: number;
-  readonly maxHeaderBytes: number;
-  readonly maxPayloadBytes: number;
-  readonly canonical?: Partial<CanonicalBackupLimits>;
-}
-
-export const DEFAULT_ENCRYPTED_BACKUP_V4_LIMITS: EncryptedBackupV4Limits = {
-  maxEnvelopeBytes: 4 * 1024 * 1024 * 1024 + 128 * 1024,
-  maxHeaderBytes: HEADER_BYTES,
-  maxPayloadBytes: 4 * 1024 * 1024 * 1024
-};
-
-export type EncryptedBackupV4FaultPoint =
-  | "after-payload-created"
-  | "during-encryption"
-  | "before-envelope-finalization"
-  | "after-envelope-finalization"
-  | "before-decryption"
-  | "during-decryption"
-  | "after-decryption";
-
-export interface CreateEncryptedBackupOptions {
-  readonly sourceRoot: string;
-  readonly outputPath: string;
-  readonly authorization: string;
-  readonly keyProvider: BackupKeyProvider;
-  readonly writerQuiesced: boolean;
-  readonly snapshotMode?: CanonicalBackupSnapshotMode;
-  readonly limits?: Partial<EncryptedBackupV4Limits>;
-  readonly fault?: (point: EncryptedBackupV4FaultPoint) => void;
-}
-
-export interface VerifyEncryptedBackupOptions {
-  readonly keyProvider: BackupKeyProvider;
-  readonly limits?: Partial<EncryptedBackupV4Limits>;
-  readonly fault?: (point: EncryptedBackupV4FaultPoint) => void;
-}
-
-export interface RestoreEncryptedBackupOptions extends VerifyEncryptedBackupOptions {
-  readonly archivePath: string;
-  readonly targetRoot: string;
-  readonly authorization: string;
-  readonly restoreFault?: (point: CanonicalRestoreFaultPoint) => void;
-}
-
-export interface EncryptedBackupV4Result {
-  readonly backupId: string;
-  readonly archivePath: string;
-  readonly completionMarker: string;
-  readonly header: EncryptedBackupV4Header;
-  readonly envelopeBytes: number;
-}
-
-export interface VerifiedEncryptedBackupV4 extends EncryptedBackupV4Result {
-  readonly payloadManifest: ReturnType<typeof verifyCanonicalBackup>["manifest"];
-  readonly payloadArchiveSha256: string;
-}
-
-export interface RetentionOptions {
-  readonly directory: string;
-  readonly keepNewest: number;
-  readonly maxAgeMs?: number;
-  readonly protectedBackupIds?: readonly string[];
-  readonly apply?: boolean;
-  readonly authorization?: string;
-}
-
-export interface RetentionResult {
-  readonly dryRun: boolean;
-  readonly candidates: readonly string[];
-  readonly protectedFiles: readonly string[];
-  readonly deleted: readonly string[];
-}
-
-export interface BackupKeyRotationOptions {
-  readonly inputRegistryPath: string;
-  readonly outputRegistryPath: string;
-  readonly newKeyId: string;
 }
 
 /** Writes a new protected registry; it never overwrites the source registry. */
@@ -507,5 +424,3 @@ export function applyBackupRetention(options: RetentionOptions): RetentionResult
   if (options.apply) for (const filePath of candidates) { fs.unlinkSync(filePath); const marker = markerPath(filePath); if (fs.existsSync(marker)) fs.unlinkSync(marker); deleted.push(filePath); }
   return { dryRun: !options.apply, candidates, protectedFiles, deleted };
 }
-
-export { RETENTION_AUTHORIZATION };
