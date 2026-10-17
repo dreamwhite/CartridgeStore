@@ -1,8 +1,11 @@
 import crypto from "node:crypto";
 
-import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
+import type {
+  FastifyInstance,
+  FastifyReply,
+  FastifyRequest
+} from "fastify";
 
-import { encodePythonJson } from "../compatibility/serialization.js";
 import { permissionGuard } from "../authorization/guards.js";
 import type { AuthorizationService } from "../authorization/service.js";
 import type { Permission } from "../authorization/permissions.js";
@@ -12,9 +15,25 @@ import { AdminError, type AdminIdentityService, type AdminMutationContext } from
 import { AuditUnavailableError } from "./audit.js";
 import type { AdminTokenService } from "./token-service.js";
 import type { CatalogAdminService } from "./catalog-service.js";
+import {
+  assertFields,
+  cartridgeId,
+  groupId,
+  json,
+  object,
+  optionalString,
+  positiveQuery,
+  queryObject,
+  requiredVersion,
+  tokenId,
+  userId,
+  type CartridgeParams,
+  type GroupParams,
+  type JsonObject,
+  type TokenParams,
+  type UserParams,
+} from "./route-input.js";
 
-const SESSION_COOKIE = "prg32_ts_session";
-type JsonObject = Record<string, unknown>;
 
 interface AdminRouteOptions {
   readonly auth: AuthService;
@@ -24,25 +43,7 @@ interface AdminRouteOptions {
   readonly catalog: CatalogAdminService;
 }
 
-interface UserParams { readonly userId: string }
-interface GroupParams { readonly groupId: string }
-interface TokenParams { readonly tokenId: string }
-interface CartridgeParams { readonly cartridgeId: string }
-
-function json(reply: FastifyReply, body: unknown, status = 200): FastifyReply {
-  return reply.code(status).header("content-type", "application/json").send(Buffer.from(`${encodePythonJson(body)}\n`, "utf8"));
-}
-
-function object(value: unknown): JsonObject {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new AdminError("invalid_json_object", 400, "request body must be a JSON object");
-  return value as JsonObject;
-}
-
-function assertFields(value: JsonObject, allowed: readonly string[]): void {
-  const permitted = new Set(allowed);
-  const unknown = Object.keys(value).find((key) => !permitted.has(key));
-  if (unknown) throw new AdminError("unknown_field", 400, "request contains an unknown field");
-}
+const SESSION_COOKIE = "prg32_ts_session";
 
 function bearer(request: FastifyRequest): string | undefined {
   const authorization = request.headers.authorization;
@@ -101,37 +102,6 @@ function operationFailure(reply: FastifyReply, request: FastifyRequest, error: u
   return json(reply, { ok: false, error: "administrative identity operation failed", code: "admin_operation_failed" }, 500);
 }
 
-function positiveQuery(value: unknown, field: string, fallback: number, maximum: number): number {
-  if (value === undefined || value === "") return fallback;
-  if (typeof value !== "string" || !/^\d+$/.test(value)) throw new AdminError("invalid_pagination", 400, `${field} is invalid`);
-  const parsed = Number(value);
-  if (!Number.isSafeInteger(parsed) || parsed < 1 || parsed > maximum) throw new AdminError("invalid_pagination", 400, `${field} is invalid`);
-  return parsed;
-}
-
-function queryObject(request: FastifyRequest): JsonObject {
-  const query = request.query;
-  if (query === null || typeof query !== "object" || Array.isArray(query)) throw new AdminError("invalid_query", 400, "query is invalid");
-  return query as JsonObject;
-}
-
-function userId(params: UserParams): number {
-  if (!/^\d+$/.test(params.userId)) throw new AdminError("invalid_identifier", 400, "user_id is invalid");
-  return Number(params.userId);
-}
-
-function groupId(params: GroupParams): number {
-  if (!/^\d+$/.test(params.groupId)) throw new AdminError("invalid_identifier", 400, "group_id is invalid");
-  return Number(params.groupId);
-}
-
-function tokenId(params: TokenParams): number {
-  if (!/^[1-9]\d*$/.test(params.tokenId)) throw new AdminError("invalid_identifier", 400, "token_id is invalid");
-  const parsed = Number(params.tokenId);
-  if (!Number.isSafeInteger(parsed)) throw new AdminError("invalid_identifier", 400, "token_id is invalid");
-  return parsed;
-}
-
 function requireTokenAdmin(request: FastifyRequest, reply: FastifyReply, options: AdminRouteOptions, mutation: boolean): AuthRequestContext | null {
   const current = context(request, options.auth);
   if (!current.principal.authenticated) { adminFailure(reply, 401); return null; }
@@ -173,22 +143,6 @@ function requireCatalogAdmin(request: FastifyRequest, reply: FastifyReply, optio
     return null;
   }
   return current;
-}
-
-function cartridgeId(params: CartridgeParams): string {
-  if (typeof params.cartridgeId !== "string" || !params.cartridgeId.trim()) throw new AdminError("invalid_identifier", 400, "cartridge_id is invalid");
-  return params.cartridgeId;
-}
-
-function requiredVersion(query: JsonObject): string {
-  if (typeof query.version !== "string" || !query.version.trim()) throw new AdminError("version_required", 400, "version is required");
-  return query.version;
-}
-
-function optionalString(query: JsonObject, field: string, maximum = 160): string | undefined {
-  if (query[field] === undefined) return undefined;
-  if (typeof query[field] !== "string" || query[field].length > maximum) throw new AdminError("invalid_filter", 400, `${field} is invalid`);
-  return query[field].trim();
 }
 
 export function registerAdminRoutes(app: FastifyInstance, options: AdminRouteOptions): void {
