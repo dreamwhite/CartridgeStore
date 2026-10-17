@@ -1,9 +1,9 @@
 import type Database from "better-sqlite3";
 
 import { markRevokedBefore } from "../auth/revocation.js";
-import { accountStatus, hasAccountStateColumn, hasAccountStatusColumn, invalidateAccountAccess } from "../auth/account-state.js";
+import { hasAccountStateColumn, hasAccountStatusColumn, invalidateAccountAccess } from "../auth/account-state.js";
 import { generateWerkzeugScryptHash, validatePassword } from "../auth/service.js";
-import { ROLE_LEVELS, normalizeRole, type Role } from "../auth/principal.js";
+import { ROLE_LEVELS } from "../auth/principal.js";
 import type { BackendConfig } from "../config/env.js";
 import { AdminAuditLog } from "./audit.js";
 import {
@@ -13,11 +13,15 @@ import {
   normalizeAdminRole,
   normalizeAdminUsername,
   parseAdminAuditSummary,
-  parseAdminGroups,
   positiveAdminId,
   sqliteErrorCode,
 } from "./codecs.js";
 import { AdminError } from "./errors.js";
+import {
+  adminUserFromRow,
+  readAdminUser,
+  type AdminUserRow,
+} from "./user-view.js";
 import {
   type AdminMutationContext,
   type GroupView,
@@ -60,41 +64,6 @@ export class AdminIdentityService {
   private ensureEditors(database: Database.Database): void {
     const row = database.prepare("SELECT id FROM groups WHERE name = 'editors'").get() as { id?: number } | undefined;
     if (!row?.id) throw new AdminError("admin_identity_inconsistent", 503, "protected editors group is unavailable");
-  }
-
-  private user(database: Database.Database, userId: number): UserView {
-    const disabledColumn = hasAccountStateColumn(database) ? "users.disabled_at" : "NULL AS disabled_at";
-    const statusColumns = hasAccountStatusColumn(database)
-      ? "users.account_status, users.status_reason, users.status_changed_at, users.status_expires_at"
-      : "NULL AS account_status, NULL AS status_reason, NULL AS status_changed_at, NULL AS status_expires_at";
-    const row = database.prepare(
-      `SELECT id, username, email, role, external_provider, created_at, last_login, ${disabledColumn}, ${statusColumns},
-              (SELECT json_group_array(json_object('id', groups.id, 'name', groups.name, 'created_at', groups.created_at))
-                 FROM user_groups JOIN groups ON groups.id = user_groups.group_id
-                WHERE user_groups.user_id = users.id) AS groups_json
-         FROM users WHERE id = ?`
-    ).get(userId) as {
-      id: number; username: string; email: string; role: string; external_provider: string | null;
-      created_at: string; last_login: string | null; groups_json: string | null; disabled_at: string | null; account_status?: string | null; status_reason?: string | null; status_changed_at?: string | null; status_expires_at?: string | null
-    } | undefined;
-    if (!row) throw new AdminError("user_not_found", 404, "user not found");
-    let role: Role;
-    try { role = normalizeRole(row.role); } catch { throw new AdminError("admin_identity_inconsistent", 503, "stored user role is invalid"); }
-    return {
-      id: row.id,
-      username: row.username,
-      email: row.email,
-      role,
-      external_provider: row.external_provider,
-      created_at: row.created_at,
-      last_login: row.last_login,
-      groups: parseAdminGroups(row.groups_json ?? "[]")
-      ,disabled_at: row.disabled_at,
-      account_status: accountStatus(database, row.id),
-      status_reason: row.status_reason ?? null,
-      status_changed_at: row.status_changed_at ?? null,
-      status_expires_at: row.status_expires_at ?? null
-    };
   }
 
   private mutate<T>(context: AdminMutationContext, action: string, targetType: string, targetId: string, callback: (database: Database.Database) => T): T {
@@ -152,22 +121,11 @@ export class AdminIdentityService {
                  FROM user_groups JOIN groups ON groups.id = user_groups.group_id
                 WHERE user_groups.user_id = users.id) AS groups_json
          FROM users ${where} ORDER BY users.created_at ASC, users.id ASC LIMIT ? OFFSET ?`
-    ).all(...values, limit, (page - 1) * limit) as Array<{
-      id: number; username: string; email: string; role: string; external_provider: string | null;
-      created_at: string; last_login: string | null; groups_json: string | null; disabled_at: string | null; account_status?: string | null; status_reason?: string | null; status_changed_at?: string | null; status_expires_at?: string | null
-    }>;
-    const users = rows.map((row) => this.userFromRow(row));
+    ).all(...values, limit, (page - 1) * limit) as AdminUserRow[];
+    const users = rows.map((row) => adminUserFromRow(database, row));
     return { users, page, limit, total };
   }
-
-  private userFromRow(row: { id: number; username: string; email: string; role: string; external_provider: string | null; created_at: string; last_login: string | null; groups_json: string | null; disabled_at: string | null; account_status?: string | null; status_reason?: string | null; status_changed_at?: string | null; status_expires_at?: string | null }): UserView {
-    let role: Role;
-    try { role = normalizeRole(row.role); } catch { throw new AdminError("admin_identity_inconsistent", 503, "stored user role is invalid"); }
-    const status = row.disabled_at !== null ? "disabled" : (row.account_status === "suspended" || row.account_status === "banned" ? row.account_status : "active");
-    return { id: row.id, username: row.username, email: row.email, role, external_provider: row.external_provider, created_at: row.created_at, last_login: row.last_login, groups: parseAdminGroups(row.groups_json ?? "[]"), disabled_at: row.disabled_at, account_status: status, status_reason: row.status_reason ?? null, status_changed_at: row.status_changed_at ?? null, status_expires_at: row.status_expires_at ?? null };
-  }
-
-  getUser(userId: number): UserView { return this.user(this.database, positiveAdminId(userId, "user_id")); }
+  getUser(userId: number): UserView { return readAdminUser(this.database, positiveAdminId(userId, "user_id")); }
 
   createUser(input: UserCreateInput, context: AdminMutationContext): UserView {
     const username = normalizeAdminUsername(input.username);
@@ -183,7 +141,7 @@ export class AdminIdentityService {
       const result = database.prepare("INSERT INTO users(username, email, password_hash, role) VALUES (?, ?, ?, ?)").run(username, email, passwordHash, role);
       const userId = Number(result.lastInsertRowid);
       this.setGroups(database, userId, groupIds);
-      return this.user(database, userId);
+      return readAdminUser(database, userId);
     });
   }
 
@@ -199,7 +157,7 @@ export class AdminIdentityService {
     const passwordHash = input.password === undefined ? undefined : generateWerkzeugScryptHash(input.password);
     return this.mutate(context, "user.update", "user", String(id), (database) => {
       this.ensureEditors(database);
-      this.user(database, id);
+      readAdminUser(database, id);
       const fields: string[] = [];
       const values: string[] = [];
       if (username !== undefined) { fields.push("username = ?"); values.push(username); }
@@ -211,7 +169,7 @@ export class AdminIdentityService {
         database.prepare("DELETE FROM api_tokens WHERE user_id = ?").run(id);
         markRevokedBefore(database, id);
       }
-      return this.user(database, id);
+      return readAdminUser(database, id);
     });
   }
 
@@ -220,7 +178,7 @@ export class AdminIdentityService {
     const role = normalizeAdminRole(roleValue);
     return this.mutate(context, "user.role.update", "user", String(id), (database) => {
       this.ensureEditors(database);
-      const current = this.user(database, id);
+      const current = readAdminUser(database, id);
       if (id === context.actorUserId && role !== "admin") throw new AdminError("self_demotion_forbidden", 409, "administrators cannot demote themselves");
       if (current.role === "admin" && role !== "admin") {
         const count = Number((database.prepare("SELECT COUNT(*) AS count FROM users WHERE role = 'admin'").get() as { count: number }).count);
@@ -231,7 +189,7 @@ export class AdminIdentityService {
         database.prepare("DELETE FROM api_tokens WHERE user_id = ?").run(id);
         markRevokedBefore(database, id);
       }
-      return this.user(database, id);
+      return readAdminUser(database, id);
     });
   }
 
@@ -241,7 +199,7 @@ export class AdminIdentityService {
     return this.mutate(context, disabledValue ? "user.account.disabled" : "user.account.enabled", "user", String(id), (database) => {
       if (!hasAccountStateColumn(database)) throw new AdminError("account_state_unavailable", 503, "account state is unavailable");
       this.ensureEditors(database);
-      const current = this.user(database, id);
+      const current = readAdminUser(database, id);
       if (id === context.actorUserId && disabledValue) throw new AdminError("self_disable_forbidden", 409, "administrators cannot disable themselves");
       if (current.role === "admin" && disabledValue && current.disabled_at === null) {
         const count = Number((database.prepare("SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND disabled_at IS NULL").get() as { count: number }).count);
@@ -250,7 +208,7 @@ export class AdminIdentityService {
       const next = disabledValue ? new Date().toISOString() : null;
       database.prepare("UPDATE users SET disabled_at = ? WHERE id = ?").run(next, id);
       if (disabledValue) invalidateAccountAccess(database, id);
-      return this.user(database, id);
+      return readAdminUser(database, id);
     });
   }
 
@@ -268,7 +226,7 @@ export class AdminIdentityService {
     return this.mutate(context, `user.account.${status}`, "user", String(id), (database) => {
       if (!hasAccountStatusColumn(database)) throw new AdminError("account_status_unavailable", 503, "account status is unavailable");
       this.ensureEditors(database);
-      const current = this.user(database, id);
+      const current = readAdminUser(database, id);
       if (id === context.actorUserId && status !== "active") throw new AdminError("self_status_change_forbidden", 409, "administrators cannot suspend or ban themselves");
       if (current.role === "admin" && status !== "active" && current.account_status === "active") {
         const count = Number((database.prepare("SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND disabled_at IS NULL AND account_status = 'active'").get() as { count: number }).count);
@@ -278,7 +236,7 @@ export class AdminIdentityService {
       database.prepare("UPDATE users SET account_status = ?, status_reason = ?, status_actor_user_id = ?, status_changed_at = ?, status_expires_at = ?, disabled_at = CASE WHEN ? = 'active' THEN NULL ELSE disabled_at END WHERE id = ?")
         .run(status, reason || null, context.actorUserId, now, expiresAt, status, id);
       if (status !== "active") invalidateAccountAccess(database, id);
-      return this.user(database, id);
+      return readAdminUser(database, id);
     });
   }
 
@@ -287,7 +245,7 @@ export class AdminIdentityService {
     const groupIds = normalizeAdminGroupIds(value);
     return this.mutate(context, "user.groups.replace", "user", String(id), (database) => {
       this.ensureEditors(database);
-      this.user(database, id);
+      readAdminUser(database, id);
       this.assertGroups(database, groupIds);
       const before = (database.prepare("SELECT group_id FROM user_groups WHERE user_id = ? ORDER BY group_id").all(id) as Array<{ group_id: number }>).map((row) => row.group_id);
       if (before.join(",") !== [...groupIds].sort((a, b) => a - b).join(",")) {
@@ -295,7 +253,7 @@ export class AdminIdentityService {
         database.prepare("DELETE FROM api_tokens WHERE user_id = ?").run(id);
         markRevokedBefore(database, id);
       }
-      return this.user(database, id);
+      return readAdminUser(database, id);
     });
   }
 
@@ -303,7 +261,7 @@ export class AdminIdentityService {
     const id = positiveAdminId(userId, "user_id");
     return this.mutate(context, "user.delete", "user", String(id), (database) => {
       this.ensureEditors(database);
-      const current = this.user(database, id);
+      const current = readAdminUser(database, id);
       if (id === context.actorUserId) throw new AdminError("self_deletion_forbidden", 409, "administrators cannot delete themselves");
       if (current.role === "admin") {
         const count = Number((database.prepare("SELECT COUNT(*) AS count FROM users WHERE role = 'admin'").get() as { count: number }).count);
