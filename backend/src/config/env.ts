@@ -24,6 +24,7 @@ import { resolveRuntimeMode } from "./env-runtime-mode.js";
 import { resolveNetworkConfig } from "./env-network.js";
 import { resolveSessionCookieConfig } from "./env-session.js";
 import { resolveSamlLimitsConfig } from "./env-saml-limits.js";
+import { resolveSubmissionLimitsConfig } from "./env-submission-limits.js";
 import { resolveWebAuthnConfig } from "./env-webauthn.js";
 
 export type { BackendConfig } from "./env-contracts.js";
@@ -367,45 +368,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
     submissionWriteEnabled,
     submissionWriteMode,
     submissionDisposableRoot: submissionWriteEnabled ? path.resolve(submissionDisposableRoot as string) : undefined,
-    submissionMaxArchiveBytes: positiveInteger(
-      "PRG32_BACKEND_SUBMISSION_MAX_ARCHIVE_BYTES",
-      environment.PRG32_BACKEND_SUBMISSION_MAX_ARCHIVE_BYTES,
-      64 * 1024 * 1024
-    ),
-    submissionMaxEntries: positiveInteger(
-      "PRG32_BACKEND_SUBMISSION_MAX_ENTRIES",
-      environment.PRG32_BACKEND_SUBMISSION_MAX_ENTRIES,
-      128
-    ),
-    submissionMaxEntryUncompressedBytes: positiveInteger(
-      "PRG32_BACKEND_SUBMISSION_MAX_ENTRY_BYTES",
-      environment.PRG32_BACKEND_SUBMISSION_MAX_ENTRY_BYTES,
-      32 * 1024 * 1024
-    ),
-    submissionMaxTotalUncompressedBytes: positiveInteger(
-      "PRG32_BACKEND_SUBMISSION_MAX_TOTAL_BYTES",
-      environment.PRG32_BACKEND_SUBMISSION_MAX_TOTAL_BYTES,
-      128 * 1024 * 1024
-    ),
-    submissionMaxCompressionRatio: (() => {
-      const candidate = environment.PRG32_BACKEND_SUBMISSION_MAX_COMPRESSION_RATIO === undefined
-        ? 100
-        : Number(environment.PRG32_BACKEND_SUBMISSION_MAX_COMPRESSION_RATIO);
-      if (!Number.isFinite(candidate) || candidate <= 0) {
-        throw new Error("PRG32_BACKEND_SUBMISSION_MAX_COMPRESSION_RATIO must be positive");
-      }
-      return candidate;
-    })(),
-    submissionMaxManifestBytes: positiveInteger(
-      "PRG32_BACKEND_SUBMISSION_MAX_MANIFEST_BYTES",
-      environment.PRG32_BACKEND_SUBMISSION_MAX_MANIFEST_BYTES,
-      256 * 1024
-    ),
-    reviewMaxSubmissions: positiveInteger(
-      "PRG32_BACKEND_REVIEW_MAX_SUBMISSIONS",
-      environment.PRG32_BACKEND_REVIEW_MAX_SUBMISSIONS,
-      1000
-    ),
+    ...resolveSubmissionLimitsConfig(environment),
     metricsWriteEnabled,
     metricsWriteMode,
     metricsDisposableRoot: metricsWriteEnabled ? path.resolve(metricsDisposableRoot as string) : undefined,
