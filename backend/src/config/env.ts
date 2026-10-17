@@ -12,6 +12,7 @@ import {
   requiredSecret,
 } from "./env-values.js";
 import type { BackendConfig } from "./env-contracts.js";
+import { resolveAuthLimitsConfig } from "./env-auth-limits.js";
 import { resolveEmailConfig } from "./env-email.js";
 import { resolveMultiplayerConfig } from "./env-multiplayer.js";
 import {
@@ -331,40 +332,16 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
     authCookieSecure,
     authCookieSameSite,
     authCookieDomain,
-    authSessionLifetimeSeconds: positiveInteger(
-      "PRG32_BACKEND_SESSION_LIFETIME_SECONDS",
-      environment.PRG32_BACKEND_SESSION_LIFETIME_SECONDS,
-      8 * 60 * 60
-    ),
+    ...resolveAuthLimitsConfig(environment),
     federationAutoProvision,
     authBootstrapToken,
     federationLifecycleTestToken: authWriteMode === "test" ? federationLifecycleTestToken : undefined,
     federationLifecycleTestEnabled,
-    authRecentReauthSeconds: positiveInteger(
-      "PRG32_BACKEND_AUTH_RECENT_REAUTH_SECONDS",
-      environment.PRG32_BACKEND_AUTH_RECENT_REAUTH_SECONDS,
-      5 * 60
-    ),
     webauthnEnabled,
     webauthnRpId,
     webauthnRpName,
     webauthnOrigins,
     setupNetworkTestAllowlist,
-    authRateLimitMax: positiveInteger(
-      "PRG32_BACKEND_AUTH_RATE_LIMIT_MAX",
-      environment.PRG32_BACKEND_AUTH_RATE_LIMIT_MAX,
-      5
-    ),
-    authRateLimitWindowSeconds: positiveInteger(
-      "PRG32_BACKEND_AUTH_RATE_LIMIT_WINDOW_SECONDS",
-      environment.PRG32_BACKEND_AUTH_RATE_LIMIT_WINDOW_SECONDS,
-      60
-    ),
-    authRateLimitMaxClients: positiveInteger(
-      "PRG32_BACKEND_AUTH_RATE_LIMIT_MAX_CLIENTS",
-      environment.PRG32_BACKEND_AUTH_RATE_LIMIT_MAX_CLIENTS,
-      4096
-    ),
     httpRequestTimeoutMs: positiveInteger(
       "PRG32_BACKEND_HTTP_REQUEST_TIMEOUT_MS",
       environment.PRG32_BACKEND_HTTP_REQUEST_TIMEOUT_MS,
