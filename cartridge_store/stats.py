@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 import hashlib
-import re
 import time
 from typing import Any
 
@@ -15,28 +14,7 @@ from .auth import current_principal
 from .database import get_db
 from .settings import get_setting
 from .store import GameStore, StoreError
-
-
-STATS_SCHEMA = """
-CREATE TABLE IF NOT EXISTS download_events (
-    id            INTEGER PRIMARY KEY AUTOINCREMENT,
-    game_id       TEXT NOT NULL,
-    version       TEXT NOT NULL,
-    architecture  TEXT NOT NULL,
-    user_id       INTEGER,
-    ip_hash       TEXT,
-    user_agent    TEXT,
-    downloaded_at TEXT NOT NULL DEFAULT (datetime('now'))
-);
-
-CREATE INDEX IF NOT EXISTS download_events_game_idx
-ON download_events(game_id, downloaded_at);
-
-CREATE INDEX IF NOT EXISTS download_events_arch_idx
-ON download_events(architecture);
-"""
-
-DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+from .stats_contracts import *
 
 
 def init_stats_db() -> None:
