@@ -3,7 +3,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "../ui/button";
 import { useSensitiveActions } from "./use-sensitive-actions";
@@ -22,6 +22,7 @@ import {
   StatusBadge,
   TextArea,
 } from "./presentation";
+import { useProviderForm } from "./use-provider-form";
 
 export function FederationOverview() {
   const query = useQuery({ queryKey: federationQueryKeys.providers(), queryFn: federationAdminApi.listProviders, retry: false });
@@ -46,43 +47,51 @@ export function ProviderList() {
 type ProviderFormProps = { protocol: "oidc" | "saml"; provider?: FederationProvider; onSubmit: (input: FederationProviderInput | Omit<FederationProviderInput, "provider_id" | "protocol" | "issuer">) => void; pending: boolean; error?: unknown; onCancel: () => void; clearSensitive?: () => void };
 
 export function ProviderForm({ protocol, provider, onSubmit, pending, error, onCancel, clearSensitive }: ProviderFormProps) {
-  const [providerId, setProviderId] = useState(provider?.provider_id ?? "");
-  const [displayName, setDisplayName] = useState(provider?.display_name ?? "");
-  const [issuer, setIssuer] = useState(provider?.issuer ?? "");
-  const [clientId, setClientId] = useState(provider?.client_id ?? "");
-  const [clientAuthMethod, setClientAuthMethod] = useState<FederationProvider["client_auth_method"]>(provider?.client_auth_method ?? "client_secret_basic");
-  const [clientSecret, setClientSecret] = useState("");
-  const [discoveryIssuer, setDiscoveryIssuer] = useState(provider?.discovery_issuer ?? "");
-  const [redirectUri, setRedirectUri] = useState(provider?.redirect_uri ?? "");
-  const [scopes, setScopes] = useState(provider?.scopes.join(", ") ?? "openid, profile");
-  const [idpEntityId, setIdpEntityId] = useState(provider?.idp_entity_id ?? "");
-  const [spEntityId, setSpEntityId] = useState(provider?.sp_entity_id ?? "");
-  const [acsUrl, setAcsUrl] = useState(provider?.acs_url ?? "");
-  const [entryPoint, setEntryPoint] = useState(provider?.saml_entry_point ?? "");
-  const [certificate, setCertificate] = useState("");
-  const [trustedCertificates, setTrustedCertificates] = useState("");
-  const [assertionsSigned, setAssertionsSigned] = useState(provider?.saml_want_assertions_signed ?? true);
-  const [responsesSigned, setResponsesSigned] = useState(provider?.saml_want_authn_response_signed ?? true);
-  const [signRequests, setSignRequests] = useState(provider?.saml_sign_authn_requests ?? false);
-  const [formError, setFormError] = useState("");
-  const publicOrigin = publicApiPath("/").replace(/\/$/, "");
-  const canonicalRedirect = `${publicOrigin}/api/auth/oidc/${encodeURIComponent(providerId || "<provider-id>")}/callback`;
-  const canonicalAcs = `${publicOrigin}/api/auth/saml/${encodeURIComponent(providerId || "<provider-id>")}/acs`;
-  const submit = (event: FormEvent) => {
-    event.preventDefault(); setFormError("");
-    if (!displayName.trim() || !issuer.trim() || (!provider && !providerId.trim())) { setFormError("Complete the required fields."); return; }
-    if (protocol === "oidc" && clientAuthMethod !== "none" && !provider && !clientSecret) { setFormError("A client secret is required for this authentication method."); return; }
-    if (protocol === "saml" && (!idpEntityId || !spEntityId || !entryPoint || !(certificate || trustedCertificates))) { setFormError("SAML entity IDs, SSO URL, and a trusted certificate are required."); return; }
-    const trustSet = (trustedCertificates.trim() || certificate.trim()).split(/\n\s*\n/).map((value) => value.trim()).filter(Boolean);
-    const input: FederationProviderInput = protocol === "oidc" ? {
-      provider_id: provider?.provider_id ?? providerId.trim(), protocol, display_name: displayName.trim(), issuer: issuer.trim(), client_id: clientId.trim() || undefined, client_auth_method: clientAuthMethod, client_secret: clientSecret || undefined, discovery_issuer: discoveryIssuer.trim() || undefined, redirect_uri: redirectUri.trim() || canonicalRedirect, scopes: scopes.split(",").map((value) => value.trim()).filter(Boolean),
-    } : {
-      provider_id: provider?.provider_id ?? providerId.trim(), protocol, display_name: displayName.trim(), issuer: issuer.trim() || idpEntityId.trim(), idp_entity_id: idpEntityId.trim(), sp_entity_id: spEntityId.trim(), acs_url: acsUrl.trim() || canonicalAcs, saml_entry_point: entryPoint.trim(), saml_name_id_format: "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent", ...(trustSet.length ? { saml_idp_certificate_pem: trustSet[0], saml_trusted_certificates_pem: trustSet } : {}), saml_want_assertions_signed: assertionsSigned, saml_want_authn_response_signed: responsesSigned, saml_sign_authn_requests: signRequests,
-    };
-    onSubmit(provider ? Object.fromEntries(Object.entries(input).filter(([key]) => !["provider_id", "protocol", "issuer", "client_secret"].includes(key))) as Omit<FederationProviderInput, "provider_id" | "protocol" | "issuer"> : input);
-  };
+  const {
+    providerId,
+    setProviderId,
+    displayName,
+    setDisplayName,
+    issuer,
+    setIssuer,
+    clientId,
+    setClientId,
+    clientAuthMethod,
+    setClientAuthMethod,
+    clientSecret,
+    setClientSecret,
+    discoveryIssuer,
+    setDiscoveryIssuer,
+    redirectUri,
+    setRedirectUri,
+    scopes,
+    setScopes,
+    idpEntityId,
+    setIdpEntityId,
+    spEntityId,
+    setSpEntityId,
+    acsUrl,
+    setAcsUrl,
+    entryPoint,
+    setEntryPoint,
+    certificate,
+    setCertificate,
+    trustedCertificates,
+    setTrustedCertificates,
+    assertionsSigned,
+    setAssertionsSigned,
+    responsesSigned,
+    setResponsesSigned,
+    signRequests,
+    setSignRequests,
+    formError,
+    canonicalRedirect,
+    canonicalAcs,
+    resetSensitive,
+    submit,
+  } = useProviderForm({ protocol, provider, onSubmit });
   const visibleError = formError || (error ? federationErrorMessage(error) : "");
-  return <form className="space-y-5" onSubmit={submit} onReset={() => { setClientSecret(""); setCertificate(""); clearSensitive?.(); }}><div className="grid gap-4 md:grid-cols-2"><Field label="Display name" required value={displayName} onChange={(event) => setDisplayName(event.target.value)} /><Field label="Issuer" required value={issuer} onChange={(event) => setIssuer(event.target.value)} hint={protocol === "saml" ? "For SAML this must equal the IdP Entity ID." : "The Identity Provider issuer URL."} />{!provider && <Field label="Provider ID" required pattern="[a-z][a-z0-9._-]{0,63}" value={providerId} onChange={(event) => setProviderId(event.target.value)} hint="Lowercase identifier; immutable after creation." />}</div>{protocol === "oidc" ? <div className="grid gap-4 md:grid-cols-2"><Field label="Client ID" value={clientId} onChange={(event) => setClientId(event.target.value)} /><label className="grid gap-1 text-sm font-medium"><span>Client authentication method</span><select value={clientAuthMethod} onChange={(event) => setClientAuthMethod(event.target.value as FederationProvider["client_auth_method"])} className="min-h-10 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3"><option value="client_secret_basic">client_secret_basic</option><option value="client_secret_post">client_secret_post</option><option value="none">none</option></select></label><Field label={provider ? "New client secret (optional)" : "Client secret"} type="password" value={clientSecret} onChange={(event) => setClientSecret(event.target.value)} autoComplete="new-password" hint="Never displayed again; use rotation later to replace it." /><Field label="Discovery issuer (optional)" value={discoveryIssuer} onChange={(event) => setDiscoveryIssuer(event.target.value)} /><Field label="Redirect URI" value={redirectUri || canonicalRedirect} onChange={(event) => setRedirectUri(event.target.value)} hint="Verify this against the backend public origin before saving." /><Field label="Scopes" value={scopes} onChange={(event) => setScopes(event.target.value)} hint="Comma-separated; include openid for usable OIDC login." /></div> : <div className="grid gap-4 md:grid-cols-2"><Field label="IdP Entity ID" required value={idpEntityId} onChange={(event) => { setIdpEntityId(event.target.value); if (!issuer) setIssuer(event.target.value); }} /><Field label="IdP SSO URL" required value={entryPoint} onChange={(event) => setEntryPoint(event.target.value)} /><Field label="SP Entity ID" required value={spEntityId} onChange={(event) => setSpEntityId(event.target.value)} /><Field label="ACS URL" value={acsUrl || canonicalAcs} onChange={(event) => setAcsUrl(event.target.value)} hint="Canonical callback: verify the configured public origin." /><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={assertionsSigned} onChange={(event) => setAssertionsSigned(event.target.checked)} />Require signed assertions</label><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={responsesSigned} onChange={(event) => setResponsesSigned(event.target.checked)} />Require signed responses</label></div>} {protocol === "saml" && <div className="space-y-4"><TextArea label="Trusted IdP certificate PEM" required={!provider} value={certificate} onChange={(event) => setCertificate(event.target.value)} hint="PEM is submitted only to the certificate mutation. Existing PEM is never returned." /><TextArea label="Replacement trust set (optional)" value={trustedCertificates} onChange={(event) => setTrustedCertificates(event.target.value)} hint="Separate certificates with a blank line; maximum two trusted certificates." /><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={signRequests} onChange={(event) => setSignRequests(event.target.checked)} />Sign authentication requests (requires backend-managed key material)</label></div>} {visibleError && <Notice error={visibleError} />}<div className="flex flex-wrap justify-end gap-2"><Button type="button" variant="secondary" onClick={() => { setClientSecret(""); setCertificate(""); clearSensitive?.(); onCancel(); }}>Cancel</Button><Button disabled={pending}>{pending ? "Saving…" : provider ? "Save changes" : "Create provider"}</Button></div></form>;
+  return <form className="space-y-5" onSubmit={submit} onReset={() => { resetSensitive(); clearSensitive?.(); }}><div className="grid gap-4 md:grid-cols-2"><Field label="Display name" required value={displayName} onChange={(event) => setDisplayName(event.target.value)} /><Field label="Issuer" required value={issuer} onChange={(event) => setIssuer(event.target.value)} hint={protocol === "saml" ? "For SAML this must equal the IdP Entity ID." : "The Identity Provider issuer URL."} />{!provider && <Field label="Provider ID" required pattern="[a-z][a-z0-9._-]{0,63}" value={providerId} onChange={(event) => setProviderId(event.target.value)} hint="Lowercase identifier; immutable after creation." />}</div>{protocol === "oidc" ? <div className="grid gap-4 md:grid-cols-2"><Field label="Client ID" value={clientId} onChange={(event) => setClientId(event.target.value)} /><label className="grid gap-1 text-sm font-medium"><span>Client authentication method</span><select value={clientAuthMethod} onChange={(event) => setClientAuthMethod(event.target.value as FederationProvider["client_auth_method"])} className="min-h-10 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3"><option value="client_secret_basic">client_secret_basic</option><option value="client_secret_post">client_secret_post</option><option value="none">none</option></select></label><Field label={provider ? "New client secret (optional)" : "Client secret"} type="password" value={clientSecret} onChange={(event) => setClientSecret(event.target.value)} autoComplete="new-password" hint="Never displayed again; use rotation later to replace it." /><Field label="Discovery issuer (optional)" value={discoveryIssuer} onChange={(event) => setDiscoveryIssuer(event.target.value)} /><Field label="Redirect URI" value={redirectUri || canonicalRedirect} onChange={(event) => setRedirectUri(event.target.value)} hint="Verify this against the backend public origin before saving." /><Field label="Scopes" value={scopes} onChange={(event) => setScopes(event.target.value)} hint="Comma-separated; include openid for usable OIDC login." /></div> : <div className="grid gap-4 md:grid-cols-2"><Field label="IdP Entity ID" required value={idpEntityId} onChange={(event) => { setIdpEntityId(event.target.value); if (!issuer) setIssuer(event.target.value); }} /><Field label="IdP SSO URL" required value={entryPoint} onChange={(event) => setEntryPoint(event.target.value)} /><Field label="SP Entity ID" required value={spEntityId} onChange={(event) => setSpEntityId(event.target.value)} /><Field label="ACS URL" value={acsUrl || canonicalAcs} onChange={(event) => setAcsUrl(event.target.value)} hint="Canonical callback: verify the configured public origin." /><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={assertionsSigned} onChange={(event) => setAssertionsSigned(event.target.checked)} />Require signed assertions</label><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={responsesSigned} onChange={(event) => setResponsesSigned(event.target.checked)} />Require signed responses</label></div>} {protocol === "saml" && <div className="space-y-4"><TextArea label="Trusted IdP certificate PEM" required={!provider} value={certificate} onChange={(event) => setCertificate(event.target.value)} hint="PEM is submitted only to the certificate mutation. Existing PEM is never returned." /><TextArea label="Replacement trust set (optional)" value={trustedCertificates} onChange={(event) => setTrustedCertificates(event.target.value)} hint="Separate certificates with a blank line; maximum two trusted certificates." /><label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={signRequests} onChange={(event) => setSignRequests(event.target.checked)} />Sign authentication requests (requires backend-managed key material)</label></div>} {visibleError && <Notice error={visibleError} />}<div className="flex flex-wrap justify-end gap-2"><Button type="button" variant="secondary" onClick={() => { resetSensitive(); clearSensitive?.(); onCancel(); }}>Cancel</Button><Button disabled={pending}>{pending ? "Saving…" : provider ? "Save changes" : "Create provider"}</Button></div></form>;
 }
 
 export function NewProvider() {
