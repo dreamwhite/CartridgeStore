@@ -7,7 +7,10 @@ import type Database from "better-sqlite3";
 import type { Principal } from "../auth/principal.js";
 import type { BackendConfig } from "../config/env.js";
 import { ReviewError, type ReviewErrorCode } from "../review/errors.js";
-import type { OwnedSubmissionPage, ReviewWorkflowService, SubmissionRecord } from "../review/service.js";
+import type {
+  ReviewWorkflowService,
+  SubmissionRecord
+} from "../review/service.js";
 import { SubmissionError } from "../submission/errors.js";
 import { normalizeArchitecture, validateCartridgeBinary } from "../submission/prg32.js";
 import { type SubmissionResult } from "../submission/service.js";
@@ -35,7 +38,6 @@ import {
   parseJson,
   publicationMetadata,
   sha256,
-  submissionStatus,
   uuid,
 } from "./workflow-codecs.js";
 import {
@@ -59,6 +61,10 @@ import {
   type CanonicalWorkflowManifest,
 } from "./workflow-visibility.js";
 import { recordCanonicalDownload } from "./workflow-downloads.js";
+import {
+  listCanonicalSubmissions,
+  listOwnedCanonicalSubmissions
+} from "./workflow-queries.js";
 
 export type {
   CanonicalDownloadEvent,
@@ -68,8 +74,6 @@ export type {
 
 const WORKFLOW_JOURNAL_VERSION = 1;
 const MAX_OPERATION_BYTES = 2 * 1024 * 1024;
-const MAX_SUBMISSION_PAGE = 100;
-
 type ObjectPlan = CanonicalObjectPlan;
 
 interface OperationRow {
@@ -214,24 +218,18 @@ export class CanonicalWorkflowService implements ReviewWorkflowService {
   }
 
   list(status: string | undefined): SubmissionRecord[] {
-    const normalized = status === undefined || status === "all" ? undefined : status === "pending" ? "pending_review" : status === "verified" ? "published" : status;
-    const rows = normalized === undefined
-      ? this.database.prepare("SELECT submission_id, cartridge_id, version, status, submitted_by_user_id, submitted_by, reviewed_by_user_id, reviewed_by, created_at, reviewed_at, published_release_id, revision_of_submission_id, revision_number FROM submissions ORDER BY created_at DESC, submission_id DESC LIMIT 1000").all()
-      : this.database.prepare("SELECT submission_id, cartridge_id, version, status, submitted_by_user_id, submitted_by, reviewed_by_user_id, reviewed_by, created_at, reviewed_at, published_release_id, revision_of_submission_id, revision_number FROM submissions WHERE status = ? ORDER BY created_at DESC, submission_id DESC LIMIT 1000").all(normalized);
-    return (rows as CanonicalSubmissionRow[]).map((row) => this.record(row));
+    return listCanonicalSubmissions(this.database, status);
   }
 
-  listMine(userId: number, status: string | undefined, page = 1, perPage = 25): OwnedSubmissionPage {
-    if (!Number.isSafeInteger(userId) || userId <= 0 || !Number.isSafeInteger(page) || page <= 0 || !Number.isSafeInteger(perPage) || perPage <= 0 || perPage > MAX_SUBMISSION_PAGE) fail("submission pagination is invalid");
-    const normalized = status === undefined || status === "all" ? undefined : status === "pending" ? "pending_review" : status === "verified" ? "published" : status;
-    const where = normalized === undefined ? "submitted_by_user_id = ?" : "submitted_by_user_id = ? AND status = ?";
-    const params = normalized === undefined ? [userId] : [userId, normalized];
-    const total = Number((this.database.prepare(`SELECT COUNT(*) AS total FROM submissions WHERE ${where}`).get(...params) as { total: number }).total);
-    const pages = Math.ceil(total / perPage);
-    const rows = normalized === undefined
-      ? this.database.prepare(`SELECT submission_id, cartridge_id, version, status, created_at, reviewed_at, (SELECT title FROM releases WHERE release_id = submissions.published_release_id) AS title FROM submissions WHERE ${where} ORDER BY created_at DESC, submission_id DESC LIMIT ? OFFSET ?`).all(userId, perPage, (page - 1) * perPage)
-      : this.database.prepare(`SELECT submission_id, cartridge_id, version, status, created_at, reviewed_at, (SELECT title FROM releases WHERE release_id = submissions.published_release_id) AS title FROM submissions WHERE ${where} ORDER BY created_at DESC, submission_id DESC LIMIT ? OFFSET ?`).all(userId, normalized, perPage, (page - 1) * perPage);
-    return { submissions: (rows as Array<{ submission_id: number; cartridge_id: string; version: string; status: string; title: string | null; created_at: string; reviewed_at: string | null }>).map((row) => ({ id: row.submission_id, game_id: row.cartridge_id, title: row.title || row.cartridge_id, version: row.version, status: submissionStatus(row.status), created_at: row.created_at, reviewed_at: row.reviewed_at })), pagination: { page, per_page: perPage, total, pages, has_next: page < pages, has_prev: page > 1 && pages > 0, next_page: page < pages ? page + 1 : null, prev_page: page > 1 && pages > 0 ? page - 1 : null } };
+  listMine(userId: number, status: string | undefined, page = 1, perPage = 25) {
+    return listOwnedCanonicalSubmissions(
+      this.database,
+      userId,
+      status,
+      page,
+      perPage,
+      fail
+    );
   }
 
   detail(submissionId: number): SubmissionRecord { return this.record(this.submissionRow(submissionId)); }
