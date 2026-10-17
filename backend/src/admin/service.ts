@@ -1,11 +1,26 @@
 import type Database from "better-sqlite3";
 
 import { markRevokedBefore } from "../auth/revocation.js";
-import { accountStatus, hasAccountStateColumn, hasAccountStatusColumn, invalidateAccountAccess, type AccountStatus } from "../auth/account-state.js";
+import { accountStatus, hasAccountStateColumn, hasAccountStatusColumn, invalidateAccountAccess } from "../auth/account-state.js";
 import { generateWerkzeugScryptHash, validatePassword } from "../auth/service.js";
 import { ROLE_LEVELS, normalizeRole, type Role } from "../auth/principal.js";
 import type { BackendConfig } from "../config/env.js";
 import { AdminAuditLog } from "./audit.js";
+import {
+  type AdminMutationContext,
+  type GroupView,
+  type UserCreateInput,
+  type UserUpdateInput,
+  type UserView,
+} from "./service-contracts.js";
+
+export type {
+  AdminMutationContext,
+  GroupView,
+  UserCreateInput,
+  UserUpdateInput,
+  UserView,
+} from "./service-contracts.js";
 
 const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 const USERNAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
@@ -13,50 +28,6 @@ const GROUP_RE = /^[a-z][a-z0-9_-]{0,63}$/;
 const MAX_GROUP_IDS = 50;
 
 type DatabaseSource = Database.Database | (() => Database.Database);
-
-export interface AdminMutationContext {
-  readonly actorUserId: number;
-  readonly requestId: string;
-}
-
-export interface UserCreateInput {
-  readonly username: string;
-  readonly email: string;
-  readonly password: string;
-  readonly passwordConfirm?: string;
-  readonly role?: string;
-  readonly groupIds?: readonly number[];
-}
-
-export interface UserUpdateInput {
-  readonly username?: string;
-  readonly email?: string;
-  readonly password?: string;
-  readonly passwordConfirm?: string;
-}
-
-export interface UserView {
-  readonly id: number;
-  readonly username: string;
-  readonly email: string;
-  readonly role: Role;
-  readonly external_provider: string | null;
-  readonly created_at: string;
-  readonly last_login: string | null;
-  readonly groups: readonly GroupView[];
-  readonly disabled_at: string | null;
-  readonly account_status: AccountStatus;
-  readonly status_reason: string | null;
-  readonly status_changed_at: string | null;
-  readonly status_expires_at: string | null;
-}
-
-export interface GroupView {
-  readonly id: number;
-  readonly name: string;
-  readonly created_at: string;
-  readonly user_count: number;
-}
 
 export class AdminError extends Error {
   constructor(readonly code: string, readonly statusCode: number, message: string) {
