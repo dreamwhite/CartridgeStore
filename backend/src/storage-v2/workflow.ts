@@ -22,20 +22,21 @@ import { CanonicalWriterLease } from "./writer-lock.js";
 import { CANONICAL_OPERATIONAL_WORKFLOW_MODE, CANONICAL_WRITE_AUTHORIZATION, CANONICAL_WORKFLOW_MODE } from "./read-mode.js";
 import { assertSubmissionStagingSafe } from "./staging-audit.js";
 import type { RuntimePolicy } from "../settings/runtime-policy.js";
+import {
+  type CanonicalDownloadEvent,
+  type CanonicalWorkflowFaultPoint,
+  type CanonicalWorkflowOptions,
+} from "./workflow-contracts.js";
+
+export type {
+  CanonicalDownloadEvent,
+  CanonicalWorkflowFaultPoint,
+  CanonicalWorkflowOptions,
+} from "./workflow-contracts.js";
 
 const WORKFLOW_JOURNAL_VERSION = 1;
 const MAX_OPERATION_BYTES = 2 * 1024 * 1024;
 const MAX_SUBMISSION_PAGE = 100;
-
-export type CanonicalWorkflowFaultPoint =
-  | "before-durable-intent"
-  | "after-durable-intent"
-  | "before-object-promotion"
-  | "after-object-promotion"
-  | "before-visibility"
-  | "after-visibility"
-  | "before-completion"
-  | "during-staging-cleanup";
 
 interface CanonicalSubmissionRow {
   readonly submission_id: number;
@@ -198,23 +199,6 @@ function reviewedMetadata(original: Record<string, unknown>, updates: Record<str
   } catch (error) {
     throw new ReviewError(error instanceof Error ? error.message : "review metadata is invalid", "review_invalid_request", 400, { cause: error });
   }
-}
-
-export interface CanonicalWorkflowOptions {
-  readonly config: BackendConfig;
-  readonly root: string;
-  readonly database: StorageDatabase;
-  readonly fault?: (point: CanonicalWorkflowFaultPoint) => void;
-  readonly policy?: RuntimePolicy;
-}
-
-export interface CanonicalDownloadEvent {
-  readonly gameId: string;
-  readonly version: string;
-  readonly architecture: "esp32c6" | "qemu";
-  readonly userId: number | null;
-  readonly ipAddress: string | null;
-  readonly userAgent: string;
 }
 
 export class CanonicalWorkflowService implements ReviewWorkflowService {
