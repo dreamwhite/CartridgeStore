@@ -5,34 +5,16 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 
 import { ApiRequestError } from "../../lib/api/client";
-import { authorizeSetup, completeSetup, getSetupProgress, getSetupStatus, saveSetupStep, type SetupProgress, type SetupState, type SetupStep, type SetupStatus } from "../../lib/api/setup";
+import { authorizeSetup, completeSetup, getSetupProgress, getSetupStatus, saveSetupStep, type SetupProgress, type SetupStep, type SetupStatus } from "../../lib/api/setup";
 import { SetupValidationTools } from "../../components/setup/SetupValidationTools";
-
-const steps: Array<{ id: SetupStep; label: string; optional?: boolean }> = [
-  { id: "admin", label: "Administrator" },
-  { id: "store", label: "Store" },
-  { id: "registration", label: "Registration" },
-  { id: "security", label: "Security" },
-  { id: "smtp", label: "SMTP", optional: true },
-  { id: "oidc", label: "OIDC", optional: true },
-  { id: "saml", label: "SAML", optional: true },
-  { id: "mdns", label: "mDNS", optional: true },
-  { id: "review", label: "Review" },
-];
+import { SetupField as Field } from "../../components/setup/SetupField";
+import { setupSteps as steps } from "../../components/setup/setup-steps";
 
 type FormState = Record<string, string | boolean>;
 
 function errorMessage(error: unknown): string {
   if (error instanceof ApiRequestError) return error.body?.error ?? error.message;
   return error instanceof Error ? error.message : "The installation request failed.";
-}
-
-function Field({ label, name, type = "text", value, onChange, required = false, help }: { label: string; name: string; type?: string; value: string | boolean; onChange: (value: string | boolean) => void; required?: boolean; help?: string }) {
-  return <label className="grid gap-1 text-sm font-medium" htmlFor={name}>
-    <span>{label}</span>
-    {type === "checkbox" ? <input id={name} name={name} type="checkbox" checked={Boolean(value)} onChange={(event) => onChange(event.target.checked)} className="size-4 accent-violet-700" /> : <input id={name} name={name} type={type} value={String(value)} onChange={(event) => onChange(event.target.value)} required={required} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 font-normal" />}
-    {help ? <span className="text-xs font-normal text-[var(--color-text-muted)]">{help}</span> : null}
-  </label>;
 }
 
 export default function SetupPage() {
