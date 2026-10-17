@@ -15,6 +15,14 @@ import type { FederationLinkChallengeService } from "../federation/link-challeng
 import { SecretStorageError, type SecretStore } from "../secrets/service.js";
 import { BoundedRateLimiter } from "../security/rate-limiter.js";
 import { createCorrelation, parseCorrelation } from "./correlation.js";
+import {
+  assertOidcBoundEndpoint,
+  oidcDigest,
+  oidcUrlOrigin,
+  OidcError,
+  safeOidcReturnPath,
+  safeOidcString,
+} from "./validation.js";
 
 const OIDC_CACHE_TTL_MS = 5 * 60 * 1000;
 const OIDC_MAX_CACHE_ENTRIES = 16;
@@ -22,12 +30,7 @@ const OIDC_MAX_HTTP_BYTES = 1024 * 1024;
 const OIDC_TIMEOUT_SECONDS = 5;
 const OIDC_TRANSACTION_TTL_SECONDS = 300;
 const OIDC_MAX_PENDING_TRANSACTIONS = 4096;
-export class OidcError extends Error {
-  constructor(readonly code: string, readonly statusCode: number, message: string, readonly details?: { readonly link_challenge?: string }) {
-    super(message);
-    this.name = "OidcError";
-  }
-}
+export { OidcError } from "./validation.js";
 
 interface CacheEntry {
   readonly configuration: Configuration;
@@ -52,46 +55,6 @@ export interface OidcCallbackResult {
   readonly returnPath: string;
   readonly sessionCookie: string;
   readonly correlationCookie: string;
-}
-
-function digest(value: string): string {
-  return crypto.createHash("sha256").update(value, "utf8").digest("hex");
-}
-
-function safeString(value: string | null, max: number): string | null {
-  if (value === null || value.length === 0 || value.length > max || hasControlCharacter(value)) return null;
-  return value;
-}
-
-function hasControlCharacter(value: string): boolean {
-  return [...value].some((character) => character.charCodeAt(0) <= 31 || character.charCodeAt(0) === 127);
-}
-
-function safeReturnPath(value: string | null): string {
-  const candidate = value ?? "/";
-  if (candidate.length > 512 || !candidate.startsWith("/") || candidate.startsWith("//") || candidate.includes("\\") || hasControlCharacter(candidate)) {
-    throw new OidcError("oidc_return_path_invalid", 400, "return path is invalid");
-  }
-  return candidate;
-}
-
-function urlOrigin(value: string): URL {
-  let parsed: URL;
-  try { parsed = new URL(value); } catch { throw new OidcError("oidc_provider_invalid", 503, "OIDC provider configuration is invalid"); }
-  if (parsed.username || parsed.password || parsed.hash || (parsed.protocol !== "https:" && parsed.protocol !== "http:")) {
-    throw new OidcError("oidc_provider_invalid", 503, "OIDC provider configuration is invalid");
-  }
-  return parsed;
-}
-
-function assertBoundEndpoint(value: unknown, issuer: URL, allowHttp: boolean): string {
-  if (typeof value !== "string" || value.length === 0 || value.length > 2048) throw new OidcError("oidc_metadata_invalid", 503, "OIDC provider metadata is invalid");
-  let endpoint: URL;
-  try { endpoint = new URL(value); } catch { throw new OidcError("oidc_metadata_invalid", 503, "OIDC provider metadata is invalid"); }
-  if (endpoint.username || endpoint.password || endpoint.hash || (endpoint.protocol !== "https:" && (!allowHttp || endpoint.protocol !== "http:")) || endpoint.origin !== issuer.origin) {
-    throw new OidcError("oidc_metadata_invalid", 503, "OIDC provider metadata is invalid");
-  }
-  return endpoint.toString();
 }
 
 export class OidcService {
@@ -143,14 +106,14 @@ export class OidcService {
   async start(providerId: string, returnTo: string | null, context: OidcRequestContext): Promise<OidcLoginResult> {
     if (!this.loginLimiter.allow(context.ip + ":" + providerId)) throw new OidcError("oidc_rate_limited", 429, "too many OIDC requests");
     const provider = this.requireProvider(providerId);
-    const returnPath = safeReturnPath(returnTo);
+    const returnPath = safeOidcReturnPath(returnTo);
     const configuration = await this.discover(provider);
     const state = oidc.randomState();
     const nonce = oidc.randomNonce();
     const pkceVerifier = oidc.randomPKCECodeVerifier();
     const challenge = await oidc.calculatePKCECodeChallenge(pkceVerifier);
     const browserBinding = crypto.randomBytes(32).toString("base64url");
-    const callbackBinding = digest(provider.redirectUri + "\u0000" + browserBinding);
+    const callbackBinding = oidcDigest(provider.redirectUri + "\u0000" + browserBinding);
     const authorizationUrl = oidc.buildAuthorizationUrl(configuration, {
       redirect_uri: provider.redirectUri,
       response_type: "code",
@@ -181,9 +144,9 @@ export class OidcService {
     const parsed = new URL(requestUrl, provider.redirectUri);
     const correlation = this.parseCorrelation(correlationCookie);
     if (!correlation) throw new OidcError("oidc_browser_binding_failed", 401, "OIDC browser correlation failed");
-    const callbackBinding = digest(provider.redirectUri + "\u0000" + correlation.binding);
+    const callbackBinding = oidcDigest(provider.redirectUri + "\u0000" + correlation.binding);
     if (correlation.transactionId.length < 43) throw new OidcError("oidc_transaction_invalid", 400, "OIDC transaction is invalid");
-    const state = safeString(parsed.searchParams.get("state"), 256);
+    const state = safeOidcString(parsed.searchParams.get("state"), 256);
     if (!state) throw new OidcError("oidc_state_invalid", 400, "OIDC state is invalid");
     let transaction;
     try {
@@ -191,8 +154,8 @@ export class OidcService {
     } catch (error) {
       throw this.mapTransactionError(error);
     }
-    const providerError = safeString(parsed.searchParams.get("error"), 128);
-    const authorizationCode = safeString(parsed.searchParams.get("code"), 4096);
+    const providerError = safeOidcString(parsed.searchParams.get("error"), 128);
+    const authorizationCode = safeOidcString(parsed.searchParams.get("code"), 4096);
     if (providerError) {
       this.auditEvent("federation.oidc.rejected", provider.providerId, context.requestId, "rejected");
       throw new OidcError("oidc_provider_error", 401, "OIDC authentication was not completed");
@@ -253,7 +216,7 @@ export class OidcService {
     const current = this.auth.context(sessionCookie, undefined);
     const session = this.auth.rotateSession(current.session, resolved.userId);
     if (!session) throw new OidcError("oidc_session_unavailable", 503, "authentication session is unavailable");
-    this.auditEvent("federation.oidc.succeeded", enabledProvider.providerId, context.requestId, "committed", digest(enabledProvider.issuer + "\u0000" + claims.sub).slice(0, 32));
+    this.auditEvent("federation.oidc.succeeded", enabledProvider.providerId, context.requestId, "committed", oidcDigest(enabledProvider.issuer + "\u0000" + claims.sub).slice(0, 32));
     return { userId: resolved.userId, returnPath: transaction.returnPath, sessionCookie: session.cookieValue, correlationCookie: "" };
   }
 
@@ -273,7 +236,7 @@ export class OidcService {
     if (!this.config.oidcPublicOrigin) throw new OidcError("oidc_public_origin_missing", 503, "OIDC public origin is not configured");
     if (provider.clientAuthMethod === "none" && provider.clientSecretReference !== null) throw new OidcError("oidc_provider_invalid", 503, "OIDC provider configuration is invalid");
     if (provider.clientAuthMethod !== "none" && provider.clientSecretReference === null) throw new OidcError("oidc_client_secret_missing", 503, "OIDC provider client authentication is unavailable");
-    const redirect = urlOrigin(redirectUri);
+    const redirect = oidcUrlOrigin(redirectUri);
     if (this.config.oidcPublicOrigin && redirect.origin !== new URL(this.config.oidcPublicOrigin).origin) throw new OidcError("oidc_redirect_invalid", 503, "OIDC redirect configuration is invalid");
     const expectedPath = "/api/auth/oidc/" + provider.providerId + "/callback";
     if (redirect.pathname !== expectedPath || redirect.search || redirect.hash) throw new OidcError("oidc_redirect_invalid", 503, "OIDC redirect configuration is invalid");
@@ -297,7 +260,7 @@ export class OidcService {
   }
 
   private async discoverUncached(provider: FederationProviderConfig): Promise<Configuration> {
-    const discoveryIssuer = urlOrigin(provider.discoveryIssuer ?? provider.issuer);
+    const discoveryIssuer = oidcUrlOrigin(provider.discoveryIssuer ?? provider.issuer);
     const allowHttp = this.config.authWriteMode === "test";
     const secret = provider.clientAuthMethod === "none" ? undefined : this.loadClientSecret(provider);
     const authentication = provider.clientAuthMethod === "client_secret_post"
@@ -317,9 +280,9 @@ export class OidcService {
       });
       const metadata = configuration.serverMetadata();
       if (metadata.issuer !== provider.issuer) throw new OidcError("oidc_metadata_issuer_mismatch", 503, "OIDC provider metadata is invalid");
-      assertBoundEndpoint(metadata.authorization_endpoint, discoveryIssuer, allowHttp);
-      assertBoundEndpoint(metadata.token_endpoint, discoveryIssuer, allowHttp);
-      assertBoundEndpoint(metadata.jwks_uri, discoveryIssuer, allowHttp);
+      assertOidcBoundEndpoint(metadata.authorization_endpoint, discoveryIssuer, allowHttp);
+      assertOidcBoundEndpoint(metadata.token_endpoint, discoveryIssuer, allowHttp);
+      assertOidcBoundEndpoint(metadata.jwks_uri, discoveryIssuer, allowHttp);
       return configuration;
     } catch (error) {
       if (error instanceof OidcError) throw error;
@@ -361,8 +324,8 @@ export class OidcService {
   private async verifyIdToken(configuration: Configuration, provider: UsableOidcProvider, idToken: string | null, requestId: string): Promise<JWTPayload> {
     if (!idToken) throw new OidcError("oidc_identity_invalid", 401, "OIDC identity is invalid");
     const metadata = configuration.serverMetadata();
-    const issuer = urlOrigin(provider.discoveryIssuer ?? provider.issuer);
-    const jwksUri = assertBoundEndpoint(metadata.jwks_uri, issuer, this.config.authWriteMode === "test");
+    const issuer = oidcUrlOrigin(provider.discoveryIssuer ?? provider.issuer);
+    const jwksUri = assertOidcBoundEndpoint(metadata.jwks_uri, issuer, this.config.authWriteMode === "test");
     try {
       const response = await this.createFetch(issuer, this.config.authWriteMode === "test")(jwksUri, { method: "GET", headers: {} } as CustomFetchOptions);
       if (!response.ok) throw new Error("OIDC JWKS request failed");
