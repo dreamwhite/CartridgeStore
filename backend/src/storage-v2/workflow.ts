@@ -10,8 +10,7 @@ import { ReviewError, type ReviewErrorCode } from "../review/errors.js";
 import type { OwnedSubmissionPage, ReviewWorkflowService, SubmissionRecord } from "../review/service.js";
 import { SubmissionError } from "../submission/errors.js";
 import { buildSubmissionCartridge, normalizeArchitecture, parseCartridge, validateCartridgeBinary } from "../submission/prg32.js";
-import { parseZipArchive, type ZipEntry } from "../submission/zip.js";
-import { prepareSubmissionBundle, type PreparedSubmissionBundle, type SubmissionResult } from "../submission/service.js";
+import { type SubmissionResult } from "../submission/service.js";
 import { StagingStore } from "./staging.js";
 import { assertExplicitDisposableRoot, assertExplicitOperationalRoot } from "./catalog.js";
 import { safeGameId, safeVersion } from "../catalog/catalog.js";
@@ -54,6 +53,8 @@ import {
   type CanonicalArtifactRow,
   type CanonicalSubmissionRow,
 } from "./workflow-records.js";
+import { canonicalWorkflowPrincipal } from "./workflow-authorization.js";
+import { prepareCanonicalSubmissionBundle } from "./workflow-input.js";
 
 export type {
   CanonicalDownloadEvent,
@@ -120,26 +121,6 @@ function readStaged(root: string, row: CanonicalPayloadArtifact): Buffer {
   return bytes;
 }
 
-function canonicalPrincipal(database: Database.Database, principal: Principal, reviewer = false): { id: number; name: string } {
-  if (!principal.authenticated || principal.id === null || !Number.isSafeInteger(principal.id) || principal.id <= 0) {
-    fail(reviewer ? "reviewer authentication is required" : "login required", "review_not_authorized", 401);
-  }
-  const row = database.prepare("SELECT username, role, disabled_at FROM users WHERE id = ?").get(principal.id) as { username?: string; role?: string; disabled_at?: string | null } | undefined;
-  if (!row || row.disabled_at !== null && row.disabled_at !== undefined) fail("canonical account is unavailable", "review_not_authorized", 403);
-  if (String(row.role).toLowerCase() !== principal.role) fail("canonical account authorization is stale", "review_not_authorized", 403);
-  return { id: principal.id, name: String(row.username ?? principal.name).trim() };
-}
-
-function multipartPrepared(bundle: Uint8Array, config: ConstructorParameters<typeof CanonicalWorkflowService>[0]["config"]): PreparedSubmissionBundle {
-  try {
-    const entries: Map<string, ZipEntry> = parseZipArchive(bundle, config);
-    return prepareSubmissionBundle(entries, config);
-  } catch (error) {
-    if (error instanceof SubmissionError) throw error;
-    throw new SubmissionError("bundle could not be validated", "invalid_request", 400, { cause: error });
-  }
-}
-
 export class CanonicalWorkflowService implements ReviewWorkflowService {
   readonly root: string;
   readonly database: Database.Database;
@@ -201,8 +182,8 @@ export class CanonicalWorkflowService implements ReviewWorkflowService {
   createFromBundle(bundle: Uint8Array, principal: Principal, sourceSubmissionId: number | null = null): SubmissionResult {
     if (this.policy && !this.policy.publishingEnabled()) throw new SubmissionError("publishing is disabled", "invalid_request", 403);
     if (this.policy && bundle.byteLength > this.policy.maxArtifactBytes()) throw new SubmissionError("bundle upload is too large", "submission_payload_too_large", 413);
-    const owner = canonicalPrincipal(this.database, principal);
-    const prepared = multipartPrepared(bundle, this.config);
+    const owner = canonicalWorkflowPrincipal(this.database, principal);
+    const prepared = prepareCanonicalSubmissionBundle(bundle, this.config);
     const metadata = publicationMetadata(prepared.manifest);
     const cartridgeId = safeGameId(String(metadata.id));
     const version = safeVersion(String(metadata.version));
@@ -290,7 +271,7 @@ export class CanonicalWorkflowService implements ReviewWorkflowService {
   detail(submissionId: number): SubmissionRecord { return this.record(this.submissionRow(submissionId)); }
 
   approve(submissionId: number, metadataUpdates: Record<string, unknown>, principal: Principal, note = ""): SubmissionRecord {
-    const reviewer = canonicalPrincipal(this.database, principal, true);
+    const reviewer = canonicalWorkflowPrincipal(this.database, principal, true);
     const row = this.submissionRow(submissionId);
     if (row.status !== "pending_review") fail("submission is not pending", "review_state_conflict");
     const existing = this.database.prepare("SELECT operation_id FROM publication_operations WHERE submission_id = ? AND state NOT IN ('completed', 'failed', 'compensated') ORDER BY created_at DESC LIMIT 1").get(submissionId) as { operation_id?: string } | undefined;
@@ -341,7 +322,7 @@ export class CanonicalWorkflowService implements ReviewWorkflowService {
   }
 
   reject(submissionId: number, principal: Principal, note = ""): SubmissionRecord {
-    const reviewer = canonicalPrincipal(this.database, principal, true);
+    const reviewer = canonicalWorkflowPrincipal(this.database, principal, true);
     if (this.policy?.requireReviewNoteOnRejection() && note.trim().length === 0) fail("a rejection note is required", "review_invalid_request");
     this.database.exec("BEGIN IMMEDIATE");
     try {
