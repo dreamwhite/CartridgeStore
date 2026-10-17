@@ -15,19 +15,18 @@ import { AdminAuditLog } from "./audit.js";
 import {
   normalizeAdminEmail,
   normalizeAdminGroupIds,
-  normalizeAdminGroupName,
   normalizeAdminRole,
   normalizeAdminUsername,
   positiveAdminId
 } from "./codecs.js";
 import { AdminError } from "./errors.js";
+import { AdminGroupService } from "./group-service.js";
 import { runAdminMutation } from "./mutation-runner.js";
 import {
   readAdminUser,
 } from "./user-view.js";
 import {
   listAdminAudit,
-  listAdminGroups,
   listAdminRoles,
   listAdminUsers,
   type AdminUserListOptions,
@@ -55,11 +54,18 @@ export class AdminIdentityService {
   private readonly source: DatabaseSource;
   private readonly writable: Database.Database | null;
   private readonly audit: AdminAuditLog;
+  private readonly groups: AdminGroupService;
 
   constructor(options: { readonly config: BackendConfig; readonly database: DatabaseSource; readonly writableDatabase: Database.Database | null; readonly audit?: AdminAuditLog }) {
     this.source = options.database;
     this.writable = options.writableDatabase;
     this.audit = options.audit ?? new AdminAuditLog(options.config);
+    this.groups = new AdminGroupService({
+      config: options.config,
+      database: options.database,
+      writableDatabase: options.writableDatabase,
+      audit: this.audit,
+    });
   }
 
   private get database(): Database.Database {
@@ -98,10 +104,10 @@ export class AdminIdentityService {
     const passwordHash = generateWerkzeugScryptHash(input.password);
     return this.mutate(context, "user.create", "user", "pending", (database) => {
       this.ensureEditors(database);
-      this.assertGroups(database, groupIds);
+      this.groups.assertGroups(database, groupIds);
       const result = database.prepare("INSERT INTO users(username, email, password_hash, role) VALUES (?, ?, ?, ?)").run(username, email, passwordHash, role);
       const userId = Number(result.lastInsertRowid);
-      this.setGroups(database, userId, groupIds);
+      this.groups.setGroups(database, userId, groupIds);
       return readAdminUser(database, userId);
     });
   }
@@ -207,10 +213,10 @@ export class AdminIdentityService {
     return this.mutate(context, "user.groups.replace", "user", String(id), (database) => {
       this.ensureEditors(database);
       readAdminUser(database, id);
-      this.assertGroups(database, groupIds);
+      this.groups.assertGroups(database, groupIds);
       const before = (database.prepare("SELECT group_id FROM user_groups WHERE user_id = ? ORDER BY group_id").all(id) as Array<{ group_id: number }>).map((row) => row.group_id);
       if (before.join(",") !== [...groupIds].sort((a, b) => a - b).join(",")) {
-        this.setGroups(database, id, groupIds);
+        this.groups.setGroups(database, id, groupIds);
         database.prepare("DELETE FROM api_tokens WHERE user_id = ?").run(id);
         markRevokedBefore(database, id);
       }
@@ -236,42 +242,19 @@ export class AdminIdentityService {
   }
 
   listGroups(limit: number): { readonly groups: readonly GroupView[]; readonly limit: number } {
-    const database = this.database;
-    this.ensureEditors(database);
-    return listAdminGroups(database, limit);
+    return this.groups.listGroups(limit);
   }
 
   createGroup(nameValue: unknown, context: AdminMutationContext): GroupView {
-    const name = normalizeAdminGroupName(nameValue);
-    return this.mutate(context, "group.create", "group", "pending", (database) => {
-      this.ensureEditors(database);
-      const result = database.prepare("INSERT INTO groups(name) VALUES (?)").run(name);
-      return this.group(database, Number(result.lastInsertRowid));
-    });
+    return this.groups.createGroup(nameValue, context);
   }
 
   renameGroup(groupId: number, nameValue: unknown, context: AdminMutationContext): GroupView {
-    const id = positiveAdminId(groupId, "group_id");
-    const name = normalizeAdminGroupName(nameValue);
-    return this.mutate(context, "group.rename", "group", String(id), (database) => {
-      this.ensureEditors(database);
-      const current = this.group(database, id);
-      if (current.name === "editors") throw new AdminError("protected_group", 409, "the editors group cannot be renamed");
-      database.prepare("UPDATE groups SET name = ? WHERE id = ?").run(name, id);
-      return this.group(database, id);
-    });
+    return this.groups.renameGroup(groupId, nameValue, context);
   }
 
   deleteGroup(groupId: number, context: AdminMutationContext): { readonly group_id: number } {
-    const id = positiveAdminId(groupId, "group_id");
-    return this.mutate(context, "group.delete", "group", String(id), (database) => {
-      this.ensureEditors(database);
-      const current = this.group(database, id);
-      if (current.name === "editors") throw new AdminError("protected_group", 409, "the editors group cannot be deleted");
-      database.prepare("DELETE FROM user_groups WHERE group_id = ?").run(id);
-      database.prepare("DELETE FROM groups WHERE id = ?").run(id);
-      return { group_id: id };
-    });
+    return this.groups.deleteGroup(groupId, context);
   }
 
   roles(): readonly Record<string, unknown>[] {
@@ -280,28 +263,5 @@ export class AdminIdentityService {
 
   listAudit(limitValue = 100): { readonly events: readonly Record<string, unknown>[]; readonly limit: number } {
     return listAdminAudit(this.database, limitValue);
-  }
-
-  private group(database: Database.Database, groupId: number): GroupView {
-    const row = database.prepare(
-      `SELECT groups.id, groups.name, groups.created_at, COUNT(user_groups.user_id) AS user_count
-         FROM groups LEFT JOIN user_groups ON user_groups.group_id = groups.id
-        WHERE groups.id = ? GROUP BY groups.id`
-    ).get(groupId) as GroupView | undefined;
-    if (!row) throw new AdminError("group_not_found", 404, "group not found");
-    return row;
-  }
-
-  private assertGroups(database: Database.Database, groupIds: readonly number[]): void {
-    if (!groupIds.length) return;
-    const placeholders = groupIds.map(() => "?").join(",");
-    const rows = database.prepare(`SELECT id FROM groups WHERE id IN (${placeholders})`).all(...groupIds) as Array<{ id: number }>;
-    if (rows.length !== groupIds.length) throw new AdminError("group_not_found", 404, "one or more groups do not exist");
-  }
-
-  private setGroups(database: Database.Database, userId: number, groupIds: readonly number[]): void {
-    database.prepare("DELETE FROM user_groups WHERE user_id = ?").run(userId);
-    const insert = database.prepare("INSERT INTO user_groups(user_id, group_id) VALUES (?, ?)");
-    for (const groupId of groupIds) insert.run(userId, groupId);
   }
 }
