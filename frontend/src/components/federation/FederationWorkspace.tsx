@@ -23,6 +23,7 @@ import {
   TextArea,
 } from "./presentation";
 import { useProviderForm } from "./use-provider-form";
+import { useProviderDetails } from "./use-provider-details";
 
 export function FederationOverview() {
   const query = useQuery({ queryKey: federationQueryKeys.providers(), queryFn: federationAdminApi.listProviders, retry: false });
@@ -103,20 +104,33 @@ export function NewProvider() {
 }
 
 export function ProviderDetails({ providerId }: { providerId: string }) {
-  const current = useCurrentUser(); const manage = hasFederationPermission(current.user, "federation:manage"); const queryClient = useQueryClient(); const providerQuery = useQuery({ queryKey: federationQueryKeys.provider(providerId), queryFn: () => federationAdminApi.getProvider(providerId), retry: false }); const statusQuery = useQuery({ queryKey: federationQueryKeys.status(providerId), queryFn: () => federationAdminApi.getProviderStatus(providerId), retry: false }); const actions = useSensitiveActions(); const [editing, setEditing] = useState(false); const [success, setSuccess] = useState(""); const [error, setError] = useState<unknown>(); const provider = statusQuery.data?.provider ?? providerQuery.data?.provider;
-  const refresh = () => { void queryClient.invalidateQueries({ queryKey: federationQueryKeys.provider(providerId) }); void queryClient.invalidateQueries({ queryKey: federationQueryKeys.status(providerId) }); void queryClient.invalidateQueries({ queryKey: federationQueryKeys.providers() }); };
-  const mutation = useMutation({ mutationFn: (input: Omit<FederationProviderInput, "provider_id" | "protocol" | "issuer">) => federationAdminApi.updateProvider(providerId, input), onSuccess: () => { setSuccess("Provider updated."); setEditing(false); refresh(); } });
-  const stateMutation = useMutation({ mutationFn: (enabled: boolean) => enabled ? federationAdminApi.enableProvider(providerId) : federationAdminApi.disableProvider(providerId), onSuccess: () => { setSuccess("Provider state updated."); refresh(); } });
-  const rotateMutation = useMutation({ mutationFn: (secret: string) => federationAdminApi.rotateSecret(providerId, secret), onSuccess: () => { setSuccess("Client secret rotated; pending transactions may have been invalidated."); refresh(); } });
-  const certMutation = useMutation({ mutationFn: (certificates: string[]) => federationAdminApi.updateCertificates(providerId, certificates), onSuccess: () => { setSuccess("Trusted certificate set updated."); refresh(); } });
-  const revokeMutation = useMutation({ mutationFn: () => federationAdminApi.revokeTransactions(providerId), onSuccess: (result) => { setSuccess(`${result.revoked} pending transaction(s) revoked.`); refresh(); } });
-  const [secret, setSecret] = useState(""); const [certificates, setCertificates] = useState("");
+  const current = useCurrentUser();
+  const manage = hasFederationPermission(current.user, "federation:manage");
+  const actions = useSensitiveActions();
+  const {
+    providerQuery,
+    statusQuery,
+    provider,
+    editing,
+    setEditing,
+    success,
+    error,
+    mutation,
+    stateMutation,
+    rotateMutation,
+    certMutation,
+    revokeMutation,
+    secret,
+    setSecret,
+    certificates,
+    setCertificates,
+    publicOrigin,
+    canonicalRedirect,
+    canonicalAcs,
+    sensitive,
+  } = useProviderDetails(providerId, actions);
   if (providerQuery.isLoading || statusQuery.isLoading) return <p role="status">Loading provider…</p>;
   if (providerQuery.error || !provider) return <div className="space-y-3"><Notice error={providerQuery.error ?? statusQuery.error} /><Link className="text-sm font-semibold text-violet-700" href="/admin/federation/providers">Back to providers</Link></div>;
-  const publicOrigin = publicApiPath("/").replace(/\/$/, "");
-  const canonicalRedirect = `${publicOrigin}/api/auth/oidc/${encodeURIComponent(provider.provider_id)}/callback`;
-  const canonicalAcs = `${publicOrigin}/api/auth/saml/${encodeURIComponent(provider.provider_id)}/acs`;
-  const sensitive = (action: () => void, clear?: () => void) => { setError(undefined); setSuccess(""); actions.request(action, clear); };
   return <div className="space-y-5">{actions.dialog}<div><Link className="text-sm font-semibold text-violet-700 hover:underline" href="/admin/federation/providers">← Providers</Link><div className="mt-2 flex flex-wrap items-start justify-between gap-3"><div><div className="flex flex-wrap items-center gap-2"><h2 className="text-3xl font-bold">{provider.display_name}</h2><StatusBadge enabled={provider.enabled} /></div><p className="mt-1 font-mono text-xs text-[var(--color-text-muted)]">{provider.provider_id} · {provider.protocol.toUpperCase()}</p></div><div className="flex gap-2">{manage && <Button variant="secondary" onClick={() => setEditing((value) => !value)}>{editing ? "Close edit" : "Edit"}</Button>}{manage && <Button variant={provider.enabled ? "danger" : "primary"} onClick={() => { if (provider.enabled && !window.confirm("Disable this provider? New federated logins will stop.")) return; sensitive(() => stateMutation.mutate(!provider.enabled)); }} disabled={stateMutation.isPending}>{provider.enabled ? "Disable" : "Enable"}</Button>}</div></div></div><Notice error={error ?? providerQuery.error ?? mutation.error ?? stateMutation.error ?? rotateMutation.error ?? certMutation.error ?? revokeMutation.error} success={success} />{editing && manage ? <Panel title="Edit provider"><ProviderForm protocol={provider.protocol} provider={provider} onSubmit={(input) => sensitive(() => mutation.mutate(input as Omit<FederationProviderInput, "provider_id" | "protocol" | "issuer">), () => setSecret(""))} pending={mutation.isPending} error={mutation.error} onCancel={() => setEditing(false)} /></Panel> : <><Panel title="Safe configuration"><dl className="grid gap-4 sm:grid-cols-2">{[["Issuer / entity", provider.issuer], ["Client ID", provider.client_id ?? "Not configured"], ["Configuration", provider.configuration_complete ? "Complete" : "Incomplete"], ["Generation", provider.generation], ["Updated", provider.updated_at], ["Pending transactions", provider.pending_transactions]].map(([label, value]) => <div key={String(label)}><dt className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">{label}</dt><dd className="mt-1 break-all text-sm">{String(value)}</dd></div>)}</dl>{provider.protocol === "oidc" && <div className="mt-5 space-y-2 rounded-md bg-[var(--color-surface-muted)] p-4 text-sm"><p><strong>Redirect URI:</strong> <code className="break-all">{provider.redirect_uri ?? "Not configured"}</code></p><p className="text-xs text-[var(--color-text-muted)]">Client secret configured: {provider.client_secret_configured ? "yes (value hidden)" : "no"}. Never use a masked value as a secret.</p></div>}{provider.protocol === "saml" && <CertificatePanel provider={provider} certificates={certificates} setCertificates={setCertificates} manage={manage} mutation={certMutation} request={sensitive} />}</Panel><Panel title="Canonical endpoints"><Endpoint label="OIDC callback" value={provider.protocol === "oidc" ? provider.redirect_uri ?? canonicalRedirect : "Not applicable"} /><Endpoint label="SAML ACS" value={provider.protocol === "saml" ? provider.acs_url ?? canonicalAcs : "Not applicable"} /><Endpoint label="SAML metadata" value={provider.protocol === "saml" ? `${publicOrigin}/api/auth/saml/${encodeURIComponent(provider.provider_id)}/metadata` : "Not applicable"} link={provider.protocol === "saml" ? publicApiPath(`/api/auth/saml/${encodeURIComponent(provider.provider_id)}/metadata`) : undefined} /></Panel>{manage && provider.protocol === "oidc" && <Panel title="Rotate OIDC client secret"><p className="text-sm text-[var(--color-text-muted)]">Rotation replaces the existing secret, which is never readable here, and may invalidate pending authentication transactions.</p><div className="mt-3 flex flex-col gap-3 sm:flex-row"><input aria-label="New OIDC client secret" type="password" autoComplete="new-password" value={secret} onChange={(event) => setSecret(event.target.value)} className="min-h-10 flex-1 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3" /><Button disabled={!secret || rotateMutation.isPending} onClick={() => { if (!window.confirm("Rotate this client secret?")) return; sensitive(() => rotateMutation.mutate(secret), () => setSecret("")); }}>{rotateMutation.isPending ? "Rotating…" : "Rotate secret"}</Button></div></Panel>}{manage && <Panel title="Pending authentication transactions"><p className="text-sm text-[var(--color-text-muted)]">Current pending count: {provider.pending_transactions}. Revocation invalidates pending transactions for this provider.</p><Button className="mt-3" variant="danger" disabled={!provider.pending_transactions || revokeMutation.isPending} onClick={() => { if (window.confirm("Revoke all pending transactions for this provider?")) sensitive(() => revokeMutation.mutate()); }}>{revokeMutation.isPending ? "Revoking…" : "Revoke pending transactions"}</Button></Panel>}</>}</div>;
 }
 
