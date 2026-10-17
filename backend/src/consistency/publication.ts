@@ -5,7 +5,6 @@ import path from "node:path";
 import type Database from "better-sqlite3";
 
 import { safeGameId, safeVersion } from "../catalog/catalog.js";
-import { encodePythonJson } from "../compatibility/serialization.js";
 import {
   normalizeArchitecture,
   validateCartridgeBinary,
@@ -49,13 +48,17 @@ import {
   writeAtomic
 } from "./publication-files.js";
 import { reconcilePublication } from "./reconciliation.js";
-import { compensatePublicationOperation } from "./publication-compensation.js";
 import {
   indexForCatalogMutation,
   indexForPublication,
   loadPublicationIndex,
-  PUBLICATION_INDEX_MAX_BYTES,
 } from "./publication-index.js";
+import {
+  PUBLICATION_MAX_CARTRIDGE_BYTES,
+  PUBLICATION_PENDING_ROOT,
+  PUBLICATION_STAGING_ROOT,
+  PublicationExecutionService,
+} from "./publication-execution.js";
 
 export { applyReviewMetadata } from "./publication-codecs.js";
 export {
@@ -88,12 +91,9 @@ interface SubmissionRow {
 }
 
 const MAX_JOURNAL_BYTES = 4 * 1024 * 1024;
-const MAX_CARTRIDGE_BYTES = 128 * 1024 * 1024;
 const LOCK_FILE = "publication.lock";
 const JOURNAL_ROOT = "publication-operations";
-const STAGING_ROOT = "publication-staging";
 const BACKUP_ROOT = "publication-backups";
-const PENDING_ROOT = "pending";
 const CARTRIDGE_ROOT = "cartridges";
 
 export class PublicationConsistencyService {
@@ -103,16 +103,24 @@ export class PublicationConsistencyService {
   private readonly stagingRoot: string;
   private readonly backupRoot: string;
   private readonly lockPath: string;
+  private readonly executor: PublicationExecutionService;
 
   constructor(options: PublicationConsistencyOptions) {
     this.root = path.resolve(options.root);
     this.database = options.database;
     if (!fs.existsSync(this.root) || !fs.lstatSync(this.root).isDirectory() || fs.lstatSync(this.root).isSymbolicLink()) fail("publication root must be a regular directory", "unsafe_publication_root");
     this.journalRoot = ensureDirectory(this.root, JOURNAL_ROOT);
-    this.stagingRoot = ensureDirectory(this.root, STAGING_ROOT);
+    this.stagingRoot = ensureDirectory(this.root, PUBLICATION_STAGING_ROOT);
     this.backupRoot = ensureDirectory(this.root, BACKUP_ROOT);
     this.lockPath = path.join(this.root, LOCK_FILE);
     this.fault = options.fault;
+    this.executor = new PublicationExecutionService({
+      root: this.root,
+      database: this.database,
+      ...(this.fault ? { fault: this.fault } : {}),
+      transition: (operation, state, error) =>
+        this.transition(operation, state, error),
+    });
   }
 
   private readonly fault: ((point: FaultPoint) => void) | undefined;
@@ -152,7 +160,9 @@ export class PublicationConsistencyService {
   }
 
   publish(submissionId: number, options: PublicationReviewOptions = {}): PublicationOperation {
-    return this.withLock(() => this.executeUnlocked(this.prepareUnlocked(submissionId, options)));
+    return this.withLock(() =>
+      this.executor.execute(this.prepareUnlocked(submissionId, options)),
+    );
   }
 
   prepareCatalog(options: CatalogMutationOptions): PublicationOperation {
@@ -160,7 +170,9 @@ export class PublicationConsistencyService {
   }
 
   mutateCatalog(options: CatalogMutationOptions): PublicationOperation {
-    return this.withLock(() => this.executeUnlocked(this.prepareCatalogUnlocked(options)));
+    return this.withLock(() =>
+      this.executor.execute(this.prepareCatalogUnlocked(options)),
+    );
   }
 
   runSerialized<T>(callback: () => T): T {
@@ -181,7 +193,7 @@ export class PublicationConsistencyService {
       const version = safeVersion(metadataVersion);
       if (gameId !== row.game_id || version !== row.version) fail("submission identity does not match metadata", "submission_identity_mismatch");
       const pendingDir = assertSafeRelative(row.pending_dir, "pending directory");
-      if (pendingDir !== `${PENDING_ROOT}/${submissionId}`) fail("submission pending directory is unsafe", "unsafe_publication_path");
+      if (pendingDir !== `${PUBLICATION_PENDING_ROOT}/${submissionId}`) fail("submission pending directory is unsafe", "unsafe_publication_path");
       const architectures = parseArchitectures(row.architectures_json);
       if (architectures.length === 0) fail("submission has no architectures", "submission_metadata_corrupt");
       const seen = new Set<string>();
@@ -195,7 +207,7 @@ export class PublicationConsistencyService {
         const sourcePath = assertInside(this.root, path.join(this.root, sourceRelative), "pending file");
         assertNoSymlinkComponents(this.root, sourcePath);
         if (!fs.existsSync(sourcePath) || !fs.lstatSync(sourcePath).isFile()) fail("pending cartridge file is missing", "pending_file_missing", { sourceRelative });
-        const pendingImage = readBounded(sourcePath, MAX_CARTRIDGE_BYTES, "pending_file_too_large");
+        const pendingImage = readBounded(sourcePath, PUBLICATION_MAX_CARTRIDGE_BYTES, "pending_file_too_large");
         const rebuilt = reviewedImage(pendingImage, architecture, reviewedMetadata);
         const image = rebuilt.image;
         const parsed = rebuilt.parsed;
@@ -220,7 +232,7 @@ export class PublicationConsistencyService {
           architecture,
           sourceRelative,
           targetRelative,
-          stagedRelative: `${STAGING_ROOT}/${operationId}/${targetRelative}`,
+          stagedRelative: `${PUBLICATION_STAGING_ROOT}/${operationId}/${targetRelative}`,
           backupRelative,
           expectedSha256: sha256(image),
           previousSha256,
@@ -250,7 +262,7 @@ export class PublicationConsistencyService {
         variants,
         previousIndexSha256: loaded.hash,
         expectedIndexSha256: sha256(expectedIndexBytes),
-        indexStagedRelative: `${STAGING_ROOT}/${operationId}/index.json`,
+        indexStagedRelative: `${PUBLICATION_STAGING_ROOT}/${operationId}/index.json`,
         indexBackupRelative: `${BACKUP_ROOT}/${operationId}/index.json`,
         state: "PREPARED",
         createdAt,
@@ -293,7 +305,7 @@ export class PublicationConsistencyService {
       assertNoSymlinkComponents(this.root, target);
       const stats = fs.lstatSync(target);
       if (!stats.isFile()) fail("published artifact is not a regular file", "published_artifact_corrupt");
-      const source = readBounded(target, MAX_CARTRIDGE_BYTES, "published_file_corrupt");
+      const source = readBounded(target, PUBLICATION_MAX_CARTRIDGE_BYTES, "published_file_corrupt");
       const original = validateCartridgeBinary(source);
       const image = action === "update"
         ? reviewedImage(source, architecture, reviewedMetadata, catalogColophon(original.colophon, reviewedMetadata as Record<string, unknown>))
@@ -302,7 +314,7 @@ export class PublicationConsistencyService {
         architecture,
         sourceRelative: filename,
         targetRelative: filename,
-        stagedRelative: `${STAGING_ROOT}/${operationId}/${filename}`,
+        stagedRelative: `${PUBLICATION_STAGING_ROOT}/${operationId}/${filename}`,
         backupRelative: `${BACKUP_ROOT}/${operationId}/${filename}`,
         expectedSha256: action === "update" ? sha256(image.image) : "",
         previousSha256: sha256(source),
@@ -336,7 +348,7 @@ export class PublicationConsistencyService {
       variants,
       previousIndexSha256: loaded.hash,
       expectedIndexSha256: sha256(expectedIndexBytes),
-      indexStagedRelative: `${STAGING_ROOT}/${operationId}/index.json`,
+      indexStagedRelative: `${PUBLICATION_STAGING_ROOT}/${operationId}/index.json`,
       indexBackupRelative: `${BACKUP_ROOT}/${operationId}/index.json`,
       state: "PREPARED",
       createdAt,
@@ -349,358 +361,51 @@ export class PublicationConsistencyService {
   }
 
   stage(operationId: string): PublicationOperation {
-    return this.withLock(() => {
-      let operation = this.readOperation(operationId);
-      if (operation.state === "STAGED" || operation.state === "VERIFIED") return operation;
-      if (operation.state !== "PREPARED") fail("operation cannot be staged from its current state", "invalid_operation_transition");
-      const loaded = loadPublicationIndex(this.root);
-      if (loaded.hash !== operation.previousIndexSha256) fail("catalog index changed after preparation", "publication_index_changed");
-      for (const variant of operation.variants) {
-        const sourcePath = assertInside(this.root, path.join(this.root, variant.sourceRelative), "pending file");
-        const pendingImage = readBounded(sourcePath, MAX_CARTRIDGE_BYTES, "pending_file_too_large");
-        const image = reviewedImage(pendingImage, variant.architecture, operation.reviewedMetadata).image;
-        if (sha256(image) !== variant.expectedSha256) fail("pending file hash changed", "pending_hash_mismatch", variant);
-        const stagePath = assertInside(this.root, path.join(this.root, variant.stagedRelative), "staged file");
-        ensureDirectory(this.root, path.dirname(path.relative(this.root, stagePath)));
-        writeAtomic(this.root, variant.stagedRelative, image);
-      }
-      const expectedIndex = indexForPublication(
-        loaded.index,
-        operation.gameId,
-        operation.version,
-        operation.variants,
-        operation.createdAt,
-      );
-      const indexBytes = serializeJson(expectedIndex);
-      if (sha256(indexBytes) !== operation.expectedIndexSha256) fail("planned index identity changed", "publication_plan_mismatch");
-      this.hit("before-index-temp-write");
-      writeAtomic(this.root, operation.indexStagedRelative, indexBytes);
-      this.hit("after-index-temp-write");
-      operation = this.transition(operation, "STAGED");
-      this.hit("after-staging");
-      return operation;
-    });
+    return this.withLock(() =>
+      this.executor.stage(this.readOperation(operationId)),
+    );
   }
 
   verifyStaged(operationId: string): PublicationOperation {
-    return this.withLock(() => {
-      let operation = this.readOperation(operationId);
-      if (operation.state === "VERIFIED") return operation;
-      if (operation.state !== "STAGED") fail("operation cannot be verified from its current state", "invalid_operation_transition");
-      for (const variant of operation.variants) {
-        const stagePath = assertInside(this.root, path.join(this.root, variant.stagedRelative), "staged file");
-        const image = readBounded(stagePath, MAX_CARTRIDGE_BYTES, "staged_file_corrupt");
-        if (sha256(image) !== variant.expectedSha256) fail("staged file hash mismatch", "staged_hash_mismatch", variant);
-        validateCartridgeBinary(image);
-      }
-      const indexBytes = readBounded(assertInside(this.root, path.join(this.root, operation.indexStagedRelative), "staged index"), PUBLICATION_INDEX_MAX_BYTES, "staged_index_corrupt");
-      if (sha256(indexBytes) !== operation.expectedIndexSha256) fail("staged index hash mismatch", "staged_index_mismatch");
-      this.hit("after-staged-verification");
-      operation = this.transition(operation, "VERIFIED");
-      return operation;
-    });
+    return this.withLock(() =>
+      this.executor.verifyStaged(this.readOperation(operationId)),
+    );
   }
 
   replaceFiles(operationId: string): PublicationOperation {
-    return this.withLock(() => {
-      let operation = this.readOperation(operationId);
-      if (operation.state === "FILES_REPLACED" || operation.state === "INDEX_REPLACED" || operation.state === "DATABASE_UPDATED" || operation.state === "COMPLETED") return operation;
-      if (operation.state !== "VERIFIED") fail("files cannot be replaced from the current operation state", "invalid_operation_transition");
-      for (const variant of operation.variants) {
-        const target = assertInside(this.root, path.join(this.root, variant.targetRelative), "published target");
-        ensureDirectory(this.root, path.dirname(path.relative(this.root, target)));
-        const current = fs.existsSync(target) ? sha256File(target) : null;
-        if (current === variant.expectedSha256) continue;
-        if (current !== variant.previousSha256) fail("published target changed outside the operation", "publication_target_ambiguous", variant);
-        if (variant.previousSha256 !== null) {
-          const backup = assertInside(this.root, path.join(this.root, variant.backupRelative), "publication backup");
-          if (!fs.existsSync(backup)) {
-            ensureDirectory(this.root, path.dirname(path.relative(this.root, backup)));
-            fs.copyFileSync(target, backup, fs.constants.COPYFILE_EXCL);
-            if (sha256File(backup) !== variant.previousSha256) fail("publication backup hash mismatch", "publication_backup_corrupt");
-          }
-        }
-        this.hit("before-binary-replacement");
-        const staged = assertInside(this.root, path.join(this.root, variant.stagedRelative), "staged file");
-        if (!fs.existsSync(staged) || sha256File(staged) !== variant.expectedSha256) fail("staged file is unavailable for replacement", "staged_file_corrupt");
-        fs.renameSync(staged, target);
-        this.hit("after-binary-replacement");
-        if (sha256File(target) !== variant.expectedSha256) fail("published file hash mismatch after replacement", "publication_hash_mismatch");
-      }
-      operation = this.transition(operation, "FILES_REPLACED");
-      return operation;
-    });
+    return this.withLock(() =>
+      this.executor.replaceFiles(this.readOperation(operationId)),
+    );
   }
 
   replaceIndex(operationId: string): PublicationOperation {
-    return this.withLock(() => {
-      let operation = this.readOperation(operationId);
-      if (operation.state === "INDEX_REPLACED" || operation.state === "DATABASE_UPDATED" || operation.state === "COMPLETED") return operation;
-      if (operation.state !== "FILES_REPLACED") fail("index cannot be replaced from the current operation state", "invalid_operation_transition");
-      const indexPath = path.join(this.root, "index.json");
-      const current = fs.existsSync(indexPath) ? sha256File(indexPath) : null;
-      if (current !== operation.expectedIndexSha256) {
-        if (current !== operation.previousIndexSha256) fail("catalog index changed outside the operation", "publication_index_ambiguous");
-        if (current !== null) {
-          const backup = assertInside(this.root, path.join(this.root, operation.indexBackupRelative), "index backup");
-          if (!fs.existsSync(backup)) {
-            ensureDirectory(this.root, path.dirname(path.relative(this.root, backup)));
-            fs.copyFileSync(indexPath, backup, fs.constants.COPYFILE_EXCL);
-            if (sha256File(backup) !== operation.previousIndexSha256) fail("index backup hash mismatch", "publication_backup_corrupt");
-          }
-        }
-        this.hit("before-index-replacement");
-        const staged = assertInside(this.root, path.join(this.root, operation.indexStagedRelative), "staged index");
-        if (!fs.existsSync(staged) || sha256File(staged) !== operation.expectedIndexSha256) fail("staged index is unavailable", "staged_index_corrupt");
-        fs.renameSync(staged, indexPath);
-        this.hit("after-index-replacement");
-      }
-      if (sha256File(indexPath) !== operation.expectedIndexSha256) fail("catalog index hash mismatch after replacement", "publication_index_mismatch");
-      operation = this.transition(operation, "INDEX_REPLACED");
-      return operation;
-    });
+    return this.withLock(() =>
+      this.executor.replaceIndex(this.readOperation(operationId)),
+    );
   }
 
   updateDatabase(operationId: string): PublicationOperation {
-    return this.withLock(() => {
-      let operation = this.readOperation(operationId);
-      if (operation.state === "DATABASE_UPDATED" || operation.state === "COMPLETED") return operation;
-      if (operation.state !== "INDEX_REPLACED") fail("database cannot be updated from the current operation state", "invalid_operation_transition");
-      this.hit("before-database-update");
-      this.database.exec("BEGIN IMMEDIATE");
-      try {
-        const row = this.database.prepare("SELECT status FROM cartridge_submissions WHERE id = ?").get(operation.submissionId) as { status?: string } | undefined;
-        if (!row) fail("submission disappeared during publication", "submission_not_found");
-        if (row.status === "pending") {
-          if (operation.reviewedMetadata && operation.reviewer) {
-            this.database.prepare("UPDATE cartridge_submissions SET status = 'verified', metadata_json = ?, reviewed_by_user_id = ?, reviewed_by = ?, reviewed_at = datetime('now') WHERE id = ?").run(encodePythonJson(operation.reviewedMetadata), operation.reviewer.id, operation.reviewer.name, operation.submissionId);
-          } else {
-            this.database.prepare("UPDATE cartridge_submissions SET status = 'verified', reviewed_by = 'publication-consistency', reviewed_at = datetime('now') WHERE id = ?").run(operation.submissionId);
-          }
-        } else if (row.status !== "verified") {
-          fail("submission state changed outside the operation", "submission_state_ambiguous", row);
-        }
-        this.database.exec("COMMIT");
-      } catch (error) {
-        if (this.database.inTransaction) this.database.exec("ROLLBACK");
-        throw error;
-      }
-      this.hit("after-database-update");
-      operation = this.transition(operation, "DATABASE_UPDATED");
-      return operation;
-    });
+    return this.withLock(() =>
+      this.executor.updateDatabase(this.readOperation(operationId)),
+    );
   }
 
   complete(operationId: string): PublicationOperation {
-    return this.withLock(() => {
-      let operation = this.readOperation(operationId);
-      if (operation.state === "COMPLETED") {
-        this.cleanupCompletedUnlocked(operation);
-        return operation;
-      }
-      if (operation.state !== "DATABASE_UPDATED") fail("operation cannot complete from the current state", "invalid_operation_transition");
-      this.hit("before-completion");
-      operation = this.transition(operation, "COMPLETED");
-      this.cleanupCompletedUnlocked(operation);
-      this.hit("after-completion");
-      return operation;
-    });
+    return this.withLock(() =>
+      this.executor.complete(this.readOperation(operationId)),
+    );
   }
 
   execute(operationId: string): PublicationOperation {
-    return this.withLock(() => {
-      let operation = this.readOperation(operationId);
-      if (operation.state === "COMPLETED") {
-        this.cleanupCompletedUnlocked(operation);
-        return operation;
-      }
-      if (operation.state === "COMPENSATED") return operation;
-      if (operation.state === "RECOVERY_REQUIRED" || operation.state === "FAILED") fail("operation requires explicit recovery", "recovery_required");
-      if (operation.state === "PREPARED") { operation = this.stageUnlocked(operation); }
-      if (operation.state === "STAGED") { operation = this.verifyUnlocked(operation); }
-      if (operation.state === "VERIFIED") { operation = this.replaceFilesUnlocked(operation); }
-      if (operation.state === "FILES_REPLACED") { operation = this.replaceIndexUnlocked(operation); }
-      if (operation.state === "INDEX_REPLACED") { operation = this.updateDatabaseUnlocked(operation); }
-      if (operation.state === "DATABASE_UPDATED") { operation = this.completeUnlocked(operation); }
-      return operation;
-    });
-  }
-
-  private stageUnlocked(operation: PublicationOperation): PublicationOperation {
-    const loaded = loadPublicationIndex(this.root);
-    if (loaded.hash !== operation.previousIndexSha256) fail("catalog index changed after preparation", "publication_index_changed");
-    for (const variant of operation.variants) {
-      if (operation.operationKind === "catalog" && operation.catalogAction === "delete") continue;
-      const source = assertInside(this.root, path.join(this.root, variant.sourceRelative), "pending file");
-      const pendingImage = readBounded(source, MAX_CARTRIDGE_BYTES, "pending_file_too_large");
-      const original = validateCartridgeBinary(pendingImage);
-      const colophon = operation.operationKind === "catalog" && operation.catalogAction === "update"
-        ? catalogColophon(original.colophon, operation.reviewedMetadata as Record<string, unknown>)
-        : undefined;
-      const image = reviewedImage(pendingImage, variant.architecture, operation.reviewedMetadata, colophon).image;
-      if (sha256(image) !== variant.expectedSha256) fail("pending file hash changed", "pending_hash_mismatch");
-      writeAtomic(this.root, variant.stagedRelative, image);
-    }
-    const index = operation.operationKind === "catalog"
-      ? indexForCatalogMutation(
-          loaded.index,
-          operation.gameId,
-          operation.version,
-          operation.variants,
-          operation.catalogAction as CatalogMutationAction,
-          operation.createdAt,
-        )
-      : indexForPublication(
-          loaded.index,
-          operation.gameId,
-          operation.version,
-          operation.variants,
-          operation.createdAt,
-        );
-    const indexBytes = serializeJson(index);
-    if (sha256(indexBytes) !== operation.expectedIndexSha256) fail("planned index identity changed", "publication_plan_mismatch");
-    this.hit("before-index-temp-write");
-    writeAtomic(this.root, operation.indexStagedRelative, indexBytes);
-    this.hit("after-index-temp-write");
-    operation = this.transition(operation, "STAGED");
-    this.hit("after-staging");
-    return operation;
-  }
-
-  private verifyUnlocked(operation: PublicationOperation): PublicationOperation {
-    for (const variant of operation.variants) {
-      if (operation.operationKind === "catalog" && operation.catalogAction === "delete") continue;
-      const image = readBounded(assertInside(this.root, path.join(this.root, variant.stagedRelative), "staged file"), MAX_CARTRIDGE_BYTES, "staged_file_corrupt");
-      if (sha256(image) !== variant.expectedSha256) fail("staged file hash mismatch", "staged_hash_mismatch");
-      validateCartridgeBinary(image);
-    }
-    const index = readBounded(assertInside(this.root, path.join(this.root, operation.indexStagedRelative), "staged index"), PUBLICATION_INDEX_MAX_BYTES, "staged_index_corrupt");
-    if (sha256(index) !== operation.expectedIndexSha256) fail("staged index hash mismatch", "staged_index_mismatch");
-    this.hit("after-staged-verification");
-    return this.transition(operation, "VERIFIED");
-  }
-
-  private replaceFilesUnlocked(operation: PublicationOperation): PublicationOperation {
-    for (const variant of operation.variants) {
-      const target = assertInside(this.root, path.join(this.root, variant.targetRelative), "published target");
-      if (operation.operationKind === "catalog" && operation.catalogAction === "delete") {
-        const current = fs.existsSync(target) ? sha256File(target) : null;
-        if (current !== variant.previousSha256) fail("published target changed outside the operation", "publication_target_ambiguous");
-        const backup = assertInside(this.root, path.join(this.root, variant.backupRelative), "publication backup");
-        ensureDirectory(this.root, path.dirname(path.relative(this.root, backup)));
-        if (!fs.existsSync(backup)) {
-          fs.copyFileSync(target, backup, fs.constants.COPYFILE_EXCL);
-          if (sha256File(backup) !== variant.previousSha256) fail("publication backup hash mismatch", "publication_backup_corrupt");
-        }
-        this.hit("before-binary-replacement");
-        fs.unlinkSync(target);
-        this.hit("after-binary-replacement");
-        continue;
-      }
-      ensureDirectory(this.root, path.dirname(path.relative(this.root, target)));
-      const current = fs.existsSync(target) ? sha256File(target) : null;
-      if (current === variant.expectedSha256) continue;
-      if (current !== variant.previousSha256) fail("published target changed outside the operation", "publication_target_ambiguous");
-      if (variant.previousSha256 !== null) {
-        const backup = assertInside(this.root, path.join(this.root, variant.backupRelative), "publication backup");
-        if (!fs.existsSync(backup)) { ensureDirectory(this.root, path.dirname(path.relative(this.root, backup))); fs.copyFileSync(target, backup, fs.constants.COPYFILE_EXCL); }
-      }
-      this.hit("before-binary-replacement");
-      fs.renameSync(assertInside(this.root, path.join(this.root, variant.stagedRelative), "staged file"), target);
-      this.hit("after-binary-replacement");
-      if (sha256File(target) !== variant.expectedSha256) fail("published file hash mismatch after replacement", "publication_hash_mismatch");
-    }
-    return this.transition(operation, "FILES_REPLACED");
-  }
-
-  private replaceIndexUnlocked(operation: PublicationOperation): PublicationOperation {
-    const indexPath = path.join(this.root, "index.json");
-    const current = fs.existsSync(indexPath) ? sha256File(indexPath) : null;
-    if (current !== operation.expectedIndexSha256) {
-      if (current !== operation.previousIndexSha256) fail("catalog index changed outside the operation", "publication_index_ambiguous");
-      if (current !== null) {
-        const backup = assertInside(this.root, path.join(this.root, operation.indexBackupRelative), "index backup");
-        if (!fs.existsSync(backup)) { ensureDirectory(this.root, path.dirname(path.relative(this.root, backup))); fs.copyFileSync(indexPath, backup, fs.constants.COPYFILE_EXCL); }
-      }
-      this.hit("before-index-replacement");
-      fs.renameSync(assertInside(this.root, path.join(this.root, operation.indexStagedRelative), "staged index"), indexPath);
-      this.hit("after-index-replacement");
-    }
-    if (sha256File(indexPath) !== operation.expectedIndexSha256) fail("catalog index hash mismatch", "publication_index_mismatch");
-    return this.transition(operation, "INDEX_REPLACED");
-  }
-
-  private updateDatabaseUnlocked(operation: PublicationOperation): PublicationOperation {
-    this.hit("before-database-update");
-    if (operation.operationKind === "catalog") return this.transition(operation, "DATABASE_UPDATED");
-    this.database.exec("BEGIN IMMEDIATE");
-    try {
-      const row = this.database.prepare("SELECT status FROM cartridge_submissions WHERE id = ?").get(operation.submissionId) as { status?: string } | undefined;
-      if (!row) fail("submission disappeared during publication", "submission_not_found");
-      if (row.status === "pending") {
-        if (operation.reviewedMetadata && operation.reviewer) {
-          this.database.prepare("UPDATE cartridge_submissions SET status = 'verified', metadata_json = ?, reviewed_by_user_id = ?, reviewed_by = ?, reviewed_at = datetime('now') WHERE id = ?").run(encodePythonJson(operation.reviewedMetadata), operation.reviewer.id, operation.reviewer.name, operation.submissionId);
-        } else {
-          this.database.prepare("UPDATE cartridge_submissions SET status = 'verified', reviewed_by = 'publication-consistency', reviewed_at = datetime('now') WHERE id = ?").run(operation.submissionId);
-        }
-      }
-      else if (row.status !== "verified") fail("submission state changed outside the operation", "submission_state_ambiguous");
-      this.database.exec("COMMIT");
-    } catch (error) { if (this.database.inTransaction) this.database.exec("ROLLBACK"); throw error; }
-    this.hit("after-database-update");
-    return this.transition(operation, "DATABASE_UPDATED");
-  }
-
-  private completeUnlocked(operation: PublicationOperation): PublicationOperation {
-    this.hit("before-completion");
-    const completed = this.transition(operation, "COMPLETED");
-    this.cleanupCompletedUnlocked(completed);
-    this.hit("after-completion");
-    return completed;
-  }
-
-  private cleanupCompletedUnlocked(operation: PublicationOperation): void {
-    fs.rmSync(assertInside(this.root, path.join(this.root, `${STAGING_ROOT}/${operation.operationId}`), "staging directory"), { recursive: true, force: true });
-    if (operation.operationKind !== "catalog") {
-      fs.rmSync(assertInside(this.root, path.join(this.root, `${PENDING_ROOT}/${operation.submissionId}`), "pending directory"), { recursive: true, force: true });
-    }
+    return this.withLock(() =>
+      this.executor.execute(this.readOperation(operationId)),
+    );
   }
 
   recover(operationId: string, action: "resume" | "compensate"): PublicationOperation {
-    return this.withLock(() => {
-      const operation = this.readOperation(operationId);
-      if (action === "resume") {
-        if (operation.state === "RECOVERY_REQUIRED" || operation.state === "FAILED") fail("ambiguous operation cannot be resumed", "recovery_ambiguous");
-        return this.executeUnlocked(operation);
-      }
-      return this.compensateUnlocked(operation);
-    });
-  }
-
-  private executeUnlocked(initial: PublicationOperation): PublicationOperation {
-    let operation = initial;
-    if (operation.state === "COMPLETED") {
-      this.cleanupCompletedUnlocked(operation);
-      return operation;
-    }
-    if (operation.state === "COMPENSATED") return operation;
-    if (operation.state === "PREPARED") operation = this.stageUnlocked(operation);
-    if (operation.state === "STAGED") operation = this.verifyUnlocked(operation);
-    if (operation.state === "VERIFIED") operation = this.replaceFilesUnlocked(operation);
-    if (operation.state === "FILES_REPLACED") operation = this.replaceIndexUnlocked(operation);
-    if (operation.state === "INDEX_REPLACED") operation = this.updateDatabaseUnlocked(operation);
-    if (operation.state === "DATABASE_UPDATED") operation = this.completeUnlocked(operation);
-    return operation;
-  }
-
-  private compensateUnlocked(operation: PublicationOperation): PublicationOperation {
-    return compensatePublicationOperation({
-      root: this.root,
-      database: this.database,
-      operation,
-      hit: (point) => this.hit(point),
-      transition: (current, state) => this.transition(current, state),
-    });
+    return this.withLock(() =>
+      this.executor.recover(this.readOperation(operationId), action),
+    );
   }
 
   listOperations(): PublicationOperation[] {
