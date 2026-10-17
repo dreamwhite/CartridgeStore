@@ -13,6 +13,7 @@ import {
 } from "./env-values.js";
 import type { BackendConfig } from "./env-contracts.js";
 import { resolveAuthLimitsConfig } from "./env-auth-limits.js";
+import { resolveBackupLimitsConfig } from "./env-backup-limits.js";
 import { resolveEmailConfig } from "./env-email.js";
 import { resolveHttpLimitsConfig } from "./env-http-limits.js";
 import { resolveMetricsLimitsConfig } from "./env-metrics-limits.js";
@@ -378,50 +379,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
     ...resolveScoresLimitsConfig(environment),
     backupEnabled,
     backupMode,
-    backupMaxArchiveBytes: positiveInteger(
-      "PRG32_BACKEND_BACKUP_MAX_ARCHIVE_BYTES",
-      environment.PRG32_BACKEND_BACKUP_MAX_ARCHIVE_BYTES,
-      1024 * 1024 * 1024
-    ),
-    backupMaxExpandedBytes: positiveInteger(
-      "PRG32_BACKEND_BACKUP_MAX_EXPANDED_BYTES",
-      environment.PRG32_BACKEND_BACKUP_MAX_EXPANDED_BYTES,
-      4 * 1024 * 1024 * 1024
-    ),
-    backupMaxEntryBytes: positiveInteger(
-      "PRG32_BACKEND_BACKUP_MAX_ENTRY_BYTES",
-      environment.PRG32_BACKEND_BACKUP_MAX_ENTRY_BYTES,
-      2 * 1024 * 1024 * 1024
-    ),
-    backupMaxManifestBytes: positiveInteger(
-      "PRG32_BACKEND_BACKUP_MAX_MANIFEST_BYTES",
-      environment.PRG32_BACKEND_BACKUP_MAX_MANIFEST_BYTES,
-      256 * 1024
-    ),
-    backupMaxEntries: positiveInteger(
-      "PRG32_BACKEND_BACKUP_MAX_ENTRIES",
-      environment.PRG32_BACKEND_BACKUP_MAX_ENTRIES,
-      50000
-    ),
-    backupMaxPathBytes: positiveInteger(
-      "PRG32_BACKEND_BACKUP_MAX_PATH_BYTES",
-      environment.PRG32_BACKEND_BACKUP_MAX_PATH_BYTES,
-      1024
-    ),
-    backupMaxPathDepth: positiveInteger(
-      "PRG32_BACKEND_BACKUP_MAX_PATH_DEPTH",
-      environment.PRG32_BACKEND_BACKUP_MAX_PATH_DEPTH,
-      32
-    ),
-    backupMaxCompressionRatio: (() => {
-      const candidate = environment.PRG32_BACKEND_BACKUP_MAX_COMPRESSION_RATIO === undefined
-        ? 200
-        : Number(environment.PRG32_BACKEND_BACKUP_MAX_COMPRESSION_RATIO);
-      if (!Number.isFinite(candidate) || candidate <= 0) {
-        throw new Error("PRG32_BACKEND_BACKUP_MAX_COMPRESSION_RATIO must be positive");
-      }
-      return candidate;
-    })(),
+    ...resolveBackupLimitsConfig(environment),
     catalogReadMode: configuredCatalogReadMode,
     canonicalStorageRoot: configuredCatalogReadMode === CANONICAL_DISPOSABLE_READ_MODE || configuredCatalogReadMode === CANONICAL_OPERATIONAL_READ_MODE ? path.resolve(canonicalStorageRoot as string) : undefined,
     canonicalReadAuthorization: configuredCatalogReadMode === CANONICAL_DISPOSABLE_READ_MODE || configuredCatalogReadMode === CANONICAL_OPERATIONAL_READ_MODE ? canonicalReadAuthorization : undefined,
