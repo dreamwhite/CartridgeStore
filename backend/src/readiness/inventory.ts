@@ -1,40 +1,21 @@
-export const READINESS_ABI = "prg32-operational-handover-readiness-1.0" as const;
+import {
+  READINESS_ABI,
+  VERSION_TUPLE,
+  type ReadinessGate,
+  type ReadinessClassification,
+  type RouteInventoryEntry,
+} from "./inventory-contracts.js";
 
-export const VERSION_TUPLE = {
-  schema: 2,
-  storageLayout: 2,
-  publicationJournal: 1,
-  backupFormat: 3
-} as const;
-
-export type ReadinessClassification =
-  | "READY"
-  | "ISOLATED_READY"
-  | "PARTIAL"
-  | "LEGACY_DEPENDENT"
-  | "MISSING"
-  | "NOT_VERIFIED";
-
-export type RouteOwner = "flask" | "fastify" | "next" | "external" | "none";
-
-export interface RouteInventoryEntry {
-  readonly id: string;
-  readonly family: string;
-  readonly methods: readonly string[];
-  readonly paths: readonly string[];
-  readonly currentOwner: RouteOwner;
-  readonly candidateOwner: RouteOwner;
-  readonly classification: ReadinessClassification;
-  readonly flaskSource?: string;
-  readonly fastifySource?: string;
-  readonly auth: string;
-  readonly persistence: string;
-  readonly sideEffects: string;
-  readonly firmwareRelevant: boolean;
-  readonly frontendRelevant: boolean;
-  readonly tests: readonly string[];
-  readonly blockers: readonly string[];
-}
+export {
+  READINESS_ABI,
+  VERSION_TUPLE,
+} from "./inventory-contracts.js";
+export type {
+  ReadinessClassification,
+  ReadinessGate,
+  RouteInventoryEntry,
+  RouteOwner,
+} from "./inventory-contracts.js";
 
 const source = {
   flaskApp: "cartridge_store/app.py",
@@ -511,14 +492,6 @@ export const ROUTE_INVENTORY: readonly RouteInventoryEntry[] = [
     blockers: ["public storage-v2 route activation is explicitly out of scope", "operational ownership must follow publication and parity gates"]
   }
 ];
-
-export interface ReadinessGate {
-  readonly id: string;
-  readonly classification: ReadinessClassification;
-  readonly evidence: readonly string[];
-  readonly decision: string;
-  readonly blockers: readonly string[];
-}
 
 export const READINESS_GATES: readonly ReadinessGate[] = [
   {
