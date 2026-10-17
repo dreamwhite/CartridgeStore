@@ -49,6 +49,7 @@ import {
   writeAtomic
 } from "./publication-files.js";
 import { reconcilePublication } from "./reconciliation.js";
+import { compensatePublicationOperation } from "./publication-compensation.js";
 import {
   indexForCatalogMutation,
   indexForPublication,
@@ -693,52 +694,13 @@ export class PublicationConsistencyService {
   }
 
   private compensateUnlocked(operation: PublicationOperation): PublicationOperation {
-    if (operation.state === "COMPLETED" || operation.state === "COMPENSATED") return operation;
-    this.hit("before-compensation");
-    let current = this.transition(operation, "COMPENSATING");
-    for (const variant of current.variants) {
-      const target = assertInside(this.root, path.join(this.root, variant.targetRelative), "published target");
-      if (current.operationKind === "catalog" && current.catalogAction === "delete") {
-        const currentHash = fs.existsSync(target) ? sha256File(target) : null;
-        if (currentHash === variant.previousSha256) continue;
-        if (currentHash !== null) fail("cannot compensate a changed published file", "recovery_ambiguous", variant);
-        const backup = assertInside(this.root, path.join(this.root, variant.backupRelative), "publication backup");
-        if (!fs.existsSync(backup) || sha256File(backup) !== variant.previousSha256) fail("compensation backup is unavailable", "recovery_ambiguous", variant);
-        ensureDirectory(this.root, path.dirname(path.relative(this.root, target)));
-        fs.copyFileSync(backup, target, fs.constants.COPYFILE_EXCL);
-        continue;
-      }
-      if (!fs.existsSync(target)) continue;
-      const currentHash = sha256File(target);
-      if (currentHash === variant.previousSha256) continue;
-      if (currentHash !== variant.expectedSha256) fail("cannot compensate a changed published file", "recovery_ambiguous", variant);
-      if (variant.previousSha256 === null) fs.unlinkSync(target);
-      else {
-        const backup = assertInside(this.root, path.join(this.root, variant.backupRelative), "publication backup");
-        if (!fs.existsSync(backup) || sha256File(backup) !== variant.previousSha256) fail("compensation backup is unavailable", "recovery_ambiguous", variant);
-        fs.copyFileSync(backup, target);
-      }
-    }
-    const indexPath = path.join(this.root, "index.json");
-    if (fs.existsSync(indexPath)) {
-      const currentHash = sha256File(indexPath);
-      if (currentHash === current.expectedIndexSha256) {
-        if (current.previousIndexSha256 === null) fs.unlinkSync(indexPath);
-        else {
-          const backup = assertInside(this.root, path.join(this.root, current.indexBackupRelative), "index backup");
-          if (!fs.existsSync(backup) || sha256File(backup) !== current.previousIndexSha256) fail("index compensation backup is unavailable", "recovery_ambiguous");
-          fs.copyFileSync(backup, indexPath);
-        }
-      } else if (currentHash !== current.previousIndexSha256) fail("cannot compensate a changed catalog index", "recovery_ambiguous");
-    }
-    if (current.operationKind !== "catalog") {
-      const row = this.database.prepare("SELECT status FROM cartridge_submissions WHERE id = ?").get(current.submissionId) as { status?: string } | undefined;
-      if (row?.status === "verified") this.database.prepare("UPDATE cartridge_submissions SET status = 'pending', reviewed_by = '', reviewed_at = NULL WHERE id = ?").run(current.submissionId);
-    }
-    fs.rmSync(assertInside(this.root, path.join(this.root, `${STAGING_ROOT}/${current.operationId}`), "staging directory"), { recursive: true, force: true });
-    current = this.transition(current, "COMPENSATED");
-    this.hit("after-compensation");
-    return current;
+    return compensatePublicationOperation({
+      root: this.root,
+      database: this.database,
+      operation,
+      hit: (point) => this.hit(point),
+      transition: (current, state) => this.transition(current, state),
+    });
   }
 
   listOperations(): PublicationOperation[] {
