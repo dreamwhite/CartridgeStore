@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 import json
-import math
 import os
-import re
 from threading import Lock
-from typing import Any, Callable
+from typing import Any
 
 from flask import Flask, jsonify, request
 from flask_sock import Sock
@@ -20,29 +18,12 @@ from .auth import (
     parse_user_config,
     role_at_least,
 )
-
-
-SIGNATURE_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,47}$")
-
-
-class MultiplayerPeer:
-    def __init__(
-        self,
-        send_json: Callable[[dict[str, Any]], None],
-        *,
-        connection_token: str = "",
-        principal: Principal = ANONYMOUS,
-    ) -> None:
-        self.send_json = send_json
-        self.connection_token = connection_token
-        self.principal = principal
-        self.signature = ""
-        self.flags = 0
-        self.player_id = 0
-        self.state: dict[str, Any] | None = None
-
-    def send(self, message: dict[str, Any]) -> None:
-        self.send_json(message)
+from .multiplayer_protocol import (
+    SIGNATURE_RE,
+    MultiplayerPeer,
+    _peer_message,
+    _uint32,
+)
 
 
 class MultiplayerHub:
@@ -246,37 +227,6 @@ class MultiplayerHub:
         player_id = self.next_player_id
         self.next_player_id = (self.next_player_id + 1) & 0xffffffff
         return player_id
-
-
-def _number(value: Any) -> int:
-    try:
-        number = float(value)
-    except (TypeError, ValueError):
-        return 0
-    if not math.isfinite(number):
-        return 0
-    return int(number)
-
-
-def _clamp(value: Any, minimum: int, maximum: int) -> int:
-    return max(minimum, min(maximum, _number(value)))
-
-
-def _uint32(value: Any) -> int:
-    return _number(value) & 0xffffffff
-
-
-def _peer_message(player_id: int, state: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "type": "peer",
-        "player_id": player_id,
-        "x": _clamp(state.get("x"), -32768, 32767),
-        "y": _clamp(state.get("y"), -32768, 32767),
-        "sprite": _clamp(state.get("sprite"), 0, 65535),
-        "flags": _clamp(state.get("flags"), 0, 65535),
-        "input": _clamp(state.get("input"), 0, 0xffffffff),
-        "frame": _clamp(state.get("frame"), 0, 0xffffffff),
-    }
 
 
 def _configured_users(app: Flask) -> list[Principal]:
