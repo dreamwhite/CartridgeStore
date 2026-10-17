@@ -28,11 +28,17 @@ import {
   type CanonicalBackupOptions,
   type CanonicalBackupResult,
   type CanonicalBackupSnapshotMode,
-  type CanonicalRestoreFaultPoint,
   type CanonicalRestoreOptions,
   type CanonicalRestoreReport,
   type CanonicalRestoreResult,
 } from "./backup-contracts.js";
+import {
+  copyExtractedData,
+  promoteRestoredDatabase,
+  restoreStatePath,
+  writeDurable,
+  writeRestoreState as writeState,
+} from "./backup-restore-io.js";
 import {
   assertDatabase,
   canonicalJson,
@@ -65,17 +71,6 @@ export type {
 } from "./backup-contracts.js";
 
 const SQLITE_SNAPSHOT_TIMEOUT_MS = 5 * 60 * 1000;
-const RESTORE_STATE_FILE = ".prg32-storage-v2-restore.json";
-
-interface RestoreJournal {
-  readonly abi: typeof CANONICAL_BACKUP_ABI;
-  readonly operation_id: string;
-  readonly backup_id: string;
-  readonly archive_sha256: string;
-  readonly state: "preparing" | "restoring_database" | "restoring_objects" | "restoring_staging" | "restoring_journals" | "verifying" | "completed" | "recovery_required" | "failed";
-  readonly updated_at: string;
-  readonly error_code?: string;
-}
 
 function limits(value?: Partial<CanonicalBackupLimits>): CanonicalBackupLimits {
   const result = { ...DEFAULT_CANONICAL_BACKUP_LIMITS, ...value };
@@ -133,62 +128,6 @@ function backendConfig(limitsValue: CanonicalBackupLimits): BackendConfig {
 }
 
 function archiveIdentity(filePath: string): string { return sha256File(filePath).sha256; }
-
-function writeState(root: string, state: RestoreJournal): void {
-  const filePath = path.join(root, RESTORE_STATE_FILE);
-  writeDurable(filePath, `${canonicalJson(state)}\n`);
-}
-
-function writeDurable(filePath: string, value: string): void {
-  const temporary = `${filePath}.tmp-${crypto.randomUUID()}`;
-  const fd = fs.openSync(temporary, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY, 0o600);
-  try {
-    fs.writeSync(fd, value, undefined, "utf8");
-    fs.fsyncSync(fd);
-  } finally {
-    fs.closeSync(fd);
-  }
-  fs.renameSync(temporary, filePath);
-  const directory = fs.openSync(path.dirname(filePath), fs.constants.O_RDONLY);
-  try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
-}
-
-function copyExtractedData(extractedData: string, targetRoot: string, fault?: (point: CanonicalRestoreFaultPoint) => void): void {
-  if (!fs.existsSync(extractedData)) return;
-  const walk = (directory: string): void => {
-    for (const item of fs.readdirSync(directory, { withFileTypes: true })) {
-      const source = path.join(directory, item.name);
-      const relative = path.relative(extractedData, source);
-      const destination = path.join(targetRoot, relative);
-      if (item.isSymbolicLink()) throw new BackupError("canonical restore rejects symlinks", "canonical_restore_symlink_rejected");
-      if (item.isDirectory()) { fs.mkdirSync(destination, { recursive: true, mode: 0o700 }); walk(source); continue; }
-      if (!item.isFile() || fs.existsSync(destination)) throw new BackupError("canonical restore refuses an overwrite", "canonical_restore_conflict");
-      fs.mkdirSync(path.dirname(destination), { recursive: true, mode: 0o700 });
-      fs.copyFileSync(source, destination, fs.constants.COPYFILE_EXCL); fs.chmodSync(destination, 0o600);
-      if (relative.startsWith(`storage${path.sep}staging${path.sep}`)) fault?.("during-staging-restoration");
-      if (relative.startsWith(`journal${path.sep}`)) fault?.("during-journal-restoration");
-      else fault?.("during-object-extraction");
-    }
-  };
-  walk(extractedData);
-}
-
-/**
- * Docker bind mounts and tmpfs use different filesystems. Keep the normal
- * atomic rename when possible, but make restore portable across that
- * boundary without weakening the fresh-target and recovery-state checks.
- */
-function promoteRestoredDatabase(source: string, destination: string): void {
-  try {
-    fs.renameSync(source, destination);
-    return;
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EXDEV") throw error;
-  }
-  fs.copyFileSync(source, destination, fs.constants.COPYFILE_EXCL);
-  fs.chmodSync(destination, 0o600);
-  fs.unlinkSync(source);
-}
 
 function prepareVerificationRoot(extracted: ReturnType<typeof extractZipArchive>): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "prg32-backup-verify-"));
@@ -416,6 +355,6 @@ export function restoreCanonicalBackup(options: CanonicalRestoreOptions): Canoni
 }
 
 export function assertRestoreTargetNotReady(root: string): void {
-  const statePath = path.join(resolved(root, "target root"), RESTORE_STATE_FILE);
+  const statePath = restoreStatePath(resolved(root, "target root"));
   if (fs.existsSync(statePath)) throw new BackupError("canonical restore target has an incomplete or completed restore journal", "canonical_restore_target_not_ready", 409);
 }
