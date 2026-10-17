@@ -21,6 +21,7 @@ import {
 import { createBackupCommand } from "./manage/backup.mjs";
 import { createHealthCommand } from "./manage/health.mjs";
 import { createDeployCommand } from "./manage/deploy.mjs";
+import { createVerificationCommands } from "./manage/verification.mjs";
 
 const execFileAsync = promisify(execFile);
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
@@ -411,44 +412,6 @@ async function build(ctx, values) {
   return success({ ok: true, command: "build", profile: ctx.profileName, services, output: result.stdout }, EXIT.OK);
 }
 
-async function pnpmScript(ctx, directory, script, args = []) {
-  const result = await runFile("pnpm", ["--dir", directory, "run", script, ...args], ctx, { timeoutMs: ctx.globals.timeout * 1000, maxBuffer: 32 * 1024 * 1024 });
-  return { command: `pnpm --dir ${directory} run ${script}`, output: result.stdout };
-}
-
-async function test(ctx) {
-  ensureNode24();
-  const results = [];
-  for (const [directory, scripts] of [["backend", ["typecheck", "lint", "test", "build"]], ["frontend", ["typecheck", "lint", "test", "build"]], ["cli", ["typecheck", "lint", "test", "build"]]]) {
-    for (const script of scripts) results.push({ ...(await pnpmScript(ctx, directory, script)) });
-  }
-  const python = fs.existsSync(path.join(ROOT, ".venv313", "bin", "python")) ? path.join(ROOT, ".venv313", "bin", "python") : "python3";
-  const pythonResult = await runFile(python, ["-m", "pytest", "-q"], ctx, { env: { ...process.env, SECRET_KEY: "prg32-test-only-secret" }, timeoutMs: ctx.globals.timeout * 1000, maxBuffer: 32 * 1024 * 1024 });
-  results.push({ command: `${python} -m pytest -q`, output: pythonResult.stdout });
-  return success({ ok: true, command: "test", suites: results.map((result) => ({ command: result.command, output_tail: result.output.trim().split(/\r?\n/u).slice(-3).join("\n") })) }, EXIT.OK);
-}
-
-async function ci(ctx) {
-  ensureNode24();
-  const results = [];
-  for (const [directory, scripts] of [["backend", ["typecheck", "lint", "test", "build"]], ["frontend", ["typecheck", "lint", "test", "build"]], ["cli", ["typecheck", "lint", "test", "build"]]]) {
-    for (const script of scripts) results.push(await pnpmScript(ctx, directory, script));
-  }
-  const python = fs.existsSync(path.join(ROOT, ".venv313", "bin", "python")) ? path.join(ROOT, ".venv313", "bin", "python") : "python3";
-  const pythonResult = await runFile(python, ["-m", "pytest", "-q"], ctx, { env: { ...process.env, SECRET_KEY: "prg32-test-only-secret" }, timeoutMs: ctx.globals.timeout * 1000, maxBuffer: 32 * 1024 * 1024 });
-  results.push({ command: `${python} -m pytest -q`, output: pythonResult.stdout });
-  for (const composeCtx of [{ ...ctx, profileName: "candidate", profile: PROFILES.candidate, composeFile: path.join(ROOT, PROFILES.candidate.compose), project: PROFILES.candidate.project }, { ...ctx, profileName: "standalone", profile: PROFILES.standalone, composeFile: path.join(ROOT, PROFILES.standalone.compose), project: PROFILES.standalone.project }, { ...ctx, profileName: "operational", profile: PROFILES.operational, composeFile: path.join(ROOT, PROFILES.operational.compose), project: PROFILES.operational.project }]) {
-    await composeConfigCheck(composeCtx, { synthetic: true });
-    results.push({ command: `docker compose config --quiet (${composeCtx.profileName})`, output: "accepted" });
-  }
-  const rootCompose = path.join(ROOT, "docker-compose.yml");
-  await runFile("docker", ["compose", "-f", rootCompose, "--profile", "dev", "config", "--quiet"], ctx, { timeoutMs: ctx.globals.timeout * 1000 });
-  results.push({ command: "docker compose --profile dev config --quiet (root)", output: "accepted" });
-  const diff = await runFile("git", ["diff", "--check"], ctx, { timeoutMs: 5000 });
-  results.push({ command: "git diff --check", output: diff.stdout });
-  return success({ ok: true, command: "ci check", non_interactive: true, production_secrets_used: false, operational_services_started: false, checks: results.map((result) => ({ command: result.command, status: "PASS" })) }, EXIT.OK);
-}
-
 const backupCommand = createBackupCommand({
   root: ROOT,
   value,
@@ -483,6 +446,15 @@ const deployCommand = createDeployCommand({
   success
 });
 
+const verificationCommands = createVerificationCommands({
+  root: ROOT,
+  ensureNode24,
+  runFile,
+  composeConfigCheck,
+  profiles: PROFILES,
+  success
+});
+
 async function execute(ctx) {
   const values = parseCommandArgs(ctx.commandArgs);
   const { command, subcommand } = ctx;
@@ -501,8 +473,10 @@ async function execute(ctx) {
   if (command === "update") return update(ctx, subcommand);
   if (command === "deploy") return deployCommand(ctx, values);
   if (command === "build") return build(ctx, values);
-  if (command === "test") return test(ctx);
-  if (command === "ci" && subcommand === "check") return ci(ctx);
+  if (command === "test") return verificationCommands.test(ctx);
+  if (command === "ci" && subcommand === "check") {
+    return verificationCommands.ci(ctx);
+  }
   fail("usage", `unknown command or subcommand: ${command}${subcommand ? ` ${subcommand}` : ""}`, EXIT.USAGE);
 }
 
