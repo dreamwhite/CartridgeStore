@@ -2,25 +2,23 @@ import crypto from "node:crypto";
 
 import type Database from "better-sqlite3";
 
-import type { AdminAuditLog } from "../admin/audit.js";
-import type { AuthService } from "../auth/service.js";
-import type { BackendConfig } from "../config/env.js";
-import type { FederationProviderOperations } from "../federation/operations.js";
 import type { FederationProviderService, ProviderInput } from "../federation/provider.js";
-import type { SettingsService } from "../settings/service.js";
 import { loadSamlMetadata, parseSamlMetadata, ProviderValidationError, validateOidcDiscovery, validateParsedSamlMetadata } from "./provider-validation.js";
+import {
+  SETUP_STEPS,
+  type SetupServiceOptions,
+  type SetupSession,
+  type SetupState,
+  type SetupStep,
+} from "./service-contracts.js";
 
-export const SETUP_STATES = [
-  "INFRASTRUCTURE_NOT_READY",
-  "INSTALLATION_REQUIRED",
-  "INSTALLATION_IN_PROGRESS",
-  "INSTALLATION_COMPLETE",
-  "INSTALLATION_RECOVERY_REQUIRED"
-] as const;
-export type SetupState = typeof SETUP_STATES[number];
-
-export const SETUP_STEPS = ["admin", "store", "registration", "security", "smtp", "oidc", "saml", "mdns", "review"] as const;
-export type SetupStep = typeof SETUP_STEPS[number];
+export { SETUP_STATES, SETUP_STEPS } from "./service-contracts.js";
+export type {
+  SetupServiceOptions,
+  SetupSession,
+  SetupState,
+  SetupStep,
+} from "./service-contracts.js";
 
 const SETUP_SESSION_SECONDS = 15 * 60;
 const SETUP_SESSION_COOKIE = "prg32_setup_session";
@@ -31,22 +29,6 @@ export class SetupError extends Error {
     super(message, options);
     this.name = "SetupError";
   }
-}
-
-export interface SetupSession {
-  readonly id: string;
-  readonly csrfToken: string;
-  readonly expiresAt: number;
-}
-
-export interface SetupServiceOptions {
-  readonly config: BackendConfig;
-  readonly auth: AuthService;
-  readonly settings: SettingsService;
-  readonly providers: FederationProviderService | null;
-  readonly operations: FederationProviderOperations | null;
-  readonly audit?: AdminAuditLog;
-  readonly database: Database.Database | null;
 }
 
 interface SetupRow {
