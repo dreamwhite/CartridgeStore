@@ -1,7 +1,5 @@
 "use client";
 
-import type { FormEvent } from "react";
-
 import {
   federationErrorMessage,
   type FederationProvider,
@@ -11,8 +9,11 @@ import { Button } from "../ui/button";
 import {
   Field,
   Notice,
-  TextArea,
 } from "./presentation";
+import {
+  OidcProviderFields,
+  SamlProviderFields,
+} from "./provider-form-fields";
 import { useProviderForm } from "./use-provider-form";
 
 /** Properties shared by provider creation and provider editing forms. */
@@ -129,132 +130,51 @@ export function ProviderForm({
       </div>
 
       {protocol === "oidc" ? (
-        <div className="grid gap-4 md:grid-cols-2">
-          <Field
-            label="Client ID"
-            value={clientId}
-            onChange={(event) => setClientId(event.target.value)}
-          />
-          <label className="grid gap-1 text-sm font-medium">
-            <span>Client authentication method</span>
-            <select
-              value={clientAuthMethod}
-              onChange={(event) =>
-                setClientAuthMethod(
-                  event.target.value as FederationProvider["client_auth_method"],
-                )
-              }
-              className={
-                "min-h-10 rounded-md border border-[var(--color-border)] " +
-                "bg-[var(--color-surface)] px-3"
-              }
-            >
-              <option value="client_secret_basic">client_secret_basic</option>
-              <option value="client_secret_post">client_secret_post</option>
-              <option value="none">none</option>
-            </select>
-          </label>
-          <Field
-            label={provider ? "New client secret (optional)" : "Client secret"}
-            type="password"
-            value={clientSecret}
-            onChange={(event) => setClientSecret(event.target.value)}
-            autoComplete="new-password"
-            hint="Never displayed again; use rotation later to replace it."
-          />
-          <Field
-            label="Discovery issuer (optional)"
-            value={discoveryIssuer}
-            onChange={(event) => setDiscoveryIssuer(event.target.value)}
-          />
-          <Field
-            label="Redirect URI"
-            value={redirectUri || canonicalRedirect}
-            onChange={(event) => setRedirectUri(event.target.value)}
-            hint="Verify this against the backend public origin before saving."
-          />
-          <Field
-            label="Scopes"
-            value={scopes}
-            onChange={(event) => setScopes(event.target.value)}
-            hint="Comma-separated; include openid for usable OIDC login."
-          />
-        </div>
+        <OidcProviderFields
+          provider={provider}
+          clientId={clientId}
+          setClientId={(event) => setClientId(event.target.value)}
+          clientAuthMethod={clientAuthMethod}
+          setClientAuthMethod={setClientAuthMethod}
+          clientSecret={clientSecret}
+          setClientSecret={(event) => setClientSecret(event.target.value)}
+          discoveryIssuer={discoveryIssuer}
+          setDiscoveryIssuer={(event) =>
+            setDiscoveryIssuer(event.target.value)
+          }
+          redirectUri={redirectUri}
+          setRedirectUri={(event) => setRedirectUri(event.target.value)}
+          canonicalRedirect={canonicalRedirect}
+          scopes={scopes}
+          setScopes={(event) => setScopes(event.target.value)}
+        />
       ) : (
-        <div className="grid gap-4 md:grid-cols-2">
-          <Field
-            label="IdP Entity ID"
-            required
-            value={idpEntityId}
-            onChange={(event) => {
-              setIdpEntityId(event.target.value);
-              if (!issuer) setIssuer(event.target.value);
-            }}
-          />
-          <Field
-            label="IdP SSO URL"
-            required
-            value={entryPoint}
-            onChange={(event) => setEntryPoint(event.target.value)}
-          />
-          <Field
-            label="SP Entity ID"
-            required
-            value={spEntityId}
-            onChange={(event) => setSpEntityId(event.target.value)}
-          />
-          <Field
-            label="ACS URL"
-            value={acsUrl || canonicalAcs}
-            onChange={(event) => setAcsUrl(event.target.value)}
-            hint="Canonical callback: verify the configured public origin."
-          />
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={assertionsSigned}
-              onChange={(event) => setAssertionsSigned(event.target.checked)}
-            />
-            Require signed assertions
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={responsesSigned}
-              onChange={(event) => setResponsesSigned(event.target.checked)}
-            />
-            Require signed responses
-          </label>
-        </div>
-      )}
-
-      {protocol === "saml" && (
-        <div className="space-y-4">
-          <TextArea
-            label="Trusted IdP certificate PEM"
-            required={!provider}
-            value={certificate}
-            onChange={(event) => setCertificate(event.target.value)}
-            hint={
-              "PEM is submitted only to the certificate mutation. " +
-              "Existing PEM is never returned."
-            }
-          />
-          <TextArea
-            label="Replacement trust set (optional)"
-            value={trustedCertificates}
-            onChange={(event) => setTrustedCertificates(event.target.value)}
-            hint="Separate certificates with a blank line; maximum two trusted certificates."
-          />
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              checked={signRequests}
-              onChange={(event) => setSignRequests(event.target.checked)}
-            />
-            Sign authentication requests (requires backend-managed key material)
-          </label>
-        </div>
+        <SamlProviderFields
+          provider={provider}
+          idpEntityId={idpEntityId}
+          setIdpEntityId={(event) => setIdpEntityId(event.target.value)}
+          setIssuer={(event) => setIssuer(event.target.value)}
+          issuer={issuer}
+          entryPoint={entryPoint}
+          setEntryPoint={(event) => setEntryPoint(event.target.value)}
+          spEntityId={spEntityId}
+          setSpEntityId={(event) => setSpEntityId(event.target.value)}
+          acsUrl={acsUrl}
+          setAcsUrl={(event) => setAcsUrl(event.target.value)}
+          canonicalAcs={canonicalAcs}
+          certificate={certificate}
+          setCertificate={(event) => setCertificate(event.target.value)}
+          trustedCertificates={trustedCertificates}
+          setTrustedCertificates={(event) =>
+            setTrustedCertificates(event.target.value)
+          }
+          assertionsSigned={assertionsSigned}
+          setAssertionsSigned={setAssertionsSigned}
+          responsesSigned={responsesSigned}
+          setResponsesSigned={setResponsesSigned}
+          signRequests={signRequests}
+          setSignRequests={setSignRequests}
+        />
       )}
 
       {visibleError && <Notice error={visibleError} />}
