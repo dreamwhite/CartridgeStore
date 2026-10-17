@@ -11,6 +11,7 @@ import {
   type StorageObjectRecord,
   type StoragePaths
 } from "./types.js";
+import { verifyStorageObject } from "./object-verification.js";
 
 export const CARTRIDGE_MEDIA_TYPE = "application/vnd.prg32.cartridge";
 export const MAX_OBJECT_BYTES = 128 * 1024 * 1024;
@@ -323,31 +324,14 @@ export class ObjectStore {
   }
 
   verify(objectId: string): ObjectVerification {
-    const record = this.metadata(objectId);
-    if (!record) return { ok: false, code: "missing", message: "storage object row is missing" };
-    let resolved: ResolvedStorageObject;
-    try { resolved = this.resolve(objectId); } catch (error) {
-      const code = error instanceof StorageObjectError ? error.code : "object_invalid";
-      const verificationCode: ObjectVerification["code"] = code === "object_file_missing" ? "missing" : code === "object_symlink_rejected" ? "symlink" : code === "object_not_regular_file" ? "not_regular_file" : code === "object_size_mismatch" ? "size_mismatch" : code === "object_storage_key_invalid" ? "invalid_storage_key" : "missing";
-      return { ok: false, code: verificationCode, message: error instanceof Error ? error.message : "storage object is invalid" };
+    if (!this.metadata(objectId)) {
+      return {
+        ok: false,
+        code: "missing",
+        message: "storage object row is missing",
+      };
     }
-    const hash = crypto.createHash("sha256");
-    let total = 0;
-    const buffer = Buffer.allocUnsafe(64 * 1024);
-    try {
-      while (true) {
-        const count = fs.readSync(resolved.fileDescriptor, buffer, 0, buffer.byteLength, null);
-        if (count === 0) break;
-        total += count;
-        hash.update(buffer.subarray(0, count));
-      }
-    } finally {
-      fs.closeSync(resolved.fileDescriptor);
-    }
-    const actualSha256 = hash.digest("hex");
-    if (total !== record.sizeBytes) return { ok: false, code: "size_mismatch", message: "storage object size does not match metadata", actualSizeBytes: total, actualSha256 };
-    if (actualSha256 !== record.sha256) return { ok: false, code: "hash_mismatch", message: "storage object hash does not match metadata", actualSizeBytes: total, actualSha256 };
-    return { ok: true, code: "ok", message: "storage object is intact", actualSizeBytes: total, actualSha256 };
+    return verifyStorageObject(objectId, (value) => this.resolve(value));
   }
 }
 
@@ -382,28 +366,7 @@ export class ReadonlyObjectStore {
   }
 
   verify(objectId: string): ObjectVerification {
-    let resolved: ResolvedStorageObject;
-    try { resolved = this.resolve(objectId); } catch (error) {
-      const code = error instanceof StorageObjectError ? error.code : "object_invalid";
-      const verificationCode: ObjectVerification["code"] = code === "object_file_missing" ? "missing" : code === "object_symlink_rejected" ? "symlink" : code === "object_not_regular_file" ? "not_regular_file" : code === "object_size_mismatch" ? "size_mismatch" : code === "object_storage_key_invalid" ? "invalid_storage_key" : "missing";
-      return { ok: false, code: verificationCode, message: error instanceof Error ? error.message : "storage object is invalid" };
-    }
-    const record = resolved.record;
-    const hash = crypto.createHash("sha256");
-    let total = 0;
-    const buffer = Buffer.allocUnsafe(64 * 1024);
-    try {
-      while (true) {
-        const count = fs.readSync(resolved.fileDescriptor, buffer, 0, buffer.byteLength, null);
-        if (count === 0) break;
-        total += count;
-        hash.update(buffer.subarray(0, count));
-      }
-    } finally { fs.closeSync(resolved.fileDescriptor); }
-    const actualSha256 = hash.digest("hex");
-    if (total !== record.sizeBytes) return { ok: false, code: "size_mismatch", message: "storage object size does not match metadata", actualSizeBytes: total, actualSha256 };
-    if (actualSha256 !== record.sha256) return { ok: false, code: "hash_mismatch", message: "storage object hash does not match metadata", actualSizeBytes: total, actualSha256 };
-    return { ok: true, code: "ok", message: "storage object is intact", actualSizeBytes: total, actualSha256 };
+    return verifyStorageObject(objectId, (value) => this.resolve(value));
   }
 }
 
