@@ -23,6 +23,7 @@ import {
 import { resolveRuntimeMode } from "./env-runtime-mode.js";
 import { resolveNetworkConfig } from "./env-network.js";
 import { resolveSessionCookieConfig } from "./env-session.js";
+import { resolveSamlLimitsConfig } from "./env-saml-limits.js";
 import { resolveWebAuthnConfig } from "./env-webauthn.js";
 
 export type { BackendConfig } from "./env-contracts.js";
@@ -355,21 +356,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
     federationPublicOrigin,
     frontendPublicOrigin,
     corsAllowedOrigins,
-    samlMaxPostBytes: positiveInteger(
-      "PRG32_BACKEND_SAML_MAX_POST_BYTES",
-      environment.PRG32_BACKEND_SAML_MAX_POST_BYTES,
-      2 * 1024 * 1024
-    ),
-    samlMaxResponseBytes: positiveInteger(
-      "PRG32_BACKEND_SAML_MAX_RESPONSE_BYTES",
-      environment.PRG32_BACKEND_SAML_MAX_RESPONSE_BYTES,
-      1024 * 1024
-    ),
-    samlMaxRelayStateBytes: positiveInteger(
-      "PRG32_BACKEND_SAML_MAX_RELAY_STATE_BYTES",
-      environment.PRG32_BACKEND_SAML_MAX_RELAY_STATE_BYTES,
-      1024
-    ),
+    ...resolveSamlLimitsConfig(environment),
     secretEncryptionEnabled,
     secretKeyRegistryPath: secretKeyRegistryPath ? path.resolve(secretKeyRegistryPath) : undefined,
     secretMaxRows: positiveInteger(
