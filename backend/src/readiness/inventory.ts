@@ -1,8 +1,5 @@
 import {
-  READINESS_ABI,
-  VERSION_TUPLE,
   type ReadinessGate,
-  type ReadinessClassification,
   type RouteInventoryEntry,
 } from "./inventory-contracts.js";
 
