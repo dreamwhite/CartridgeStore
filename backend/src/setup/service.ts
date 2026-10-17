@@ -5,7 +5,7 @@ import type Database from "better-sqlite3";
 import type { ProviderInput } from "../federation/provider.js";
 import { loadSamlMetadata, parseSamlMetadata, ProviderValidationError, validateOidcDiscovery, validateParsedSamlMetadata } from "./provider-validation.js";
 import { SetupError } from "./errors.js";
-import { isSetupRecord, parseSetupSteps, safeProviderSummary, setupBooleanValue, setupStringValue, type SetupRow } from "./codecs.js";
+import { isSetupRecord, parseSetupSteps, setupBooleanValue, setupStringValue, type SetupRow } from "./codecs.js";
 import {
   SETUP_STEPS,
   type SetupServiceOptions,
@@ -17,6 +17,7 @@ import {
   readApplicationMdnsPreference,
   readSetupInfrastructure,
 } from "./infrastructure.js";
+import { buildSetupProgress, buildSetupStatus } from "./read-model.js";
 
 export { SETUP_STATES, SETUP_STEPS } from "./service-contracts.js";
 export type {
@@ -85,43 +86,24 @@ export class SetupService {
       mdns: { infrastructure_allowed: false, application_enabled: false, effective_enabled: false, service_type: "_prg32store._tcp.local.", abi: "prg32-store-discovery-1.0", port: this.options.config.mdnsPort, restart_required: true }
     };
     const row = this.row();
-    const state = infrastructure.ready ? row.state : "INFRASTRUCTURE_NOT_READY";
-    return {
-      ok: true,
-      state,
-      setup_required: state === "INSTALLATION_REQUIRED" || state === "INSTALLATION_IN_PROGRESS" || state === "INSTALLATION_RECOVERY_REQUIRED",
-      authorization_required: state !== "INSTALLATION_COMPLETE" && state !== "INFRASTRUCTURE_NOT_READY",
+    const applicationMdnsEnabled = readApplicationMdnsPreference(this.database);
+    return buildSetupStatus(
+      this.options,
       infrastructure,
-      public_origins: {
-        store: this.options.config.frontendPublicOrigin ?? null,
-        api: this.options.config.federationPublicOrigin ?? this.options.config.oidcPublicOrigin ?? null
-      },
-      mdns: {
-        infrastructure_allowed: this.options.config.mdnsEnabled,
-        application_enabled: readApplicationMdnsPreference(this.database),
-        effective_enabled: this.options.config.mdnsEnabled && readApplicationMdnsPreference(this.database),
-        service_type: "_prg32store._tcp.local.",
-        abi: "prg32-store-discovery-1.0",
-        port: this.options.config.mdnsPort,
-        restart_required: true
-      }
-    };
+      row,
+      applicationMdnsEnabled,
+    );
   }
 
   progress(session: SetupSession): Record<string, unknown> {
     this.requireSession(session);
     const row = this.row();
-    return {
-      ok: true,
-      state: row.state,
-      completed_steps: parseSetupSteps(row.completed_steps_json),
-      admin_user_id: row.admin_user_id,
-      started_at: row.started_at,
-      completed_at: row.completed_at,
-      csrf_token: session.csrfToken,
-      settings: this.options.settings.read(),
-      providers: this.options.providers?.list().map((provider) => safeProviderSummary(provider)) ?? []
-    };
+    return buildSetupProgress(
+      row,
+      session,
+      this.options.settings.read(),
+      this.options.providers?.list() ?? [],
+    );
   }
 
   authorize(token: string): { readonly session: SetupSession; readonly progress: Record<string, unknown> } {
