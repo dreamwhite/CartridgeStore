@@ -19,6 +19,7 @@ import {
   validatePublicOriginConfig,
 } from "./env-origins.js";
 import { resolveRuntimeMode } from "./env-runtime-mode.js";
+import { resolveSessionCookieConfig } from "./env-session.js";
 import { resolveWebAuthnConfig } from "./env-webauthn.js";
 
 export type { BackendConfig } from "./env-contracts.js";
@@ -237,28 +238,11 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
       throw new Error("backup requires the isolated authentication writer profile");
     }
   }
-  const authCookieSameSite = (environment.PRG32_BACKEND_SESSION_SAMESITE ?? "lax").trim().toLowerCase();
-  if (authCookieSameSite !== "lax" && authCookieSameSite !== "strict" && authCookieSameSite !== "none") {
-    throw new Error("PRG32_BACKEND_SESSION_SAMESITE must be lax, strict, or none");
-  }
-  const authCookieSecure = booleanValue(
-    "PRG32_BACKEND_SESSION_SECURE",
-    environment.PRG32_BACKEND_SESSION_SECURE,
-    (environment.NODE_ENV ?? "").trim().toLowerCase() === "production"
-  );
-  if ((environment.NODE_ENV ?? "").trim().toLowerCase() === "production" && !authCookieSecure) {
-    throw new Error("PRG32_BACKEND_SESSION_SECURE must remain enabled in production");
-  }
-  if (authCookieSameSite === "none" && !authCookieSecure) {
-    throw new Error("SameSite=None requires a Secure authentication cookie");
-  }
-  const authCookieDomain = optionalNonEmpty(environment.PRG32_BACKEND_SESSION_COOKIE_DOMAIN);
-  if (authCookieDomain && !/^\.?[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?$/.test(authCookieDomain)) {
-    throw new Error("PRG32_BACKEND_SESSION_COOKIE_DOMAIN must be a valid cookie domain");
-  }
-  if (authCookieDomain?.includes("..")) {
-    throw new Error("PRG32_BACKEND_SESSION_COOKIE_DOMAIN must not contain empty labels");
-  }
+  const {
+    authCookieSecure,
+    authCookieSameSite,
+    authCookieDomain,
+  } = resolveSessionCookieConfig(environment);
   const mdnsEnabled = booleanValue("PRG32_BACKEND_MDNS_ENABLED", environment.PRG32_BACKEND_MDNS_ENABLED, false);
   const trustProxy = booleanValue("PRG32_BACKEND_TRUST_PROXY", environment.PRG32_BACKEND_TRUST_PROXY, false);
   const trustProxyHops = positiveInteger("PRG32_BACKEND_TRUST_PROXY_HOPS", environment.PRG32_BACKEND_TRUST_PROXY_HOPS, 1);
