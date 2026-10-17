@@ -20,15 +20,25 @@ import { SessionStore, type SessionRecord } from "./session.js";
 import { hashApiToken } from "./tokens.js";
 import { EmailDeliveryError, type EmailService } from "../email/service.js";
 import type { RuntimePolicy } from "../settings/runtime-policy.js";
+import {
+  AuthConflictError,
+  AuthValidationError,
+  AuthWriteDisabledError,
+} from "./errors.js";
+import {
+  authScalar,
+  AUTH_USERNAME_MAX_LENGTH,
+  isValidAuthEmail,
+  validateAccountInput,
+  validatePassword,
+} from "./validation.js";
 
-const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-const USERNAME_MAX_LENGTH = 80;
-
-function scalar(value: unknown, fallback = ""): string {
-  return typeof value === "string" || typeof value === "number" || typeof value === "boolean"
-    ? String(value)
-    : fallback;
-}
+export {
+  AuthConflictError,
+  AuthValidationError,
+  AuthWriteDisabledError,
+} from "./errors.js";
+export { validatePassword } from "./validation.js";
 
 export interface AuthServiceOptions {
   readonly config: BackendConfig;
@@ -41,13 +51,6 @@ export interface AuthRequestContext {
   readonly principal: Principal;
   readonly session: SessionRecord | null;
   readonly bearerOnly: boolean;
-}
-
-export class AuthWriteDisabledError extends Error {
-  constructor() {
-    super("authentication writes are disabled in this backend");
-    this.name = "AuthWriteDisabledError";
-  }
 }
 
 export class AuthService {
@@ -187,10 +190,10 @@ export class AuthService {
    * continues to use bootstrap() above.
    */
   bootstrapWithinTransaction(payload: Record<string, unknown>, db = this.writableDatabase()): Principal {
-    const username = scalar(payload.username).trim();
-    const email = scalar(payload.email).trim().toLowerCase();
-    const password = scalar(payload.password);
-    const confirmation = scalar(payload.password_confirm, password);
+    const username = authScalar(payload.username).trim();
+    const email = authScalar(payload.email).trim().toLowerCase();
+    const password = authScalar(payload.password);
+    const confirmation = authScalar(payload.password_confirm, password);
     validateAccountInput(username, email, password, confirmation);
     let userId = 0;
     const existingAdmin = db.prepare("SELECT id FROM users WHERE role = 'admin' OR username = 'admin' LIMIT 1").get();
@@ -226,13 +229,13 @@ export class AuthService {
   async requestRegistrationDetails(payload: Record<string, unknown>): Promise<{ readonly email: string }> {
     const db = this.writableDatabase();
     ensureAuthWorkflowSchema(db);
-    const normalized = scalar(payload.email).trim().toLowerCase();
-    if (!EMAIL_RE.test(normalized)) throw new AuthValidationError("email must be valid");
-    const username = scalar(payload.username, normalized).trim();
-    const password = scalar(payload.password);
-    const confirmation = scalar(payload.password_confirm, password);
+    const normalized = authScalar(payload.email).trim().toLowerCase();
+    if (!isValidAuthEmail(normalized)) throw new AuthValidationError("email must be valid");
+    const username = authScalar(payload.username, normalized).trim();
+    const password = authScalar(payload.password);
+    const confirmation = authScalar(payload.password_confirm, password);
     if (payload.username !== undefined || payload.password !== undefined || payload.password_confirm !== undefined) {
-      if (!username || username.length > USERNAME_MAX_LENGTH) throw new AuthValidationError("username is required and must be at most 80 characters");
+      if (!username || username.length > AUTH_USERNAME_MAX_LENGTH) throw new AuthValidationError("username is required and must be at most 80 characters");
       validatePassword(password, confirmation);
     }
     let token = "";
@@ -275,9 +278,9 @@ export class AuthService {
   completeRegistration(payload: Record<string, unknown>): Principal {
     const db = this.writableDatabase();
     ensureAuthWorkflowSchema(db);
-    const token = scalar(payload.token);
-    const password = scalar(payload.password);
-    const confirmation = scalar(payload.password_confirm, password);
+    const token = authScalar(payload.token);
+    const password = authScalar(payload.password);
+    const confirmation = authScalar(payload.password_confirm, password);
     try {
       db.exec("BEGIN IMMEDIATE");
       const record = db.prepare(
@@ -395,25 +398,6 @@ export class AuthService {
   revokeToken(userId: number, tokenId: number): boolean {
     return this.writableDatabase().prepare("DELETE FROM api_tokens WHERE id = ? AND user_id = ?").run(tokenId, userId).changes > 0;
   }
-}
-
-export class AuthValidationError extends Error {
-  constructor(message: string) { super(message); this.name = "AuthValidationError"; }
-}
-
-export class AuthConflictError extends Error {
-  constructor(message: string) { super(message); this.name = "AuthConflictError"; }
-}
-
-export function validatePassword(password: string, confirmation: string): void {
-  if (password.length < 10) throw new AuthValidationError("password must be at least 10 characters");
-  if (password !== confirmation) throw new AuthValidationError("password confirmation does not match");
-}
-
-function validateAccountInput(username: string, email: string, password: string, confirmation: string): void {
-  if (!username || username.length > USERNAME_MAX_LENGTH) throw new AuthValidationError("username is required and must be at most 80 characters");
-  if (!EMAIL_RE.test(email)) throw new AuthValidationError("email must be valid");
-  validatePassword(password, confirmation);
 }
 
 function registrationDomain(database: Database.Database): string {
