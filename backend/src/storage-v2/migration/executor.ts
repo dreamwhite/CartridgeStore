@@ -6,21 +6,16 @@ import type Database from "better-sqlite3";
 
 import { openTargetStorage, initializeDisposableStorage, isDisposablePath } from "../database.js";
 import { ObjectStore, readStorageObjectRow } from "../objects.js";
-import { TARGET_SCHEMA_VERSION, TARGET_STORAGE_LAYOUT_VERSION } from "../types.js";
 import { parseCartridge } from "../../submission/prg32.js";
 import {
   canonicalJson,
   hashFile,
-  parseBoundedJson,
   readBounded,
-  resolveLegacyReference,
   writeAtomic
 } from "../legacy/filesystem.js";
 import { openLegacySnapshot } from "../legacy/database.js";
-import { verifyLegacyManifest } from "../legacy/manifest.js";
 import {
   MAX_CARTRIDGE_BYTES,
-  MAX_MANIFEST_BYTES,
   type LegacyArtifactEntry,
   type LegacyManifest,
   type LegacyMediaEntry,
@@ -51,17 +46,16 @@ import {
 } from "./types.js";
 
 const DEFAULT_MIGRATION_TIMESTAMP = "1970-01-01T00:00:00.000Z";
-const SAFE_SOURCE_REF = /^(?!\/)(?!.*(?:^|\/)\.\.(?:\/|$))(?!.*\\)(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+$/u;
-
-export class MigrationError extends Error {
-  readonly code: string;
-
-  constructor(message: string, code = "migration_failed", options?: ErrorOptions) {
-    super(message, options);
-    this.name = "MigrationError";
-    this.code = code;
-  }
-}
+export { MigrationError } from "./errors.js";
+import { MigrationError } from "./errors.js";
+import {
+  loadMigrationManifest,
+  sourceFilePath,
+  targetFilePath,
+  validateMigrationManifest,
+  validateMigrationRoots,
+  verifyMigrationSource,
+} from "./validation.js";
 
 function now(): string {
   return new Date().toISOString();
@@ -73,59 +67,11 @@ function json(value: unknown): string {
 
 function isInside(parent: string, candidate: string): boolean {
   const relative = path.relative(path.resolve(parent), path.resolve(candidate));
-  return relative !== "" && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative);
-}
-
-function sourceFilePath(config: LegacySnapshotConfig, sourceRef: string): string {
-  if (!SAFE_SOURCE_REF.test(sourceRef)) throw new MigrationError("source reference is unsafe", "migration_source_path_unsafe");
-  const root = path.resolve(config.root);
-  const resolved = resolveLegacyReference(root, root, sourceRef);
-  if (!resolved.safe || !fs.existsSync(resolved.absolutePath)) throw new MigrationError("source reference is unavailable", "migration_source_file_missing");
-  const stats = fs.lstatSync(resolved.absolutePath);
-  if (!stats.isFile() || stats.isSymbolicLink()) throw new MigrationError("source reference is not a regular file", "migration_source_file_unsafe");
-  return resolved.absolutePath;
-}
-
-function targetFilePath(root: string, relative: string): string {
-  const target = path.resolve(root, relative);
-  if (!isInside(root, target) || relative.includes("..") || path.isAbsolute(relative)) throw new MigrationError("target staging path is unsafe", "migration_target_path_unsafe");
-  let current = root;
-  for (const part of path.relative(root, target).split(path.sep).filter(Boolean)) {
-    current = path.join(current, part);
-    if (fs.existsSync(current) && fs.lstatSync(current).isSymbolicLink()) throw new MigrationError("target staging path contains a symlink", "migration_target_path_unsafe");
-  }
-  return target;
-}
-
-function validateManifest(manifest: LegacyManifest): void {
-  if (manifest.manifestAbi !== "prg32-storage-migration-manifest-1.0" || manifest.manifestVersion !== 1) throw new MigrationError("manifest ABI is unsupported", "migration_manifest_unsupported");
-  if (manifest.target.schemaVersion !== TARGET_SCHEMA_VERSION || manifest.target.storageLayoutVersion !== TARGET_STORAGE_LAYOUT_VERSION) throw new MigrationError("manifest target version is incompatible", "migration_manifest_target_incompatible");
-  if (!manifest.readiness.inventoryComplete || !manifest.readiness.migrationReady || manifest.readiness.operationalCutoverReady !== false || manifest.readiness.blockingAnomalyCount !== 0) throw new MigrationError("manifest is not migration-ready", "migration_manifest_not_ready");
-  if (!/^[a-f0-9]{64}$/u.test(manifest.manifestSha256)) throw new MigrationError("manifest fingerprint is invalid", "migration_manifest_invalid");
-}
-
-function loadManifest(config: MigrationConfig): LegacyManifest {
-  if (config.manifest) return config.manifest;
-  if (!config.manifestPath) throw new MigrationError("verified manifest path is required", "migration_manifest_required");
-  const parsed = parseBoundedJson(path.resolve(config.manifestPath), MAX_MANIFEST_BYTES, "migration manifest");
-  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) throw new MigrationError("manifest must be an object", "migration_manifest_invalid");
-  return parsed as LegacyManifest;
-}
-
-function validateRoots(config: MigrationConfig): string {
-  const source = path.resolve(config.snapshot.root);
-  const target = path.resolve(config.targetRoot);
-  if (!source || !target || source === path.parse(source).root || target === path.parse(target).root) throw new MigrationError("source and target roots must be explicit non-root directories", "migration_root_unsafe");
-  if (!isDisposablePath(target) || target === path.resolve(process.cwd()) || isInside(process.cwd(), target)) throw new MigrationError("target root is not a disposable path", "migration_target_forbidden");
-  if (source === target || isInside(source, target) || isInside(target, source)) throw new MigrationError("source and target roots overlap", "migration_root_overlap");
-  if (fs.existsSync(target) && fs.lstatSync(target).isSymbolicLink()) throw new MigrationError("target root may not be a symlink", "migration_target_symlink");
-  if (fs.existsSync(source) && fs.lstatSync(source).isSymbolicLink()) throw new MigrationError("source root may not be a symlink", "migration_source_symlink");
-  return target;
-}
-
-function sourceIdentity(config: MigrationConfig, manifest: LegacyManifest): void {
-  const verification = verifyLegacyManifest(config.snapshot, manifest);
-  if (!verification.ok) throw new MigrationError("legacy manifest verification failed", "migration_source_verification_failed");
+  return (
+    relative !== "" &&
+    !relative.startsWith(`..${path.sep}`) &&
+    !path.isAbsolute(relative)
+  );
 }
 
 function columnNames(sqlite: Database.Database, table: string): string[] {
@@ -414,10 +360,10 @@ function updateCompleted(journal: MigrationJournal, field: "completedTables" | "
 
 export function migrateLegacySnapshot(config: MigrationConfig): MigrationResult {
   if (config.authorization !== DISPOSABLE_MIGRATION_AUTHORIZATION) throw new MigrationError("explicit disposable authorization is required", "migration_authorization_required");
-  const targetRoot = validateRoots(config);
-  const manifest = loadManifest(config);
-  validateManifest(manifest);
-  sourceIdentity(config, manifest);
+  const targetRoot = validateMigrationRoots(config);
+  const manifest = loadMigrationManifest(config);
+  validateMigrationManifest(manifest);
+  verifyMigrationSource(config, manifest);
   const plan = planMigration(manifest);
   const existingJournal = readMigrationJournal(targetRoot, plan.migrationId);
   if (!existingJournal) {
@@ -521,10 +467,10 @@ export function migrateLegacySnapshot(config: MigrationConfig): MigrationResult 
 
 export function verifyMigration(config: MigrationConfig): MigrationResult {
   if (config.authorization !== DISPOSABLE_MIGRATION_AUTHORIZATION) throw new MigrationError("explicit disposable authorization is required", "migration_authorization_required");
-  const targetRoot = validateRoots(config);
-  const manifest = loadManifest(config);
-  validateManifest(manifest);
-  sourceIdentity(config, manifest);
+  const targetRoot = validateMigrationRoots(config);
+  const manifest = loadMigrationManifest(config);
+  validateMigrationManifest(manifest);
+  verifyMigrationSource(config, manifest);
   const plan = planMigration(manifest);
   const journal = readMigrationJournal(targetRoot, plan.migrationId);
   if (!journal) throw new MigrationError("migration journal is missing", "migration_journal_missing");
