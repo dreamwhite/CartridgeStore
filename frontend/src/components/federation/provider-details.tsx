@@ -3,17 +3,18 @@
 import Link from "next/link";
 
 import type { FederationProviderInput } from "../../lib/api/federation-admin";
-import { publicApiPath } from "../../lib/api/origin";
 import { useCurrentUser } from "../../lib/auth/use-current-user";
 import { Button } from "../ui/button";
 import { hasFederationPermission } from "./FederationAdminGuard";
 import {
   CertificatePanel,
-  Endpoint,
   Notice,
   Panel,
-  StatusBadge,
 } from "./presentation";
+import {
+  ProviderEndpointPanel,
+  ProviderHeader,
+} from "./provider-details-panels";
 import { ProviderForm } from "./provider-form";
 import { useProviderDetails } from "./use-provider-details";
 import { useSensitiveActions } from "./use-sensitive-actions";
@@ -84,54 +85,24 @@ export function ProviderDetails({ providerId }: { providerId: string }) {
   return (
     <div className="space-y-5">
       {actions.dialog}
-      <div>
-        <Link
-          className="text-sm font-semibold text-violet-700 hover:underline"
-          href="/admin/federation/providers"
-        >
-          ← Providers
-        </Link>
-        <div className="mt-2 flex flex-wrap items-start justify-between gap-3">
-          <div>
-            <div className="flex flex-wrap items-center gap-2">
-              <h2 className="text-3xl font-bold">{provider.display_name}</h2>
-              <StatusBadge enabled={provider.enabled} />
-            </div>
-            <p className="mt-1 font-mono text-xs text-[var(--color-text-muted)]">
-              {provider.provider_id} · {provider.protocol.toUpperCase()}
-            </p>
-          </div>
-          <div className="flex gap-2">
-            {manage && (
-              <Button
-                variant="secondary"
-                onClick={() => setEditing((value) => !value)}
-              >
-                {editing ? "Close edit" : "Edit"}
-              </Button>
-            )}
-            {manage && (
-              <Button
-                variant={provider.enabled ? "danger" : "primary"}
-                onClick={() => {
-                  if (
-                    provider.enabled &&
-                    !window.confirm(
-                      "Disable this provider? New federated logins will stop.",
-                    )
-                  ) {
-                    return;
-                  }
-                  sensitive(() => stateMutation.mutate(!provider.enabled));
-                }}
-                disabled={stateMutation.isPending}
-              >
-                {provider.enabled ? "Disable" : "Enable"}
-              </Button>
-            )}
-          </div>
-        </div>
-      </div>
+      <ProviderHeader
+        provider={provider}
+        manage={manage}
+        editing={editing}
+        toggleEditing={() => setEditing((value) => !value)}
+        toggleEnabled={() => {
+          if (
+            provider.enabled &&
+            !window.confirm(
+              "Disable this provider? New federated logins will stop.",
+            )
+          ) {
+            return;
+          }
+          sensitive(() => stateMutation.mutate(!provider.enabled));
+        }}
+        statePending={stateMutation.isPending}
+      />
 
       <Notice
         error={
@@ -218,43 +189,12 @@ export function ProviderDetails({ providerId }: { providerId: string }) {
             )}
           </Panel>
 
-          <Panel title="Canonical endpoints">
-            <Endpoint
-              label="OIDC callback"
-              value={
-                provider.protocol === "oidc"
-                  ? provider.redirect_uri ?? canonicalRedirect
-                  : "Not applicable"
-              }
-            />
-            <Endpoint
-              label="SAML ACS"
-              value={
-                provider.protocol === "saml"
-                  ? provider.acs_url ?? canonicalAcs
-                  : "Not applicable"
-              }
-            />
-            <Endpoint
-              label="SAML metadata"
-              value={
-                provider.protocol === "saml"
-                  ? `${publicOrigin}/api/auth/saml/${encodeURIComponent(
-                      provider.provider_id,
-                    )}/metadata`
-                  : "Not applicable"
-              }
-              link={
-                provider.protocol === "saml"
-                  ? publicApiPath(
-                      `/api/auth/saml/${encodeURIComponent(
-                        provider.provider_id,
-                      )}/metadata`,
-                    )
-                  : undefined
-              }
-            />
-          </Panel>
+          <ProviderEndpointPanel
+            provider={provider}
+            publicOrigin={publicOrigin}
+            canonicalRedirect={canonicalRedirect}
+            canonicalAcs={canonicalAcs}
+          />
 
           {manage && provider.protocol === "oidc" && (
             <Panel title="Rotate OIDC client secret">
