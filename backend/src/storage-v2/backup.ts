@@ -41,8 +41,8 @@ import {
 } from "./backup-restore-io.js";
 import {
   manifestPayload,
-  verifyCanonicalBackup as verifyBackupArchive,
-} from "./backup-verification.js";
+} from "./backup-manifest.js";
+import { verifyCanonicalBackup as verifyBackupArchive } from "./backup-verification.js";
 import {
   assertDatabase,
   canonicalJson,

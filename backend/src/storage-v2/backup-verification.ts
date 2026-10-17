@@ -2,160 +2,28 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 
-import type { BackendConfig } from "../config/env.js";
 import { extractZipArchive, scanZipArchive } from "../backup/archive.js";
 import { BackupError } from "../backup/format.js";
 import { auditStorage } from "./integrity.js";
 import { openTargetStorage } from "./database.js";
 import {
-  CANONICAL_BACKUP_ABI,
-  CANONICAL_BACKUP_VERSION,
-  DEFAULT_CANONICAL_BACKUP_LIMITS,
   type CanonicalBackupLimits,
   type CanonicalBackupManifest,
 } from "./backup-contracts.js";
 import { copyExtractedData } from "./backup-restore-io.js";
+import {
+  canonicalBackupConfig,
+  canonicalBackupLimits,
+  readCanonicalManifest,
+  resolvedBackupPath,
+} from "./backup-manifest.js";
 import {
   assertDatabase,
   canonicalJson,
   hashText,
   sha256File,
 } from "./backup-validation.js";
-import { TARGET_VERSION_TUPLE } from "./schema.js";
 import type { ObjectKind } from "./types.js";
-
-function resolved(value: string, label: string): string {
-  if (!value || value.trim() === "") {
-    throw new BackupError(
-      `${label} is required`,
-      "canonical_backup_path_required",
-    );
-  }
-  const result = path.resolve(value);
-  if (result === path.parse(result).root) {
-    throw new BackupError(
-      `${label} may not be the filesystem root`,
-      "canonical_backup_path_unsafe",
-    );
-  }
-  return result;
-}
-
-/** Serializes the manifest payload before its canonical hash is added. */
-export function manifestPayload(
-  manifest: Omit<CanonicalBackupManifest, "canonical_manifest_sha256">,
-): string {
-  return `${canonicalJson(manifest)}\n`;
-}
-
-function limits(
-  value?: Partial<CanonicalBackupLimits>,
-): CanonicalBackupLimits {
-  const result = { ...DEFAULT_CANONICAL_BACKUP_LIMITS, ...value };
-  for (const [key, numberValue] of Object.entries(result)) {
-    if (!Number.isSafeInteger(numberValue) || numberValue <= 0) {
-      throw new BackupError(
-        `canonical backup limit ${key} is invalid`,
-        "canonical_backup_limit_invalid",
-      );
-    }
-  }
-  return result;
-}
-
-function backendConfig(limitsValue: CanonicalBackupLimits): BackendConfig {
-  return {
-    backupMaxArchiveBytes: limitsValue.maxArchiveBytes,
-    backupMaxExpandedBytes: limitsValue.maxExpandedBytes,
-    backupMaxEntryBytes: limitsValue.maxEntryBytes,
-    backupMaxManifestBytes: limitsValue.maxManifestBytes,
-    backupMaxEntries: limitsValue.maxEntries,
-    backupMaxPathBytes: limitsValue.maxPathBytes,
-    backupMaxPathDepth: limitsValue.maxPathDepth,
-    backupMaxCompressionRatio: limitsValue.maxCompressionRatio,
-  } as BackendConfig;
-}
-
-function readManifest(
-  extractedPath: string,
-  limitValue: CanonicalBackupLimits,
-): { readonly manifest: CanonicalBackupManifest; readonly bytes: Buffer } {
-  const bytes = fs.readFileSync(extractedPath);
-  if (bytes.byteLength > limitValue.maxManifestBytes) {
-    throw new BackupError(
-      "canonical backup manifest is too large",
-      "canonical_backup_manifest_too_large",
-    );
-  }
-  let value: unknown;
-  try {
-    value = JSON.parse(bytes.toString("utf8")) as unknown;
-  } catch {
-    throw new BackupError(
-      "canonical backup manifest is invalid",
-      "canonical_backup_manifest_invalid",
-    );
-  }
-  if (value === null || typeof value !== "object" || Array.isArray(value)) {
-    throw new BackupError(
-      "canonical backup manifest is invalid",
-      "canonical_backup_manifest_invalid",
-    );
-  }
-  const manifest = value as Partial<CanonicalBackupManifest>;
-  if (
-    manifest.abi !== CANONICAL_BACKUP_ABI ||
-    manifest.format_version !== CANONICAL_BACKUP_VERSION ||
-    manifest.application !== "prg32-cartridge-store" ||
-    typeof manifest.backup_id !== "string" ||
-    !manifest.snapshot ||
-    !manifest.versions ||
-    !Array.isArray(manifest.inventory) ||
-    typeof manifest.canonical_manifest_sha256 !== "string" ||
-    !/^[a-f0-9]{64}$/u.test(manifest.canonical_manifest_sha256)
-  ) {
-    throw new BackupError(
-      "canonical backup manifest is incompatible",
-      "canonical_backup_manifest_incompatible",
-    );
-  }
-  if (
-    manifest.versions.schemaVersion !== TARGET_VERSION_TUPLE.schemaVersion ||
-    manifest.versions.storageLayoutVersion !==
-      TARGET_VERSION_TUPLE.storageLayoutVersion ||
-    manifest.versions.publicationJournalVersion !==
-      TARGET_VERSION_TUPLE.publicationJournalVersion ||
-    manifest.versions.backupFormatVersion !==
-      TARGET_VERSION_TUPLE.backupFormatVersion
-  ) {
-    throw new BackupError(
-      "canonical backup version tuple is incompatible",
-      "canonical_backup_version_incompatible",
-    );
-  }
-  const parsedManifest = manifest as CanonicalBackupManifest;
-  const withoutHash = JSON.parse(JSON.stringify(parsedManifest)) as Record<
-    string,
-    unknown
-  >;
-  delete withoutHash.canonical_manifest_sha256;
-  if (
-    hashText(
-      manifestPayload(
-        withoutHash as Omit<
-          CanonicalBackupManifest,
-          "canonical_manifest_sha256"
-        >,
-      ),
-    ) !== parsedManifest.canonical_manifest_sha256
-  ) {
-    throw new BackupError(
-      "canonical backup manifest hash is invalid",
-      "canonical_backup_manifest_tampered",
-    );
-  }
-  return { manifest: parsedManifest, bytes };
-}
 
 function prepareVerificationRoot(
   extracted: ReturnType<typeof extractZipArchive>,
@@ -194,9 +62,9 @@ export function verifyCanonicalBackup(
   readonly archiveSha256: string;
   readonly archiveBytes: number;
 } {
-  const archivePath = resolved(archivePathValue, "archive path");
-  const limitValue = limits(options.limits);
-  const config = backendConfig(limitValue);
+  const archivePath = resolvedBackupPath(archivePathValue, "archive path");
+  const limitValue = canonicalBackupLimits(options.limits);
+  const config = canonicalBackupConfig(limitValue);
   scanZipArchive(archivePath, config);
   const temporary = fs.mkdtempSync(
     path.join(os.tmpdir(), "prg32-backup-verify-"),
@@ -217,7 +85,7 @@ export function verifyCanonicalBackup(
         "canonical_backup_required_file_missing",
       );
     }
-    const parsed = readManifest(extracted.manifestPath, limitValue);
+    const parsed = readCanonicalManifest(extracted.manifestPath, limitValue);
     const sidecar = fs
       .readFileSync(path.join(temporary, "manifest.sha256"), "utf8")
       .trim();
