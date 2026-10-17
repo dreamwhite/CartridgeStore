@@ -1,8 +1,8 @@
 import path from "node:path";
 
-import { parseLegacyConfiguredUsers, type LegacyConfiguredUser } from "../auth/tokens.js";
-import { CANONICAL_DISPOSABLE_READ_MODE, CANONICAL_OPERATIONAL_READ_MODE, CANONICAL_OPERATIONAL_WORKFLOW_MODE, CANONICAL_READ_AUTHORIZATION, CANONICAL_WRITE_AUTHORIZATION, CANONICAL_WORKFLOW_MODE, LEGACY_READ_MODE, type CatalogReadMode, type CanonicalWorkflowMode } from "../storage-v2/read-mode.js";
-import { CANDIDATE_RUNTIME_AUTHORIZATION, CANDIDATE_RUNTIME_MODE, type CandidateRuntimeMode } from "../runtime/candidate.js";
+import { parseLegacyConfiguredUsers } from "../auth/tokens.js";
+import { CANONICAL_DISPOSABLE_READ_MODE, CANONICAL_OPERATIONAL_READ_MODE, CANONICAL_OPERATIONAL_WORKFLOW_MODE, CANONICAL_READ_AUTHORIZATION, CANONICAL_WRITE_AUTHORIZATION, CANONICAL_WORKFLOW_MODE, LEGACY_READ_MODE } from "../storage-v2/read-mode.js";
+import { CANDIDATE_RUNTIME_AUTHORIZATION, CANDIDATE_RUNTIME_MODE } from "../runtime/candidate.js";
 import {
   booleanValue,
   looksLikeSqliteUri,
@@ -12,134 +12,9 @@ import {
   proxyCidrs,
   requiredSecret,
 } from "./env-values.js";
+import type { BackendConfig } from "./env-contracts.js";
 
-export interface BackendConfig {
-  readonly host: string;
-  readonly port: number;
-  readonly logLevel: string;
-  readonly trustProxy: boolean;
-  readonly trustProxyHops: number;
-  readonly trustedProxyCidrs: readonly string[];
-  readonly databasePath: string;
-  readonly storeDataDirectory: string;
-  readonly storePortOverride: string | undefined;
-  readonly storeName: string;
-  readonly storeVersion: string;
-  readonly mdnsEnabled: boolean;
-  readonly mdnsName: string;
-  readonly mdnsHost: string | undefined;
-  readonly mdnsPort: number;
-  readonly mdnsInterface: string;
-  readonly busyTimeoutMs: number;
-  readonly multiplayerMaxPeers: number;
-  readonly multiplayerMaxConnections: number;
-  readonly multiplayerMaxConnectionsPerSource: number;
-  readonly multiplayerMaxConnectionsPerIdentity: number;
-  readonly multiplayerMaxUnjoinedConnections: number;
-  readonly multiplayerMessageRatePerSecond: number;
-  readonly multiplayerMessageBurst: number;
-  readonly multiplayerStateRatePerSecond: number;
-  readonly multiplayerStateBurst: number;
-  readonly multiplayerJoinRateMax: number;
-  readonly multiplayerJoinRateWindowSeconds: number;
-  readonly multiplayerSourceMessageRatePerSecond: number;
-  readonly multiplayerSourceMessageBurst: number;
-  readonly multiplayerIdentityMessageRatePerSecond: number;
-  readonly multiplayerIdentityMessageBurst: number;
-  readonly multiplayerHeartbeatIntervalSeconds: number;
-  readonly multiplayerHeartbeatGraceSeconds: number;
-  readonly multiplayerUnjoinedTimeoutSeconds: number;
-  readonly multiplayerMaxBufferedBytes: number;
-  readonly legacyConfiguredUsers: readonly LegacyConfiguredUser[];
-  readonly authWriteEnabled: boolean;
-  readonly authWriteMode: string | undefined;
-  readonly authWriteDatabasePath: string | undefined;
-  readonly authDisposableRoot: string | undefined;
-  readonly authSessionSecret: string | undefined;
-  readonly authCookieSecure: boolean;
-  readonly authCookieSameSite: "lax" | "strict" | "none";
-  readonly authCookieDomain: string | undefined;
-  readonly authSessionLifetimeSeconds: number;
-  readonly federationAutoProvision: boolean;
-  readonly authBootstrapToken: string | undefined;
-  readonly federationLifecycleTestToken: string | undefined;
-  readonly federationLifecycleTestEnabled: boolean;
-  readonly authRecentReauthSeconds: number;
-  readonly webauthnEnabled: boolean;
-  readonly webauthnRpId: string | undefined;
-  readonly webauthnRpName: string;
-  readonly webauthnOrigins: readonly string[];
-  readonly setupNetworkTestAllowlist: readonly string[];
-  readonly authRateLimitMax: number;
-  readonly authRateLimitWindowSeconds: number;
-  readonly authRateLimitMaxClients: number;
-  readonly httpRequestTimeoutMs: number;
-  readonly httpKeepAliveTimeoutMs: number;
-  readonly httpCatalogRateLimitMax: number;
-  readonly httpDownloadRateLimitMax: number;
-  readonly httpRateLimitWindowSeconds: number;
-  readonly httpRateLimitMaxClients: number;
-  readonly emailTransport: "disabled" | "memory" | "smtp";
-  readonly emailFrom: string;
-  readonly emailPublicOrigin: string | undefined;
-  readonly emailSmtpHost: string | undefined;
-  readonly emailSmtpPort: number;
-  readonly emailSmtpUser: string | undefined;
-  readonly emailSmtpPassword: string | undefined;
-  readonly oidcPublicOrigin: string | undefined;
-  readonly federationPublicOrigin: string | undefined;
-  readonly frontendPublicOrigin: string | undefined;
-  readonly corsAllowedOrigins: readonly string[];
-  readonly samlMaxPostBytes: number;
-  readonly samlMaxResponseBytes: number;
-  readonly samlMaxRelayStateBytes: number;
-  readonly secretEncryptionEnabled: boolean;
-  readonly secretKeyRegistryPath: string | undefined;
-  readonly secretMaxRows: number;
-  readonly submissionWriteEnabled: boolean;
-  readonly submissionWriteMode: string | undefined;
-  readonly submissionDisposableRoot: string | undefined;
-  readonly submissionMaxArchiveBytes: number;
-  readonly submissionMaxEntries: number;
-  readonly submissionMaxEntryUncompressedBytes: number;
-  readonly submissionMaxTotalUncompressedBytes: number;
-  readonly submissionMaxCompressionRatio: number;
-  readonly submissionMaxManifestBytes: number;
-  readonly reviewMaxSubmissions: number;
-  readonly metricsWriteEnabled: boolean;
-  readonly metricsWriteMode: string | undefined;
-  readonly metricsDisposableRoot: string | undefined;
-  readonly metricsMaxContentBytes: number;
-  readonly metricsMaxSamplesPerRequest: number;
-  readonly metricsMaxDbWork: number;
-  readonly metricsMaxExportSamples: number;
-  readonly scoresWriteEnabled: boolean;
-  readonly scoresWriteMode: string | undefined;
-  readonly scoresDisposableRoot: string | undefined;
-  readonly scoresMaxContentBytes: number;
-  readonly scoresRateLimitMax: number;
-  readonly scoresRateLimitWindowSeconds: number;
-  readonly scoresRateLimitBurst: number;
-  readonly scoresRateLimitMaxClients: number;
-  readonly scoresMaxRows: number;
-  readonly backupEnabled: boolean;
-  readonly backupMode: string | undefined;
-  readonly backupMaxArchiveBytes: number;
-  readonly backupMaxExpandedBytes: number;
-  readonly backupMaxEntryBytes: number;
-  readonly backupMaxManifestBytes: number;
-  readonly backupMaxEntries: number;
-  readonly backupMaxPathBytes: number;
-  readonly backupMaxPathDepth: number;
-  readonly backupMaxCompressionRatio: number;
-  readonly catalogReadMode: CatalogReadMode;
-  readonly canonicalStorageRoot: string | undefined;
-  readonly canonicalReadAuthorization: string | undefined;
-  readonly canonicalWorkflowMode: CanonicalWorkflowMode | undefined;
-  readonly canonicalWriteAuthorization: string | undefined;
-  readonly candidateRuntimeMode: CandidateRuntimeMode | undefined;
-  readonly candidateRuntimeAuthorization: string | undefined;
-}
+export type { BackendConfig } from "./env-contracts.js";
 
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env): BackendConfig {
   const configuredDatabase = nonEmpty(
