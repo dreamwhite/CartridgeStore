@@ -4,7 +4,6 @@ import path from "node:path";
 
 import type Database from "better-sqlite3";
 
-import { applyReviewMetadata } from "../consistency/publication.js";
 import type { Principal } from "../auth/principal.js";
 import type { BackendConfig } from "../config/env.js";
 import { ReviewError, type ReviewErrorCode } from "../review/errors.js";
@@ -22,6 +21,17 @@ import { CanonicalWriterLease } from "./writer-lock.js";
 import { CANONICAL_OPERATIONAL_WORKFLOW_MODE, CANONICAL_WRITE_AUTHORIZATION, CANONICAL_WORKFLOW_MODE } from "./read-mode.js";
 import { assertSubmissionStagingSafe } from "./staging-audit.js";
 import type { RuntimePolicy } from "../settings/runtime-policy.js";
+import {
+  json,
+  mediaType,
+  object,
+  parseJson,
+  publicationMetadata,
+  reviewedMetadata,
+  sha256,
+  submissionStatus,
+  uuid,
+} from "./workflow-codecs.js";
 import {
   type CanonicalDownloadEvent,
   type CanonicalWorkflowFaultPoint,
@@ -104,33 +114,8 @@ interface OperationRow {
   readonly manifest_json: string;
 }
 
-function now(): string { return new Date().toISOString(); }
-
-function uuid(prefix: string): string { return `${prefix}_${crypto.randomUUID()}`; }
-
-function json(value: unknown): string { return JSON.stringify(value); }
-
-function sha256(bytes: Uint8Array): string { return crypto.createHash("sha256").update(bytes).digest("hex"); }
-
-function mediaType(bytes: Uint8Array): string {
-  if (Buffer.from(bytes.subarray(0, 8)).equals(Buffer.from("89504e470d0a1a0a", "hex"))) return "image/png";
-  if (Buffer.from(bytes.subarray(0, 3)).equals(Buffer.from([0xff, 0xd8, 0xff]))) return "image/jpeg";
-  return "application/octet-stream";
-}
-
-function object(value: unknown, message: string): Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) throw new ReviewError(message, "review_operation_failed", 500);
-  return value as Record<string, unknown>;
-}
-
-function parseJson(value: string, label: string): unknown {
-  try { return JSON.parse(value) as unknown; } catch { throw new ReviewError(`${label} is malformed`, "review_operation_failed", 500); }
-}
-
-function submissionStatus(value: string): string {
-  if (value === "pending_review" || value === "validated") return "pending";
-  if (value === "published" || value === "approved") return "verified";
-  return value;
+function now(): string {
+  return new Date().toISOString();
 }
 
 function fail(message: string, code: ReviewErrorCode = "review_operation_failed", status = 400): never {
@@ -181,23 +166,6 @@ function multipartPrepared(bundle: Uint8Array, config: ConstructorParameters<typ
   } catch (error) {
     if (error instanceof SubmissionError) throw error;
     throw new SubmissionError("bundle could not be validated", "invalid_request", 400, { cause: error });
-  }
-}
-
-function publicationMetadata(manifest: Record<string, unknown>): Record<string, unknown> {
-  const copy = JSON.parse(JSON.stringify(manifest)) as Record<string, unknown>;
-  delete copy.assets;
-  delete copy.architectures;
-  delete copy.colophon;
-  copy.summary ??= "";
-  return copy;
-}
-
-function reviewedMetadata(original: Record<string, unknown>, updates: Record<string, unknown>): Record<string, unknown> {
-  try {
-    return applyReviewMetadata(original, updates);
-  } catch (error) {
-    throw new ReviewError(error instanceof Error ? error.message : "review metadata is invalid", "review_invalid_request", 400, { cause: error });
   }
 }
 
