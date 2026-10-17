@@ -25,6 +25,7 @@ import { resolveRuntimeMode } from "./env-runtime-mode.js";
 import { resolveNetworkConfig } from "./env-network.js";
 import { resolveSessionCookieConfig } from "./env-session.js";
 import { resolveSamlLimitsConfig } from "./env-saml-limits.js";
+import { resolveScoresLimitsConfig } from "./env-scores-limits.js";
 import { resolveSubmissionLimitsConfig } from "./env-submission-limits.js";
 import { resolveWebAuthnConfig } from "./env-webauthn.js";
 
@@ -377,36 +378,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
     scoresWriteEnabled,
     scoresWriteMode,
     scoresDisposableRoot: scoresWriteEnabled ? path.resolve(scoresDisposableRoot as string) : undefined,
-    scoresMaxContentBytes: positiveInteger(
-      "PRG32_BACKEND_SCORES_MAX_CONTENT_BYTES",
-      environment.PRG32_BACKEND_SCORES_MAX_CONTENT_BYTES,
-      1024
-    ),
-    scoresRateLimitMax: positiveInteger(
-      "PRG32_BACKEND_SCORES_RATE_LIMIT_MAX",
-      environment.PRG32_BACKEND_SCORES_RATE_LIMIT_MAX,
-      120
-    ),
-    scoresRateLimitWindowSeconds: positiveInteger(
-      "PRG32_BACKEND_SCORES_RATE_LIMIT_WINDOW_SECONDS",
-      environment.PRG32_BACKEND_SCORES_RATE_LIMIT_WINDOW_SECONDS,
-      60
-    ),
-    scoresRateLimitBurst: positiveInteger(
-      "PRG32_BACKEND_SCORES_RATE_LIMIT_BURST",
-      environment.PRG32_BACKEND_SCORES_RATE_LIMIT_BURST,
-      16
-    ),
-    scoresRateLimitMaxClients: positiveInteger(
-      "PRG32_BACKEND_SCORES_RATE_LIMIT_MAX_CLIENTS",
-      environment.PRG32_BACKEND_SCORES_RATE_LIMIT_MAX_CLIENTS,
-      4096
-    ),
-    scoresMaxRows: positiveInteger(
-      "PRG32_BACKEND_SCORES_MAX_ROWS",
-      environment.PRG32_BACKEND_SCORES_MAX_ROWS,
-      100000
-    ),
+    ...resolveScoresLimitsConfig(environment),
     backupEnabled,
     backupMode,
     backupMaxArchiveBytes: positiveInteger(
