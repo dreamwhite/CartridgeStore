@@ -2,88 +2,14 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 import json
 import struct
 from typing import Any, Iterable
 
-
-CART_MAGIC = b"PRG2"
 CART_HEADER = struct.Struct("<4sHHHHIIIIIII32s")
-PRG32_CART_FLAG_AUDIO_BLOCK = 1 << 0
-AUDIO_BLOCK_MAGIC = b"AUD0"
-AUDIO_BLOCK_HEADER_SIZE = 40
-AUDIO_BLOCK_SIZE_OFFSET = 36
-
-TRAILER_MAGIC = b"PRG32META"
-TRAILER_VERSION = 1
 TRAILER_HEADER = struct.Struct("<9sBHI")
 TLV_HEADER = struct.Struct("<4sI")
-
-METADATA_ABI = "prg32-metadata-1.0"
-COLOPHON_ABI = "prg32-colophon-1.0"
-
-BLOCK_META = "META"
-BLOCK_ICON = "ICON"
-BLOCK_SCREENSHOT = "SCRN"
-BLOCK_SIGNATURE = "SIGN"
-BLOCK_COLOPHON = "COLO"
-KNOWN_BLOCKS = {BLOCK_META, BLOCK_ICON, BLOCK_SCREENSHOT, BLOCK_SIGNATURE, BLOCK_COLOPHON}
-
-ARCHITECTURE_PROFILES: dict[str, dict[str, str]] = {
-    "esp32c6": {
-        "id": "esp32c6",
-        "label": "ESP32-C6 hardware",
-        "platform": "PRG32",
-        "target": "esp32c6",
-        "display": "ili9341",
-        "isa": "RV32I",
-    },
-    "qemu": {
-        "id": "qemu",
-        "label": "QEMU virtual screen",
-        "platform": "PRG32",
-        "target": "esp32c3",
-        "display": "qemu-rgb",
-        "isa": "RV32I",
-    },
-}
-
-
-class CartridgeFormatError(ValueError):
-    pass
-
-
-class MetadataValidationError(ValueError):
-    pass
-
-
-class ColophonValidationError(ValueError):
-    pass
-
-
-@dataclass(frozen=True)
-class TrailerBlock:
-    block_type: str
-    data: bytes
-
-
-@dataclass(frozen=True)
-class CartridgeImage:
-    data: bytes
-    legacy_payload: bytes
-    trailer_present: bool
-    blocks: tuple[TrailerBlock, ...]
-    metadata: dict[str, Any] | None = None
-    icon: bytes | None = None
-    screenshot: bytes | None = None
-    signature: bytes | None = None
-    signature_json: Any | None = None
-    colophon: dict[str, Any] | None = None
-
-    @property
-    def unknown_blocks(self) -> tuple[TrailerBlock, ...]:
-        return tuple(block for block in self.blocks if block.block_type not in KNOWN_BLOCKS)
+from .format_contracts import *
 
 
 def deterministic_json_bytes(value: dict[str, Any]) -> bytes:
