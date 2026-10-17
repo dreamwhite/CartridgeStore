@@ -1,9 +1,17 @@
-import net from "node:net";
 import path from "node:path";
 
 import { parseLegacyConfiguredUsers, type LegacyConfiguredUser } from "../auth/tokens.js";
 import { CANONICAL_DISPOSABLE_READ_MODE, CANONICAL_OPERATIONAL_READ_MODE, CANONICAL_OPERATIONAL_WORKFLOW_MODE, CANONICAL_READ_AUTHORIZATION, CANONICAL_WRITE_AUTHORIZATION, CANONICAL_WORKFLOW_MODE, LEGACY_READ_MODE, type CatalogReadMode, type CanonicalWorkflowMode } from "../storage-v2/read-mode.js";
 import { CANDIDATE_RUNTIME_AUTHORIZATION, CANDIDATE_RUNTIME_MODE, type CandidateRuntimeMode } from "../runtime/candidate.js";
+import {
+  booleanValue,
+  looksLikeSqliteUri,
+  nonEmpty,
+  optionalNonEmpty,
+  positiveInteger,
+  proxyCidrs,
+  requiredSecret,
+} from "./env-values.js";
 
 export interface BackendConfig {
   readonly host: string;
@@ -131,64 +139,6 @@ export interface BackendConfig {
   readonly canonicalWriteAuthorization: string | undefined;
   readonly candidateRuntimeMode: CandidateRuntimeMode | undefined;
   readonly candidateRuntimeAuthorization: string | undefined;
-}
-
-function positiveInteger(name: string, value: string | undefined, fallback: number): number {
-  const candidate = value === undefined ? fallback : Number(value);
-  if (!Number.isSafeInteger(candidate) || candidate <= 0) {
-    throw new Error(`${name} must be a positive integer`);
-  }
-  return candidate;
-}
-
-function nonEmpty(name: string, value: string | undefined, fallback: string): string {
-  const candidate = (value ?? fallback).trim();
-  if (!candidate) {
-    throw new Error(`${name} must not be empty`);
-  }
-  return candidate;
-}
-
-function booleanValue(name: string, value: string | undefined, fallback: boolean): boolean {
-  if (value === undefined) return fallback;
-  const normalized = value.trim().toLowerCase();
-  if (["1", "true", "yes", "on"].includes(normalized)) return true;
-  if (["0", "false", "no", "off"].includes(normalized)) return false;
-  throw new Error(`${name} must be a boolean`);
-}
-
-function optionalNonEmpty(value: string | undefined): string | undefined {
-  const candidate = value?.trim();
-  return candidate ? candidate : undefined;
-}
-
-function proxyCidrs(value: string | undefined): string[] {
-  const entries = (value ?? "").split(",").map((item) => item.trim()).filter(Boolean);
-  for (const entry of entries) {
-    const [address, prefix] = entry.split("/", 2);
-    const family = net.isIP(address ?? "");
-    if (family === 0) throw new Error("PRG32_BACKEND_TRUST_PROXY_CIDRS contains an invalid address");
-    if (prefix !== undefined) {
-      const parsed = Number(prefix);
-      const maximum = family === 4 ? 32 : 128;
-      if (!Number.isInteger(parsed) || parsed < 0 || parsed > maximum) {
-        throw new Error("PRG32_BACKEND_TRUST_PROXY_CIDRS contains an invalid prefix");
-      }
-    }
-  }
-  return entries;
-}
-
-function looksLikeSqliteUri(value: string): boolean {
-  const normalized = value.trim().toLowerCase();
-  return normalized.startsWith("file:") || normalized.includes("?mode=") || normalized.includes("&mode=");
-}
-
-function requiredSecret(name: string, value: string | undefined): string {
-  const candidate = optionalNonEmpty(value);
-  if (!candidate) throw new Error(`${name} is required when auth writes are enabled`);
-  if (candidate.length < 32) throw new Error(`${name} must contain at least 32 characters`);
-  return candidate;
 }
 
 export function loadConfig(environment: NodeJS.ProcessEnv = process.env): BackendConfig {
