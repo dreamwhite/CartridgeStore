@@ -1,5 +1,3 @@
-import crypto from "node:crypto";
-import fs from "node:fs";
 import path from "node:path";
 
 import type Database from "better-sqlite3";
@@ -12,22 +10,14 @@ import type { SecretStore } from "../secrets/service.js";
 import type { AdminAuditLog } from "../admin/audit.js";
 import type { EmailService, SmtpRuntimeConfig } from "../email/service.js";
 import { OutboundValidationError, resolveOutboundHost } from "../setup/outbound.js";
-import {
-  detectAssetMime,
-  isSafeAssetFilename,
-  MAX_ASSET_BYTES,
-  type AssetKind,
-} from "./assets.js";
+import type { AssetKind } from "./assets.js";
+import { SettingsAssetStore } from "./asset-store.js";
+import { SettingsError } from "./errors.js";
 
 type DatabaseSource = Database.Database | (() => Database.Database);
 export { MAX_ASSET_BYTES } from "./assets.js";
 
-export class SettingsError extends Error {
-  constructor(readonly code: string, readonly statusCode: number, message: string, options?: ErrorOptions) {
-    super(message, options);
-    this.name = "SettingsError";
-  }
-}
+export { SettingsError } from "./errors.js";
 
 export interface SettingView {
   readonly value: SettingValue;
@@ -97,26 +87,12 @@ function settingView(database: Database.Database, key: keyof typeof SETTINGS, va
   };
 }
 
-function assertRegularDirectory(directory: string): void {
-  const resolved = path.resolve(directory);
-  let existing = resolved;
-  while (!fs.existsSync(existing)) {
-    const parent = path.dirname(existing);
-    if (parent === existing) throw new SettingsError("asset_storage_unavailable", 503, "asset storage is unavailable");
-    existing = parent;
-  }
-  const existingStats = fs.lstatSync(existing);
-  if (!existingStats.isDirectory()) throw new SettingsError("asset_storage_unavailable", 503, "asset storage is unavailable");
-  fs.mkdirSync(resolved, { recursive: true, mode: 0o700 });
-  const stats = fs.lstatSync(resolved);
-  if (stats.isSymbolicLink() || !stats.isDirectory()) throw new SettingsError("asset_storage_unavailable", 503, "asset storage is unavailable");
-}
-
 export class SettingsService {
   private readonly databaseSource: DatabaseSource;
   private readonly writable: Database.Database | null;
   private readonly config: BackendConfig;
   private readonly assetDirectory: string;
+  private readonly assetStore: SettingsAssetStore;
   private readonly fault: SettingsServiceOptions["fault"];
   readonly secrets: SecretStore | undefined;
   private readonly audit: AdminAuditLog | undefined;
@@ -131,6 +107,12 @@ export class SettingsService {
     this.secrets = options.secrets;
     this.audit = options.audit;
     this.email = options.email;
+    this.assetStore = new SettingsAssetStore({
+      database: () => this.database,
+      writableDatabase: this.writable,
+      directory: this.assetDirectory,
+      fault: (point) => this.fault?.(point),
+    });
     // Apply persisted SMTP settings at process start.  The environment only
     // supplies bootstrap defaults; the canonical settings row is authoritative
     // for subsequent disposable runtime operation.
@@ -401,86 +383,10 @@ export class SettingsService {
   }
 
   assetPath(kind: AssetKind): { readonly path: string; readonly extension: string; readonly mimeType: string } | null {
-    const key = kind === "logo" ? "theme_logo_url" : "theme_favicon_url";
-    const stored = rawValue(this.database, key) ?? "";
-    const prefix = `/api/assets/${kind}/`;
-    if (stored.startsWith(prefix)) {
-      const filename = stored.slice(prefix.length);
-      if (!isSafeAssetFilename(kind, filename)) return null;
-      const resolved = path.resolve(this.assetDirectory, filename);
-      if (path.dirname(resolved) !== path.resolve(this.assetDirectory)) return null;
-      const type = filename.endsWith(".png") ? "image/png" : filename.endsWith(".jpg") ? "image/jpeg" : "image/x-icon";
-      return { path: resolved, extension: filename.split(".").pop() ?? "", mimeType: type };
-    }
-    // Read-only compatibility with Flask's historical /static/custom URLs.
-    const legacyPrefix = "/static/custom/";
-    if (stored.startsWith(legacyPrefix)) {
-      const filename = stored.slice(legacyPrefix.length);
-      if (!/^[A-Za-z0-9._-]+$/.test(filename)) return null;
-      const resolved = path.resolve(this.assetDirectory, filename);
-      if (path.dirname(resolved) !== path.resolve(this.assetDirectory)) return null;
-      const type = filename.endsWith(".png") ? "image/png" : filename.endsWith(".jpg") ? "image/jpeg" : filename.endsWith(".ico") ? "image/x-icon" : "application/octet-stream";
-      return { path: resolved, extension: filename.split(".").pop() ?? "", mimeType: type };
-    }
-    return null;
+    return this.assetStore.path(kind);
   }
 
   replaceAsset(kind: AssetKind, data: Uint8Array): { readonly kind: AssetKind; readonly url: string; readonly mime_type: string; readonly size: number } {
-    if (!this.writable) throw new SettingsError("settings_unavailable", 503, "settings write isolation is unavailable");
-    if (data.byteLength === 0) throw new SettingsError("asset_empty", 400, `${kind} upload is empty`);
-    if (data.byteLength > MAX_ASSET_BYTES) throw new SettingsError("asset_too_large", 413, `${kind} upload is too large`);
-    const detected = detectAssetMime(kind, data);
-    if (!detected) throw new SettingsError("asset_invalid_type", 400, `${kind} must be a valid PNG, JPEG, or favicon ICO`);
-    assertRegularDirectory(this.assetDirectory);
-    const key = kind === "logo" ? "theme_logo_url" : "theme_favicon_url";
-    const previous = rawValue(this.writable, key) ?? "";
-    const filename = `${kind}-${crypto.randomBytes(16).toString("hex")}.${detected.extension}`;
-    const staging = path.join(this.assetDirectory, `.staging-${filename}`);
-    const finalPath = path.join(this.assetDirectory, filename);
-    const url = `/api/assets/${kind}/${filename}`;
-    let staged = false;
-    let published = false;
-    try {
-      const fd = fs.openSync(staging, "wx", 0o600);
-      try {
-        fs.writeFileSync(fd, data);
-        fs.fsyncSync(fd);
-      } finally {
-        fs.closeSync(fd);
-      }
-      staged = true;
-      fs.renameSync(staging, finalPath);
-      staged = false;
-      published = true;
-      const directoryFd = fs.openSync(this.assetDirectory, "r");
-      try { fs.fsyncSync(directoryFd); } finally { fs.closeSync(directoryFd); }
-      this.fault?.("after-asset-publish");
-      this.writable.exec("BEGIN IMMEDIATE");
-      this.writable.prepare("INSERT INTO store_settings(key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value").run(key, url);
-      this.writable.exec("COMMIT");
-      const old = this.assetPathFromValue(kind, previous);
-      if (old && old !== finalPath) {
-        try { fs.unlinkSync(old); } catch { /* orphan cleanup is best effort after the active reference is safe */ }
-      }
-      return { kind, url, mime_type: detected.mimeType, size: data.byteLength };
-    } catch (error) {
-      if (this.writable.inTransaction) this.writable.exec("ROLLBACK");
-      const current = rawValue(this.writable, key);
-      if (published && current !== url) {
-        try { fs.unlinkSync(finalPath); } catch { /* preserve diagnostics without leaking them */ }
-      }
-      if (staged) {
-        try { fs.unlinkSync(staging); } catch { /* cleanup is best effort */ }
-      }
-      if (error instanceof SettingsError) throw error;
-      throw new SettingsError("asset_publication_failed", 503, `${kind} asset publication failed`, { cause: error });
-    }
-  }
-
-  private assetPathFromValue(kind: AssetKind, stored: string): string | null {
-    const prefix = `/api/assets/${kind}/`;
-    if (!stored.startsWith(prefix)) return null;
-    const filename = stored.slice(prefix.length);
-    return isSafeAssetFilename(kind, filename) ? path.resolve(this.assetDirectory, filename) : null;
+    return this.assetStore.replace(kind, data);
   }
 }
