@@ -12,11 +12,15 @@ import type { SecretStore } from "../secrets/service.js";
 import type { AdminAuditLog } from "../admin/audit.js";
 import type { EmailService, SmtpRuntimeConfig } from "../email/service.js";
 import { OutboundValidationError, resolveOutboundHost } from "../setup/outbound.js";
+import {
+  detectAssetMime,
+  isSafeAssetFilename,
+  MAX_ASSET_BYTES,
+  type AssetKind,
+} from "./assets.js";
 
 type DatabaseSource = Database.Database | (() => Database.Database);
-type AssetKind = "logo" | "favicon";
-
-export const MAX_ASSET_BYTES = 2 * 1024 * 1024;
+export { MAX_ASSET_BYTES } from "./assets.js";
 
 export class SettingsError extends Error {
   constructor(readonly code: string, readonly statusCode: number, message: string, options?: ErrorOptions) {
@@ -93,38 +97,6 @@ function settingView(database: Database.Database, key: keyof typeof SETTINGS, va
   };
 }
 
-function assetMime(kind: AssetKind, data: Uint8Array): { readonly extension: "png" | "jpg" | "ico"; readonly mimeType: string } | null {
-  const bytes = Buffer.from(data);
-  if (bytes.byteLength >= 33 && bytes.subarray(0, 8).equals(Buffer.from("\x89PNG\r\n\x1a\n", "binary"))) {
-    let offset = 8;
-    let hasHeader = false;
-    while (offset + 12 <= bytes.byteLength) {
-      const length = bytes.readUInt32BE(offset);
-      const chunkEnd = offset + 12 + length;
-      if (chunkEnd > bytes.byteLength) return null;
-      const type = bytes.subarray(offset + 4, offset + 8).toString("ascii");
-      if (!hasHeader) {
-        if (type !== "IHDR" || length !== 13 || bytes.readUInt32BE(offset + 8) === 0 || bytes.readUInt32BE(offset + 12) === 0) return null;
-        hasHeader = true;
-      }
-      if (type === "IEND") {
-        return hasHeader && length === 0 && chunkEnd === bytes.byteLength
-          ? { extension: "png", mimeType: "image/png" }
-          : null;
-      }
-      offset = chunkEnd;
-    }
-    return null;
-  }
-  if (data.byteLength >= 4 && data[0] === 0xff && data[1] === 0xd8 && data[2] === 0xff && data[data.byteLength - 2] === 0xff && data[data.byteLength - 1] === 0xd9) {
-    return { extension: "jpg", mimeType: "image/jpeg" };
-  }
-  if (kind === "favicon" && data.byteLength >= 6 && data[0] === 0 && data[1] === 0 && data[2] === 1 && data[3] === 0 && (data[4] ?? 0) > 0) {
-    return { extension: "ico", mimeType: "image/x-icon" };
-  }
-  return null;
-}
-
 function assertRegularDirectory(directory: string): void {
   const resolved = path.resolve(directory);
   let existing = resolved;
@@ -138,10 +110,6 @@ function assertRegularDirectory(directory: string): void {
   fs.mkdirSync(resolved, { recursive: true, mode: 0o700 });
   const stats = fs.lstatSync(resolved);
   if (stats.isSymbolicLink() || !stats.isDirectory()) throw new SettingsError("asset_storage_unavailable", 503, "asset storage is unavailable");
-}
-
-function safeAssetFilename(kind: AssetKind, filename: string): boolean {
-  return new RegExp(`^${kind}-[a-f0-9]{32}\\.(png|jpg|ico)$`).test(filename);
 }
 
 export class SettingsService {
@@ -438,7 +406,7 @@ export class SettingsService {
     const prefix = `/api/assets/${kind}/`;
     if (stored.startsWith(prefix)) {
       const filename = stored.slice(prefix.length);
-      if (!safeAssetFilename(kind, filename)) return null;
+      if (!isSafeAssetFilename(kind, filename)) return null;
       const resolved = path.resolve(this.assetDirectory, filename);
       if (path.dirname(resolved) !== path.resolve(this.assetDirectory)) return null;
       const type = filename.endsWith(".png") ? "image/png" : filename.endsWith(".jpg") ? "image/jpeg" : "image/x-icon";
@@ -461,7 +429,7 @@ export class SettingsService {
     if (!this.writable) throw new SettingsError("settings_unavailable", 503, "settings write isolation is unavailable");
     if (data.byteLength === 0) throw new SettingsError("asset_empty", 400, `${kind} upload is empty`);
     if (data.byteLength > MAX_ASSET_BYTES) throw new SettingsError("asset_too_large", 413, `${kind} upload is too large`);
-    const detected = assetMime(kind, data);
+    const detected = detectAssetMime(kind, data);
     if (!detected) throw new SettingsError("asset_invalid_type", 400, `${kind} must be a valid PNG, JPEG, or favicon ICO`);
     assertRegularDirectory(this.assetDirectory);
     const key = kind === "logo" ? "theme_logo_url" : "theme_favicon_url";
@@ -513,6 +481,6 @@ export class SettingsService {
     const prefix = `/api/assets/${kind}/`;
     if (!stored.startsWith(prefix)) return null;
     const filename = stored.slice(prefix.length);
-    return safeAssetFilename(kind, filename) ? path.resolve(this.assetDirectory, filename) : null;
+    return isSafeAssetFilename(kind, filename) ? path.resolve(this.assetDirectory, filename) : null;
   }
 }
