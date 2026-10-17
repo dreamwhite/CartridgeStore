@@ -9,7 +9,7 @@ import type { BackendConfig } from "../config/env.js";
 import { ReviewError, type ReviewErrorCode } from "../review/errors.js";
 import type { OwnedSubmissionPage, ReviewWorkflowService, SubmissionRecord } from "../review/service.js";
 import { SubmissionError } from "../submission/errors.js";
-import { buildSubmissionCartridge, normalizeArchitecture, parseCartridge, validateCartridgeBinary } from "../submission/prg32.js";
+import { normalizeArchitecture, validateCartridgeBinary } from "../submission/prg32.js";
 import { type SubmissionResult } from "../submission/service.js";
 import { StagingStore } from "./staging.js";
 import { assertExplicitDisposableRoot, assertExplicitOperationalRoot } from "./catalog.js";
@@ -31,11 +31,9 @@ import {
 } from "./workflow-payloads.js";
 import {
   json,
-  mediaType,
   object,
   parseJson,
   publicationMetadata,
-  reviewedMetadata,
   sha256,
   submissionStatus,
   uuid,
@@ -55,6 +53,7 @@ import {
 } from "./workflow-records.js";
 import { canonicalWorkflowPrincipal } from "./workflow-authorization.js";
 import { prepareCanonicalSubmissionBundle } from "./workflow-input.js";
+import { buildCanonicalPublicationPlan } from "./workflow-publication-plan.js";
 
 export type {
   CanonicalDownloadEvent,
@@ -278,29 +277,16 @@ export class CanonicalWorkflowService implements ReviewWorkflowService {
     if (existing?.operation_id) { this.execute(existing.operation_id); return this.detail(submissionId); }
     const artifacts = this.artifactRows(submissionId);
     if (artifacts.length === 0) fail("submission has no artifacts", "review_operation_failed", 500);
-    const first = validateCartridgeBinary(readStaged(this.root, artifacts[0] as CanonicalArtifactRow));
-    const baseMetadata = safeSubmissionMetadata(first.metadata);
-    const reviewed = reviewedMetadata(baseMetadata, metadataUpdates);
     const releaseId = uuid("release");
     const operationId = `pub-${crypto.randomUUID()}`;
-    const objects: ObjectPlan[] = [];
-    for (const artifact of artifacts) {
-      const artifactId = uuid("artifact");
-      const parsed = validateCartridgeBinary(readStaged(this.root, artifact));
-      const originalMetadata = safeSubmissionMetadata(parsed.metadata);
-      const updatedMetadata = reviewedMetadata(originalMetadata, metadataUpdates);
-      const reviewedColophon = parsed.colophon ? { ...parsed.colophon, title: updatedMetadata.title, version: updatedMetadata.version } : null;
-      const rebuilt = Buffer.from(buildSubmissionCartridge(parsed.legacyPayload, updatedMetadata, parsed.icon ?? Buffer.alloc(0), artifact.architecture, parsed.screenshot, reviewedColophon));
-      objects.push({ objectId: uuid("obj"), objectKind: "artifact", targetRole: "artifact", architecture: artifact.architecture, mediaType: artifact.media_type, sha256: sha256(rebuilt), sizeBytes: rebuilt.byteLength, sourceStagingKey: artifact.staging_key, artifactId, mediaId: null });
-      const rebuiltParsed = parseCartridge(rebuilt);
-      const mediaEntries: Array<{ role: "icon" | "screenshot"; bytes: Uint8Array }> = [{ role: "icon", bytes: rebuiltParsed.icon ?? new Uint8Array() }];
-      if (rebuiltParsed.screenshot) mediaEntries.push({ role: "screenshot", bytes: rebuiltParsed.screenshot });
-      for (const media of mediaEntries) {
-        if (media.bytes.byteLength === 0) fail("submission media is missing", "review_operation_failed", 500);
-        objects.push({ objectId: uuid("obj"), objectKind: "media", targetRole: media.role, architecture: artifact.architecture, mediaType: mediaType(media.bytes), sha256: sha256(media.bytes), sizeBytes: media.bytes.byteLength, sourceStagingKey: artifact.staging_key, artifactId, mediaId: uuid("media") });
-      }
-    }
-    const colophon = first.colophon ? { ...first.colophon, title: reviewed.title, version: reviewed.version } : null;
+    const publicationPlan = buildCanonicalPublicationPlan({
+      artifacts,
+      metadataUpdates,
+      readStaged: (artifact) => readStaged(this.root, artifact),
+      safeMetadata: safeSubmissionMetadata,
+      fail,
+    });
+    const { colophon, metadata: reviewed, objects } = publicationPlan;
     const manifest: WorkflowManifest = { journalVersion: WORKFLOW_JOURNAL_VERSION, operationId, releaseId, submissionId, cartridgeId: row.cartridge_id, version: row.version, reviewUpdates: JSON.parse(JSON.stringify(metadataUpdates)) as Record<string, unknown>, metadata: reviewed, colophon, reviewer, objects };
     this.hit("before-durable-intent");
     this.database.exec("BEGIN IMMEDIATE");
