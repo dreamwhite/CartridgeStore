@@ -15,7 +15,12 @@ import { prepareSubmissionBundle, type PreparedSubmissionBundle, type Submission
 import { StagingStore } from "./staging.js";
 import { assertExplicitDisposableRoot, assertExplicitOperationalRoot } from "./catalog.js";
 import { safeGameId, safeVersion } from "../catalog/catalog.js";
-import { expectedStorageKey, MAX_OBJECT_BYTES } from "./objects.js";
+import { expectedStorageKey } from "./objects.js";
+import {
+  promoteCanonicalObject,
+  verifyCanonicalObject,
+  type CanonicalObjectPlan,
+} from "./workflow-objects.js";
 import { type StorageDatabase } from "./types.js";
 import { CanonicalWriterLease } from "./writer-lock.js";
 import { CANONICAL_OPERATIONAL_WORKFLOW_MODE, CANONICAL_WRITE_AUTHORIZATION, CANONICAL_WORKFLOW_MODE } from "./read-mode.js";
@@ -78,19 +83,7 @@ interface CanonicalArtifactRow {
   readonly colophon_json: string | null;
 }
 
-interface ObjectPlan {
-  readonly objectId: string;
-  readonly objectKind: "artifact" | "media";
-  readonly targetRole: "artifact" | "icon" | "screenshot";
-  readonly architecture: "esp32c6" | "qemu";
-  readonly mediaType: string;
-  readonly sha256: string;
-  readonly sizeBytes: number;
-  readonly sourceStagingKey: string;
-  readonly artifactId: string;
-  readonly mediaId: string | null;
-  readonly targetStorageKey?: string;
-}
+type ObjectPlan = CanonicalObjectPlan;
 
 interface WorkflowManifest {
   readonly journalVersion: 1;
@@ -440,33 +433,20 @@ export class CanonicalWorkflowService implements ReviewWorkflowService {
   }
 
   private verifyFile(item: ObjectPlan): boolean {
-    const target = inside(this.root, item.targetStorageKey ?? expectedStorageKey(item.objectKind, item.objectId, item.mediaType));
-    if (!fs.existsSync(target)) return false;
-    const stats = fs.lstatSync(target);
-    if (stats.isSymbolicLink() || !stats.isFile() || stats.size !== item.sizeBytes) return false;
-    return sha256(fs.readFileSync(target)) === item.sha256;
+    return verifyCanonicalObject(this.root, item);
   }
 
   private promote(item: ObjectPlan, bytes: Buffer): void {
-    if (bytes.byteLength > MAX_OBJECT_BYTES || sha256(bytes) !== item.sha256 || bytes.byteLength !== item.sizeBytes) fail("publication object integrity failed", "review_operation_failed", 500);
-    const targetRelative = expectedStorageKey(item.objectKind, item.objectId, item.mediaType);
-    const target = inside(this.root, targetRelative);
-    const parent = path.dirname(target);
-    fs.mkdirSync(parent, { recursive: true, mode: 0o700 });
-    if (fs.existsSync(target)) {
-      if (!this.verifyFile({ ...item, targetStorageKey: targetRelative })) fail("publication target conflicts with an existing object", "review_operation_failed", 500);
-      this.database.prepare("UPDATE storage_objects SET state = 'available' WHERE object_id = ? AND state = 'staged'").run(item.objectId);
-      return;
-    }
-    const temporary = path.join(this.resource.paths.objectTempRoot, `${item.objectId}.${crypto.randomUUID()}.tmp`);
-    const fd = fs.openSync(temporary, "wx", 0o600);
-    try { fs.writeSync(fd, bytes); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-    try { fs.linkSync(temporary, target); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error; }
-    try { fs.unlinkSync(temporary); } catch { /* completed link remains verifiable */ }
-    const directory = fs.openSync(parent, fs.constants.O_RDONLY);
-    try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
-    if (!this.verifyFile({ ...item, targetStorageKey: targetRelative })) fail("promoted object verification failed", "review_operation_failed", 500);
-    this.database.prepare("UPDATE storage_objects SET state = 'available' WHERE object_id = ? AND state = 'staged'").run(item.objectId);
+    promoteCanonicalObject(
+      {
+        root: this.root,
+        objectTempRoot: this.resource.paths.objectTempRoot,
+        database: this.database,
+        fail,
+      },
+      item,
+      bytes,
+    );
   }
 
   private transition(operationId: string, fromState: string, toState: string, eventCode: string): void {
