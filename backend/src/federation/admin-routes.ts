@@ -13,14 +13,19 @@ import type { Permission } from "../authorization/permissions.js";
 import type { AdminAuditLog } from "../admin/audit.js";
 import { AuditUnavailableError } from "../admin/audit.js";
 import { FederationIdentityError, ValidatedExternalIdentity, type FederationIdentityService } from "./identity.js";
-import { FederationProviderError, type FederationProviderService, type FederationProtocol, type ProviderInput } from "./provider.js";
+import { FederationProviderError, type FederationProviderService, type ProviderInput } from "./provider.js";
 import type { FederationProviderOperations } from "./operations.js";
 import { safeFederationProvider } from "./admin-provider-view.js";
+import {
+  providerId,
+  providerInput,
+  protocol,
+  text,
+} from "./provider-route-input.js";
 import { FederationLinkChallengeError, type FederationLinkChallengeService } from "./link-challenges.js";
 import type { FederationSecretPurpose } from "../secrets/service.js";
 
 const SESSION_COOKIE = "prg32_ts_session";
-const PROVIDER_ID_RE = /^[a-z][a-z0-9._-]{0,63}$/;
 const SECRET_PURPOSES = new Set<FederationSecretPurpose>([
   "oidc-client-secret",
   "saml-sp-signing-private-key",
@@ -120,11 +125,6 @@ function assertFields(value: JsonObject, allowed: readonly string[]): void {
   }
 }
 
-function providerId(value: unknown): string {
-  if (typeof value !== "string" || !PROVIDER_ID_RE.test(value)) throw new FederationProviderError("invalid_identifier", 400, "provider_id is invalid");
-  return value;
-}
-
 function identityId(value: unknown): number {
   if (typeof value !== "string" || !/^[1-9]\d*$/.test(value)) throw new FederationIdentityError("invalid_identifier", 400, "identity_id is invalid");
   const parsed = Number(value);
@@ -135,50 +135,6 @@ function identityId(value: unknown): number {
 function userId(value: unknown): number {
   if (!Number.isSafeInteger(value) || Number(value) < 1) throw new FederationIdentityError("invalid_identifier", 400, "user_id is invalid");
   return Number(value);
-}
-
-function text(value: unknown, field: string, max: number, required = false): string | undefined {
-  if (value === undefined && !required) return undefined;
-  if (typeof value !== "string" || value.trim().length === 0 || value.length > max) {
-    throw new FederationProviderError("federation_provider_invalid", 400, `${field} is invalid`);
-  }
-  return value.trim();
-}
-
-function protocol(value: unknown): FederationProtocol {
-  if (value !== "oidc" && value !== "saml") throw new FederationProviderError("federation_provider_invalid", 400, "protocol is invalid");
-  return value;
-}
-
-function providerInput(value: JsonObject, requireIdentity = true): ProviderInput {
-  const provider = {
-    providerId: providerId(value.provider_id),
-    protocol: protocol(value.protocol),
-    displayName: text(value.display_name, "display_name", 160, true) as string,
-    issuer: text(value.issuer, "issuer", 512, true) as string,
-    ...(value.client_id === undefined ? {} : { clientId: text(value.client_id, "client_id", 240) }),
-    ...(value.client_auth_method === undefined ? {} : { clientAuthMethod: value.client_auth_method as ProviderInput["clientAuthMethod"] }),
-    ...(value.discovery_issuer === undefined ? {} : { discoveryIssuer: text(value.discovery_issuer, "discovery_issuer", 512) }),
-    ...(value.redirect_uri === undefined ? {} : { redirectUri: text(value.redirect_uri, "redirect_uri", 512) }),
-    ...(value.scopes === undefined ? {} : { scopes: value.scopes as readonly string[] }),
-    ...(value.idp_entity_id === undefined ? {} : { idpEntityId: text(value.idp_entity_id, "idp_entity_id", 512) }),
-    ...(value.sp_entity_id === undefined ? {} : { spEntityId: text(value.sp_entity_id, "sp_entity_id", 512) }),
-    ...(value.acs_url === undefined ? {} : { acsUrl: text(value.acs_url, "acs_url", 512) }),
-    ...(value.saml_entry_point === undefined ? {} : { samlEntryPoint: text(value.saml_entry_point, "saml_entry_point", 512) }),
-    ...(value.saml_name_id_format === undefined ? {} : { samlNameIdFormat: text(value.saml_name_id_format, "saml_name_id_format", 160) }),
-    ...(value.saml_idp_certificate_pem === undefined ? {} : { samlIdpCertificatePem: text(value.saml_idp_certificate_pem, "saml_idp_certificate_pem", 65536) }),
-    ...(value.saml_trusted_certificates_pem === undefined ? {} : { samlTrustedCertificatesPem: value.saml_trusted_certificates_pem as readonly string[] }),
-    ...(value.saml_sp_certificate_pem === undefined ? {} : { samlSpCertificatePem: text(value.saml_sp_certificate_pem, "saml_sp_certificate_pem", 65536) }),
-    ...(value.saml_want_assertions_signed === undefined ? {} : { samlWantAssertionsSigned: value.saml_want_assertions_signed as boolean }),
-    ...(value.saml_want_authn_response_signed === undefined ? {} : { samlWantAuthnResponseSigned: value.saml_want_authn_response_signed as boolean }),
-    ...(value.saml_sign_authn_requests === undefined ? {} : { samlSignAuthnRequests: value.saml_sign_authn_requests as boolean }),
-    ...(value.saml_accepted_clock_skew_ms === undefined ? {} : { samlAcceptedClockSkewMs: value.saml_accepted_clock_skew_ms as number }),
-    ...(value.signing_key_reference === undefined ? {} : { signingKeyReference: text(value.signing_key_reference, "signing_key_reference", 240) })
-  } as ProviderInput;
-  if (requireIdentity && provider.protocol === "saml" && (!provider.idpEntityId || !provider.spEntityId)) {
-    throw new FederationProviderError("federation_provider_invalid", 400, "SAML entity identifiers are required");
-  }
-  return provider;
 }
 
 function operationError(reply: FastifyReply, request: FastifyRequest, error: unknown): FastifyReply {
