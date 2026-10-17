@@ -26,6 +26,7 @@ import { resolveNetworkConfig } from "./env-network.js";
 import { resolveSessionCookieConfig } from "./env-session.js";
 import { resolveSamlLimitsConfig } from "./env-saml-limits.js";
 import { resolveScoresLimitsConfig } from "./env-scores-limits.js";
+import { resolveSecretLimitsConfig } from "./env-secret-limits.js";
 import { resolveSubmissionLimitsConfig } from "./env-submission-limits.js";
 import { resolveWebAuthnConfig } from "./env-webauthn.js";
 
@@ -362,11 +363,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
     ...resolveSamlLimitsConfig(environment),
     secretEncryptionEnabled,
     secretKeyRegistryPath: secretKeyRegistryPath ? path.resolve(secretKeyRegistryPath) : undefined,
-    secretMaxRows: positiveInteger(
-      "PRG32_BACKEND_SECRET_MAX_ROWS",
-      environment.PRG32_BACKEND_SECRET_MAX_ROWS,
-      16
-    ),
+    ...resolveSecretLimitsConfig(environment),
     submissionWriteEnabled,
     submissionWriteMode,
     submissionDisposableRoot: submissionWriteEnabled ? path.resolve(submissionDisposableRoot as string) : undefined,
