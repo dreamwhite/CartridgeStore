@@ -168,11 +168,17 @@ venv.bak/
 # Next.js frontend
 frontend/node_modules/
 frontend/.next/
+frontend/.next-*/
 frontend/out/
 frontend/coverage/
+frontend/test-results/
 *.tsbuildinfo
 .dev-data/
 .local/
+
+# Local Node and pnpm artifacts
+node_modules/
+pnpm-lock.yaml
 
 # Spyder project settings
 .spyderproject
