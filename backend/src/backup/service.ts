@@ -37,6 +37,19 @@ import {
   directoryBytes,
   validateFilesystemReferences
 } from "./inventory.js";
+import {
+  type BackupArtifact,
+  type BackupFaultPoint,
+  type BackupServiceOptions,
+  type RestoreResult,
+} from "./service-contracts.js";
+
+export type {
+  BackupArtifact,
+  BackupFaultPoint,
+  BackupServiceOptions,
+  RestoreResult,
+} from "./service-contracts.js";
 
 const LOCK_FILE = "publication.lock";
 const STAGING_DIRECTORY = ".prg32-backup-staging";
@@ -76,27 +89,6 @@ interface RecoveryPoint {
   readonly directory: string;
   readonly databasePath: string;
   readonly dataPath: string;
-}
-
-export interface BackupArtifact {
-  readonly path: string;
-  readonly encrypted: boolean;
-  readonly filename: string;
-}
-
-export interface RestoreResult {
-  readonly operationId: string;
-  readonly format: string;
-  readonly state: "COMPLETED";
-  readonly entries: number;
-  readonly expandedBytes: number;
-}
-
-export type BackupFaultPoint = "after-db-replacement" | "after-filesystem-replacement" | "before-verification";
-
-export interface BackupServiceOptions {
-  readonly fault?: (point: BackupFaultPoint) => void;
-  readonly secrets?: SecretStore;
 }
 
 function now(): string {
