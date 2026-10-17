@@ -15,6 +15,11 @@ import { TARGET_TABLES, TARGET_VERSION_TUPLE, COMPATIBLE_TABLES } from "./schema
 import { inspectSchema } from "../db/schema-inspection.js";
 import type { ObjectKind, StorageDatabase } from "./types.js";
 import {
+  predictedCanonicalZipBytes,
+  writeCanonicalZipArchive,
+  type ArchiveEntrySource,
+} from "./backup-archive.js";
+import {
   CANONICAL_BACKUP_ABI,
   CANONICAL_BACKUP_AUTHORIZATION,
   CANONICAL_BACKUP_OPERATIONAL_AUTHORIZATION,
@@ -61,13 +66,6 @@ const INCOMPLETE_PUBLICATION_STATES = new Set([
   "prepared", "objects_staged", "objects_verified", "database_committed", "cleanup_pending",
   "recovery_required", "compensating"
 ]);
-
-interface ArchiveEntrySource {
-  readonly archivePath: string;
-  readonly sourcePath: string;
-  readonly sizeBytes: number;
-  readonly sha256: string;
-}
 
 interface RestoreJournal {
   readonly abi: typeof CANONICAL_BACKUP_ABI;
@@ -326,110 +324,8 @@ function buildInventory(resource: StorageDatabase, snapshot: Database.Database, 
   return { entries: entries.sort((left, right) => left.archivePath.localeCompare(right.archivePath)), inventory: inventory.sort((left, right) => left.archivePath.localeCompare(right.archivePath)), objectKinds, stagingCount: stagingRows.length, recoveryMaterial: inventory.filter((item) => item.classification === "recovery_required").map((item) => item.archivePath), recoveryRequired: recoveryRequired(snapshot) };
 }
 
-function crcTable(): readonly number[] {
-  const table: number[] = [];
-  for (let n = 0; n < 256; n += 1) {
-    let c = n;
-    for (let bit = 0; bit < 8; bit += 1) c = (c & 1) === 1 ? 0xedb88320 ^ (c >>> 1) : c >>> 1;
-    table.push(c >>> 0);
-  }
-  return table;
-}
-
-const CRC_TABLE = crcTable();
-
-function streamCrcAndHash(sourcePath: string, outputFd: number, fault?: (point: CanonicalBackupFaultPoint) => void): { readonly sizeBytes: number; readonly sha256: string; readonly crc32: number } {
-  const inputFd = fs.openSync(sourcePath, "r");
-  const hash = crypto.createHash("sha256");
-  const buffer = Buffer.allocUnsafe(CHUNK_BYTES);
-  let crc = 0xffffffff;
-  let sizeBytes = 0;
-  try {
-    while (true) {
-      const count = fs.readSync(inputFd, buffer, 0, buffer.length, null);
-      if (count === 0) break;
-      const chunk = buffer.subarray(0, count);
-      sizeBytes += count;
-      hash.update(chunk);
-      for (const byte of chunk) crc = (CRC_TABLE[(crc ^ byte) & 0xff] ?? 0) ^ (crc >>> 8);
-      fs.writeSync(outputFd, chunk);
-      fault?.("during-object-streaming");
-    }
-  } finally {
-    fs.closeSync(inputFd);
-  }
-  return { sizeBytes, sha256: hash.digest("hex"), crc32: (crc ^ 0xffffffff) >>> 0 };
-}
-
-function writeU16(fd: number, value: number): void { const buffer = Buffer.alloc(2); buffer.writeUInt16LE(value, 0); fs.writeSync(fd, buffer); }
-function writeU32(fd: number, value: number): void { const buffer = Buffer.alloc(4); buffer.writeUInt32LE(value >>> 0, 0); fs.writeSync(fd, buffer); }
-
-function writeZipEntry(fd: number, entry: ArchiveEntrySource, fault?: (point: CanonicalBackupFaultPoint) => void): { readonly name: string; readonly sizeBytes: number; readonly sha256: string; readonly crc32: number; readonly offset: number } {
-  const name = Buffer.from(entry.archivePath, "utf8");
-  if (name.length > 0xffff || entry.sizeBytes > 0xffffffff) throw new BackupError("canonical backup ZIP entry exceeds format bounds", "canonical_backup_archive_unsupported");
-  const offset = fs.fstatSync(fd).size;
-  writeU32(fd, 0x04034b50); writeU16(fd, 20); writeU16(fd, 0x800); writeU16(fd, 0); writeU16(fd, 0); writeU16(fd, 0); writeU32(fd, 0); writeU32(fd, entry.sizeBytes); writeU32(fd, entry.sizeBytes); writeU16(fd, name.length); writeU16(fd, 0); fs.writeSync(fd, name);
-  const streamed = streamCrcAndHash(entry.sourcePath, fd, fault);
-  if (streamed.sizeBytes !== entry.sizeBytes || streamed.sha256 !== entry.sha256) throw new BackupError("canonical source changed while creating backup", "canonical_backup_source_changed");
-  return { name: entry.archivePath, ...streamed, offset };
-}
-
-function writeZipArchive(outputPath: string, entries: readonly ArchiveEntrySource[], manifestBytes: Buffer, manifestHash: string, limitsValue: CanonicalBackupLimits, fault?: (point: CanonicalBackupFaultPoint) => void): { readonly archiveBytes: number; readonly archiveSha256: string } {
-  const temporary = `${outputPath}.partial-${process.pid}-${crypto.randomUUID()}`;
-  const fd = fs.openSync(temporary, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_RDWR, 0o600);
-  const central: Array<{ name: string; sizeBytes: number; sha256: string; crc32: number; offset: number }> = [];
-  const manifestPath = `${temporary}.manifest`;
-  const sidecarPath = `${temporary}.manifest.sha256`;
-  try {
-    fs.writeFileSync(manifestPath, manifestBytes, { mode: 0o600 });
-    fs.writeFileSync(sidecarPath, `${manifestHash}\n`, { mode: 0o600 });
-    const allEntries: ArchiveEntrySource[] = [
-      { archivePath: "manifest.json", sourcePath: manifestPath, sizeBytes: manifestBytes.byteLength, sha256: hashText(manifestBytes.toString("utf8")) },
-      { archivePath: "manifest.sha256", sourcePath: sidecarPath, sizeBytes: Buffer.byteLength(`${manifestHash}\n`), sha256: hashText(`${manifestHash}\n`) },
-      ...entries
-    ];
-    for (const entry of allEntries) {
-      if (central.length >= limitsValue.maxEntries) throw new BackupError("canonical backup contains too many entries", "canonical_backup_too_many_entries");
-      if (entry.sizeBytes > limitsValue.maxEntryBytes) throw new BackupError("canonical backup entry is too large", "canonical_backup_entry_too_large");
-      central.push(writeZipEntry(fd, entry, fault));
-    }
-    fault?.("before-archive-finalization");
-    const centralOffset = fs.fstatSync(fd).size;
-    for (const item of central) {
-      const name = Buffer.from(item.name, "utf8");
-      writeU32(fd, 0x02014b50); writeU16(fd, 20); writeU16(fd, 20); writeU16(fd, 0x800); writeU16(fd, 0); writeU16(fd, 0); writeU16(fd, 0); writeU32(fd, item.crc32); writeU32(fd, item.sizeBytes); writeU32(fd, item.sizeBytes); writeU16(fd, name.length); writeU16(fd, 0); writeU16(fd, 0); writeU16(fd, 0); writeU16(fd, 0); writeU32(fd, 0); writeU32(fd, item.offset); fs.writeSync(fd, name);
-    }
-    const centralSize = fs.fstatSync(fd).size - centralOffset;
-    writeU32(fd, 0x06054b50); writeU16(fd, 0); writeU16(fd, 0); writeU16(fd, central.length); writeU16(fd, central.length); writeU32(fd, centralSize); writeU32(fd, centralOffset); writeU16(fd, 0);
-    fs.fsyncSync(fd);
-  } finally {
-    fs.closeSync(fd);
-    fs.rmSync(manifestPath, { force: true });
-    fs.rmSync(sidecarPath, { force: true });
-  }
-  fs.renameSync(temporary, outputPath);
-  const outputDirectory = fs.openSync(path.dirname(outputPath), fs.constants.O_RDONLY);
-  try { fs.fsyncSync(outputDirectory); } finally { fs.closeSync(outputDirectory); }
-  fault?.("after-archive-finalization");
-  const archiveIdentity = sha256File(outputPath);
-  if (archiveIdentity.sizeBytes > limitsValue.maxArchiveBytes) throw new BackupError("canonical backup archive is too large", "canonical_backup_archive_too_large");
-  return { archiveBytes: archiveIdentity.sizeBytes, archiveSha256: archiveIdentity.sha256 };
-}
-
 function manifestPayload(manifest: Omit<CanonicalBackupManifest, "canonical_manifest_sha256">): string {
   return `${canonicalJson(manifest)}\n`;
-}
-
-function predictedZipBytes(entries: readonly ArchiveEntrySource[], manifestBytes: Buffer): number {
-  const sidecarBytes = 65;
-  const all = [
-    { name: "manifest.json", size: manifestBytes.byteLength },
-    { name: "manifest.sha256", size: sidecarBytes },
-    ...entries.map((entry) => ({ name: entry.archivePath, size: entry.sizeBytes }))
-  ];
-  const local = all.reduce((total, entry) => total + 30 + Buffer.byteLength(entry.name, "utf8") + entry.size, 0);
-  const central = all.reduce((total, entry) => total + 46 + Buffer.byteLength(entry.name, "utf8"), 0);
-  return local + central + 22;
 }
 
 function readManifest(extractedPath: string, limitValue: CanonicalBackupLimits): { readonly manifest: CanonicalBackupManifest; readonly bytes: Buffer } {
@@ -637,13 +533,23 @@ export async function createCanonicalBackup(options: CanonicalBackupOptions): Pr
         manifestHash = hashText(manifestPayload(base));
         const manifest: CanonicalBackupManifest = { ...base, canonical_manifest_sha256: manifestHash };
         manifestBytes = Buffer.from(`${canonicalJson(manifest)}\n`, "utf8");
-        const nextPredicted = predictedZipBytes(payloadEntries, manifestBytes);
+        const nextPredicted = predictedCanonicalZipBytes(
+          payloadEntries,
+          manifestBytes,
+        );
         if (nextPredicted === predictedArchiveBytes) break;
         predictedArchiveBytes = nextPredicted;
       }
       const finalManifest: CanonicalBackupManifest = { ...base!, canonical_manifest_sha256: manifestHash };
       if (manifestBytes.byteLength > limitValue.maxManifestBytes) throw new BackupError("canonical backup manifest is too large", "canonical_backup_manifest_too_large");
-      const archive = writeZipArchive(outputPath, payloadEntries, manifestBytes, manifestHash, limitValue, options.fault);
+      const archive = writeCanonicalZipArchive(
+        outputPath,
+        payloadEntries,
+        manifestBytes,
+        manifestHash,
+        limitValue,
+        options.fault,
+      );
       if (archive.archiveBytes > limitValue.maxArchiveBytes) throw new BackupError("canonical backup archive is too large", "canonical_backup_archive_too_large");
       const verification = verifyCanonicalBackup(outputPath, { limits: limitValue });
       const marker = `${outputPath}.complete.json`;
