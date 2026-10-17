@@ -1,10 +1,9 @@
 # PRG32 Cartridge Store documentation
 
-This directory contains the operational documentation for the current
-repository. The service is in an incremental migration: the Next.js frontend
-and TypeScript/Fastify backend are active foundations, while Flask remains the
-authoritative compatibility service for the legacy catalog, firmware, metrics,
-scores, publishing, and multiplayer contracts until each boundary is migrated.
+This directory contains the canonical Markdown documentation for the current
+repository. The Next.js frontend and TypeScript/Fastify backend are the active
+modernization foundations. Flask remains available temporarily as a
+compatibility path, but it is not a target for further refactoring.
 
 ## Start here
 
@@ -15,9 +14,9 @@ scores, publishing, and multiplayer contracts until each boundary is migrated.
 | Configure services and environments | [Configuration](configuration.md) |
 | Review trust boundaries and security rules | [Security](security.md) |
 | Run the Docker profiles | [Docker](docker.md) |
-| Operate, back up, and recover a deployment | [Operations](operations.md) and [Deployment](deployment.md) |
-| Integrate firmware or tools | [API](api.md) and [API contract baseline](modernization/13-api-contracts.md) |
-| Follow the migration history | [Modernization roadmap](modernization/19-revised-migration-roadmap.md) |
+| Operate a deployment | [Operations](operations.md) and [Deployment](deployment.md) |
+| Integrate firmware or tools | [API](api.md) and the compatibility contracts |
+| Follow the active work plan | [Modernization roadmap](modernization/ROADMAP.md) |
 
 ## Documentation rules
 
@@ -50,4 +49,3 @@ CartridgeStore/
 ├── frontend/src/**/*.test.*     Next.js component and client tests
 └── docs/modernization/          Audits, decisions, reports, and roadmap
 ```
-
