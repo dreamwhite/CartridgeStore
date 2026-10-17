@@ -46,6 +46,14 @@ import {
   type CanonicalWorkflowFaultPoint,
   type CanonicalWorkflowOptions,
 } from "./workflow-contracts.js";
+import {
+  loadCanonicalArtifacts,
+  loadCanonicalSubmission,
+  safeSubmissionMetadata,
+  toSubmissionRecord,
+  type CanonicalArtifactRow,
+  type CanonicalSubmissionRow,
+} from "./workflow-records.js";
 
 export type {
   CanonicalDownloadEvent,
@@ -56,34 +64,6 @@ export type {
 const WORKFLOW_JOURNAL_VERSION = 1;
 const MAX_OPERATION_BYTES = 2 * 1024 * 1024;
 const MAX_SUBMISSION_PAGE = 100;
-
-interface CanonicalSubmissionRow {
-  readonly submission_id: number;
-  readonly cartridge_id: string;
-  readonly version: string;
-  readonly status: string;
-  readonly submitted_by_user_id: number | null;
-  readonly submitted_by: string;
-  readonly reviewed_by_user_id: number | null;
-  readonly reviewed_by: string;
-  readonly created_at: string;
-  readonly reviewed_at: string | null;
-  readonly published_release_id: string | null;
-  readonly revision_of_submission_id: number | null;
-  readonly revision_number: number;
-}
-
-interface CanonicalArtifactRow extends CanonicalPayloadArtifact {
-  readonly submission_artifact_id: string;
-  readonly submission_id: number;
-  readonly source_filename: string;
-  readonly sha256: string;
-  readonly size_bytes: number;
-  readonly media_type: string;
-  readonly validation_state: string;
-  readonly metadata_json: string;
-  readonly colophon_json: string | null;
-}
 
 type ObjectPlan = CanonicalObjectPlan;
 
@@ -138,10 +118,6 @@ function readStaged(root: string, row: CanonicalPayloadArtifact): Buffer {
   const bytes = fs.readFileSync(target);
   if (sha256(bytes) !== row.sha256) fail("staged artifact integrity verification failed", "review_operation_failed", 500);
   return bytes;
-}
-
-function safeMetadata(value: unknown): Record<string, unknown> {
-  return object(value, "submission metadata is malformed");
 }
 
 function canonicalPrincipal(database: Database.Database, principal: Principal, reviewer = false): { id: number; name: string } {
@@ -211,39 +187,15 @@ export class CanonicalWorkflowService implements ReviewWorkflowService {
   private hit(point: CanonicalWorkflowFaultPoint): void { this.fault?.(point); }
 
   private submissionRow(id: number): CanonicalSubmissionRow {
-    const row = this.database.prepare("SELECT submission_id, cartridge_id, version, status, submitted_by_user_id, submitted_by, reviewed_by_user_id, reviewed_by, created_at, reviewed_at, published_release_id, revision_of_submission_id, revision_number FROM submissions WHERE submission_id = ?").get(id) as CanonicalSubmissionRow | undefined;
-    if (!row) fail("submission not found", "review_not_found", 404);
-    return row;
+    return loadCanonicalSubmission(this.database, id, fail);
   }
 
   private artifactRows(id: number): CanonicalArtifactRow[] {
-    return this.database.prepare("SELECT submission_artifact_id, submission_id, architecture, source_filename, staging_key, sha256, size_bytes, media_type, validation_state, metadata_json, colophon_json FROM submission_artifacts WHERE submission_id = ? ORDER BY architecture").all(id) as CanonicalArtifactRow[];
+    return loadCanonicalArtifacts(this.database, id);
   }
 
   private record(row: CanonicalSubmissionRow): SubmissionRecord {
-    const artifacts = this.artifactRows(row.submission_id);
-    const metadataRow = artifacts[0]?.metadata_json;
-    const metadata = metadataRow ? safeMetadata(parseJson(metadataRow, "submission metadata")) : {};
-    return {
-      id: row.submission_id,
-      game_id: row.cartridge_id,
-      version: row.version,
-      status: submissionStatus(row.status),
-      submitted_by_user_id: row.submitted_by_user_id,
-      submitted_by: row.submitted_by,
-      reviewed_by_user_id: row.reviewed_by_user_id,
-      reviewed_by: row.reviewed_by,
-      pending_dir: `storage/staging/submissions/${row.submission_id}`,
-      metadata_json: json(metadata),
-      architectures_json: json(artifacts.map((item) => ({ architecture: item.architecture, file: item.source_filename, stored: item.staging_key, sha256: item.sha256, size_bytes: item.size_bytes, validation_state: item.validation_state }))),
-      created_at: row.created_at,
-      reviewed_at: row.reviewed_at,
-      metadata,
-      architectures: artifacts.map((item) => ({ architecture: item.architecture, file: item.source_filename, stored: item.staging_key, sha256: item.sha256, size_bytes: item.size_bytes, validation_state: item.validation_state }))
-      ,revision_of_submission_id: row.revision_of_submission_id
-      ,revision_number: row.revision_number
-      ,review_history: this.database.prepare("SELECT decision_id, decision, reviewer_name, metadata_json, note, created_at FROM review_decisions WHERE submission_id = ? ORDER BY created_at ASC, decision_id ASC").all(row.submission_id) as Array<Record<string, unknown>>
-    };
+    return toSubmissionRecord(this.database, row);
   }
 
   createFromBundle(bundle: Uint8Array, principal: Principal, sourceSubmissionId: number | null = null): SubmissionResult {
@@ -346,7 +298,7 @@ export class CanonicalWorkflowService implements ReviewWorkflowService {
     const artifacts = this.artifactRows(submissionId);
     if (artifacts.length === 0) fail("submission has no artifacts", "review_operation_failed", 500);
     const first = validateCartridgeBinary(readStaged(this.root, artifacts[0] as CanonicalArtifactRow));
-    const baseMetadata = safeMetadata(first.metadata);
+    const baseMetadata = safeSubmissionMetadata(first.metadata);
     const reviewed = reviewedMetadata(baseMetadata, metadataUpdates);
     const releaseId = uuid("release");
     const operationId = `pub-${crypto.randomUUID()}`;
@@ -354,7 +306,7 @@ export class CanonicalWorkflowService implements ReviewWorkflowService {
     for (const artifact of artifacts) {
       const artifactId = uuid("artifact");
       const parsed = validateCartridgeBinary(readStaged(this.root, artifact));
-      const originalMetadata = safeMetadata(parsed.metadata);
+      const originalMetadata = safeSubmissionMetadata(parsed.metadata);
       const updatedMetadata = reviewedMetadata(originalMetadata, metadataUpdates);
       const reviewedColophon = parsed.colophon ? { ...parsed.colophon, title: updatedMetadata.title, version: updatedMetadata.version } : null;
       const rebuilt = Buffer.from(buildSubmissionCartridge(parsed.legacyPayload, updatedMetadata, parsed.icon ?? Buffer.alloc(0), artifact.architecture, parsed.screenshot, reviewedColophon));
@@ -477,7 +429,7 @@ export class CanonicalWorkflowService implements ReviewWorkflowService {
       this.artifactRows(manifest.submissionId),
       {
         readStaged: (row) => readStaged(this.root, row),
-        safeMetadata,
+        safeMetadata: safeSubmissionMetadata,
         fail,
       },
     );
