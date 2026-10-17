@@ -13,6 +13,7 @@ import {
   requiredSecret,
 } from "./env-values.js";
 import type { BackendConfig } from "./env-contracts.js";
+import { resolveEmailConfig } from "./env-email.js";
 import { resolveRuntimeMode } from "./env-runtime-mode.js";
 
 export type { BackendConfig } from "./env-contracts.js";
@@ -73,15 +74,19 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
   const oidcPublicOrigin = optionalNonEmpty(environment.PRG32_BACKEND_OIDC_PUBLIC_ORIGIN);
   const federationPublicOrigin = optionalNonEmpty(environment.PRG32_BACKEND_FEDERATION_PUBLIC_ORIGIN ?? oidcPublicOrigin);
   const frontendPublicOrigin = optionalNonEmpty(environment.PRG32_BACKEND_FRONTEND_PUBLIC_ORIGIN);
-  const emailTransport = (environment.PRG32_BACKEND_EMAIL_TRANSPORT ?? (authWriteMode === "test" ? "memory" : "disabled")).trim().toLowerCase();
-  if (emailTransport !== "disabled" && emailTransport !== "memory" && emailTransport !== "smtp") throw new Error("PRG32_BACKEND_EMAIL_TRANSPORT must be disabled, memory, or smtp");
-  const emailFrom = nonEmpty("PRG32_BACKEND_EMAIL_FROM", environment.PRG32_BACKEND_EMAIL_FROM, "no-reply@prg32.local");
-  const emailPublicOrigin = optionalNonEmpty(environment.PRG32_BACKEND_EMAIL_PUBLIC_ORIGIN ?? frontendPublicOrigin ?? (authWriteMode === "test" ? "http://store.prg32.local" : undefined));
-  const emailSmtpHost = optionalNonEmpty(environment.PRG32_BACKEND_EMAIL_SMTP_HOST);
-  const emailSmtpPort = positiveInteger("PRG32_BACKEND_EMAIL_SMTP_PORT", environment.PRG32_BACKEND_EMAIL_SMTP_PORT, 587);
-  const emailSmtpUser = optionalNonEmpty(environment.PRG32_BACKEND_EMAIL_SMTP_USER);
-  const emailSmtpPassword = optionalNonEmpty(environment.PRG32_BACKEND_EMAIL_SMTP_PASSWORD);
-  if (emailTransport === "smtp" && (!emailSmtpHost || !emailPublicOrigin)) throw new Error("SMTP email transport requires an SMTP host and public origin");
+  const {
+    emailTransport,
+    emailFrom,
+    emailPublicOrigin,
+    emailSmtpHost,
+    emailSmtpPort,
+    emailSmtpUser,
+    emailSmtpPassword,
+  } = resolveEmailConfig(
+    environment,
+    authWriteMode,
+    frontendPublicOrigin,
+  );
   const corsAllowedOrigins = (environment.PRG32_BACKEND_CORS_ORIGINS ?? "")
     .split(",")
     .map((value) => value.trim())
