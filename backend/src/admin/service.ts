@@ -1,43 +1,18 @@
 import type Database from "better-sqlite3";
 
-import { markRevokedBefore } from "../auth/revocation.js";
-import {
-  hasAccountStateColumn,
-  hasAccountStatusColumn,
-  invalidateAccountAccess
-} from "../auth/account-state.js";
-import {
-  generateWerkzeugScryptHash,
-  validatePassword
-} from "../auth/service.js";
 import type { BackendConfig } from "../config/env.js";
 import { AdminAuditLog } from "./audit.js";
-import {
-  normalizeAdminEmail,
-  normalizeAdminGroupIds,
-  normalizeAdminRole,
-  normalizeAdminUsername,
-  positiveAdminId
-} from "./codecs.js";
-import { AdminError } from "./errors.js";
 import { AdminGroupService } from "./group-service.js";
-import { runAdminMutation } from "./mutation-runner.js";
-import {
-  readAdminUser,
-} from "./user-view.js";
-import {
-  listAdminAudit,
-  listAdminRoles,
-  listAdminUsers,
-  type AdminUserListOptions,
-} from "./read-model.js";
-import {
-  type AdminMutationContext,
-  type GroupView,
-  type UserCreateInput,
-  type UserUpdateInput,
-  type UserView,
+import { listAdminAudit, listAdminRoles } from "./read-model.js";
+import { AdminUserService } from "./user-service.js";
+import type {
+  AdminMutationContext,
+  GroupView,
+  UserCreateInput,
+  UserUpdateInput,
+  UserView,
 } from "./service-contracts.js";
+import type { AdminUserListOptions } from "./read-model.js";
 
 export type {
   AdminMutationContext,
@@ -50,15 +25,20 @@ export type {
 type DatabaseSource = Database.Database | (() => Database.Database);
 export { AdminError } from "./errors.js";
 
+/** Compatibility facade for administrative identity and group operations. */
 export class AdminIdentityService {
   private readonly source: DatabaseSource;
-  private readonly writable: Database.Database | null;
   private readonly audit: AdminAuditLog;
   private readonly groups: AdminGroupService;
+  private readonly users: AdminUserService;
 
-  constructor(options: { readonly config: BackendConfig; readonly database: DatabaseSource; readonly writableDatabase: Database.Database | null; readonly audit?: AdminAuditLog }) {
+  constructor(options: {
+    readonly config: BackendConfig;
+    readonly database: DatabaseSource;
+    readonly writableDatabase: Database.Database | null;
+    readonly audit?: AdminAuditLog;
+  }) {
     this.source = options.database;
-    this.writable = options.writableDatabase;
     this.audit = options.audit ?? new AdminAuditLog(options.config);
     this.groups = new AdminGroupService({
       config: options.config,
@@ -66,202 +46,145 @@ export class AdminIdentityService {
       writableDatabase: options.writableDatabase,
       audit: this.audit,
     });
-  }
-
-  private get database(): Database.Database {
-    return typeof this.source === "function" ? this.source() : this.source;
-  }
-
-  private ensureEditors(database: Database.Database): void {
-    const row = database.prepare("SELECT id FROM groups WHERE name = 'editors'").get() as { id?: number } | undefined;
-    if (!row?.id) throw new AdminError("admin_identity_inconsistent", 503, "protected editors group is unavailable");
-  }
-
-  private mutate<T>(context: AdminMutationContext, action: string, targetType: string, targetId: string, callback: (database: Database.Database) => T): T {
-    return runAdminMutation({
-      writableDatabase: this.writable,
+    this.users = new AdminUserService({
+      database: options.database,
+      writableDatabase: options.writableDatabase,
       audit: this.audit,
+      groups: this.groups,
+    });
+  }
+
+  /** Lists administrative users. */
+  listUsers(options: AdminUserListOptions): {
+    readonly users: readonly UserView[];
+    readonly page: number;
+    readonly limit: number;
+    readonly total: number;
+  } {
+    return this.users.listUsers(options);
+  }
+
+  /** Reads one administrative user. */
+  getUser(userId: number): UserView {
+    return this.users.getUser(userId);
+  }
+
+  /** Creates one local administrative user. */
+  createUser(
+    input: UserCreateInput,
+    context: AdminMutationContext,
+  ): UserView {
+    return this.users.createUser(input, context);
+  }
+
+  /** Updates one local administrative user. */
+  updateUser(
+    userId: number,
+    input: UserUpdateInput,
+    context: AdminMutationContext,
+  ): UserView {
+    return this.users.updateUser(userId, input, context);
+  }
+
+  /** Changes one user's role. */
+  setRole(
+    userId: number,
+    roleValue: unknown,
+    context: AdminMutationContext,
+  ): UserView {
+    return this.users.setRole(userId, roleValue, context);
+  }
+
+  /** Enables or disables one user account. */
+  setDisabled(
+    userId: number,
+    disabledValue: unknown,
+    context: AdminMutationContext,
+  ): UserView {
+    return this.users.setDisabled(userId, disabledValue, context);
+  }
+
+  /** Changes one user's account status. */
+  setStatus(
+    userId: number,
+    statusValue: unknown,
+    reasonValue: unknown,
+    expiresValue: unknown,
+    context: AdminMutationContext,
+  ): UserView {
+    return this.users.setStatus(
+      userId,
+      statusValue,
+      reasonValue,
+      expiresValue,
       context,
-      action,
-      targetType,
-      targetId,
-      callback
-    });
+    );
   }
 
-  listUsers(options: AdminUserListOptions): { readonly users: readonly UserView[]; readonly page: number; readonly limit: number; readonly total: number } {
-    return listAdminUsers(this.database, options);
-  }
-  getUser(userId: number): UserView { return readAdminUser(this.database, positiveAdminId(userId, "user_id")); }
-
-  createUser(input: UserCreateInput, context: AdminMutationContext): UserView {
-    const username = normalizeAdminUsername(input.username);
-    const email = normalizeAdminEmail(input.email);
-    if (typeof input.password !== "string" || !input.password) throw new AdminError("invalid_password", 400, "password is required");
-    validatePassword(input.password, input.passwordConfirm ?? input.password);
-    const role = input.role === undefined ? "user" : normalizeAdminRole(input.role);
-    const groupIds = normalizeAdminGroupIds(input.groupIds);
-    const passwordHash = generateWerkzeugScryptHash(input.password);
-    return this.mutate(context, "user.create", "user", "pending", (database) => {
-      this.ensureEditors(database);
-      this.groups.assertGroups(database, groupIds);
-      const result = database.prepare("INSERT INTO users(username, email, password_hash, role) VALUES (?, ?, ?, ?)").run(username, email, passwordHash, role);
-      const userId = Number(result.lastInsertRowid);
-      this.groups.setGroups(database, userId, groupIds);
-      return readAdminUser(database, userId);
-    });
+  /** Replaces one user's group membership. */
+  replaceGroups(
+    userId: number,
+    value: unknown,
+    context: AdminMutationContext,
+  ): UserView {
+    return this.users.replaceGroups(userId, value, context);
   }
 
-  updateUser(userId: number, input: UserUpdateInput, context: AdminMutationContext): UserView {
-    const id = positiveAdminId(userId, "user_id");
-    if (input.username === undefined && input.email === undefined && input.password === undefined) throw new AdminError("empty_user_update", 400, "user update is empty");
-    const username = input.username === undefined ? undefined : normalizeAdminUsername(input.username);
-    const email = input.email === undefined ? undefined : normalizeAdminEmail(input.email);
-    if (input.password !== undefined) {
-      if (!input.password) throw new AdminError("invalid_password", 400, "password must not be empty");
-      validatePassword(input.password, input.passwordConfirm ?? input.password);
-    }
-    const passwordHash = input.password === undefined ? undefined : generateWerkzeugScryptHash(input.password);
-    return this.mutate(context, "user.update", "user", String(id), (database) => {
-      this.ensureEditors(database);
-      readAdminUser(database, id);
-      const fields: string[] = [];
-      const values: string[] = [];
-      if (username !== undefined) { fields.push("username = ?"); values.push(username); }
-      if (email !== undefined) { fields.push("email = ?"); values.push(email); }
-      if (passwordHash !== undefined) { fields.push("password_hash = ?"); values.push(passwordHash); }
-      values.push(String(id));
-      database.prepare(`UPDATE users SET ${fields.join(", ")} WHERE id = ?`).run(...values);
-      if (passwordHash !== undefined) {
-        database.prepare("DELETE FROM api_tokens WHERE user_id = ?").run(id);
-        markRevokedBefore(database, id);
-      }
-      return readAdminUser(database, id);
-    });
+  /** Deletes one local user. */
+  deleteUser(
+    userId: number,
+    context: AdminMutationContext,
+  ): { readonly user_id: number } {
+    return this.users.deleteUser(userId, context);
   }
 
-  setRole(userId: number, roleValue: unknown, context: AdminMutationContext): UserView {
-    const id = positiveAdminId(userId, "user_id");
-    const role = normalizeAdminRole(roleValue);
-    return this.mutate(context, "user.role.update", "user", String(id), (database) => {
-      this.ensureEditors(database);
-      const current = readAdminUser(database, id);
-      if (id === context.actorUserId && role !== "admin") throw new AdminError("self_demotion_forbidden", 409, "administrators cannot demote themselves");
-      if (current.role === "admin" && role !== "admin") {
-        const count = Number((database.prepare("SELECT COUNT(*) AS count FROM users WHERE role = 'admin'").get() as { count: number }).count);
-        if (count <= 1) throw new AdminError("final_administrator_required", 409, "at least one administrator must remain");
-      }
-      if (current.role !== role) {
-        database.prepare("UPDATE users SET role = ? WHERE id = ?").run(role, id);
-        database.prepare("DELETE FROM api_tokens WHERE user_id = ?").run(id);
-        markRevokedBefore(database, id);
-      }
-      return readAdminUser(database, id);
-    });
-  }
-
-  setDisabled(userId: number, disabledValue: unknown, context: AdminMutationContext): UserView {
-    if (typeof disabledValue !== "boolean") throw new AdminError("invalid_account_state", 400, "disabled must be boolean");
-    const id = positiveAdminId(userId, "user_id");
-    return this.mutate(context, disabledValue ? "user.account.disabled" : "user.account.enabled", "user", String(id), (database) => {
-      if (!hasAccountStateColumn(database)) throw new AdminError("account_state_unavailable", 503, "account state is unavailable");
-      this.ensureEditors(database);
-      const current = readAdminUser(database, id);
-      if (id === context.actorUserId && disabledValue) throw new AdminError("self_disable_forbidden", 409, "administrators cannot disable themselves");
-      if (current.role === "admin" && disabledValue && current.disabled_at === null) {
-        const count = Number((database.prepare("SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND disabled_at IS NULL").get() as { count: number }).count);
-        if (count <= 1) throw new AdminError("final_administrator_required", 409, "at least one enabled administrator must remain");
-      }
-      const next = disabledValue ? new Date().toISOString() : null;
-      database.prepare("UPDATE users SET disabled_at = ? WHERE id = ?").run(next, id);
-      if (disabledValue) invalidateAccountAccess(database, id);
-      return readAdminUser(database, id);
-    });
-  }
-
-  setStatus(userId: number, statusValue: unknown, reasonValue: unknown, expiresValue: unknown, context: AdminMutationContext): UserView {
-    if (statusValue !== "active" && statusValue !== "suspended" && statusValue !== "banned") {
-      throw new AdminError("invalid_account_status", 400, "status is invalid");
-    }
-    const status = statusValue;
-    const reason = reasonValue === undefined ? "" : typeof reasonValue === "string" ? reasonValue.trim() : (() => { throw new AdminError("invalid_status_reason", 400, "reason is invalid"); })();
-    if (reason.length > 500) throw new AdminError("invalid_status_reason", 400, "reason is invalid");
-    const expiresAt = expiresValue === undefined || expiresValue === null || expiresValue === ""
-      ? null
-      : typeof expiresValue === "string" && !Number.isNaN(Date.parse(expiresValue)) ? new Date(expiresValue).toISOString() : (() => { throw new AdminError("invalid_status_expiry", 400, "expires_at is invalid"); })();
-    const id = positiveAdminId(userId, "user_id");
-    return this.mutate(context, `user.account.${status}`, "user", String(id), (database) => {
-      if (!hasAccountStatusColumn(database)) throw new AdminError("account_status_unavailable", 503, "account status is unavailable");
-      this.ensureEditors(database);
-      const current = readAdminUser(database, id);
-      if (id === context.actorUserId && status !== "active") throw new AdminError("self_status_change_forbidden", 409, "administrators cannot suspend or ban themselves");
-      if (current.role === "admin" && status !== "active" && current.account_status === "active") {
-        const count = Number((database.prepare("SELECT COUNT(*) AS count FROM users WHERE role = 'admin' AND disabled_at IS NULL AND account_status = 'active'").get() as { count: number }).count);
-        if (count <= 1) throw new AdminError("final_administrator_required", 409, "at least one active administrator must remain");
-      }
-      const now = new Date().toISOString();
-      database.prepare("UPDATE users SET account_status = ?, status_reason = ?, status_actor_user_id = ?, status_changed_at = ?, status_expires_at = ?, disabled_at = CASE WHEN ? = 'active' THEN NULL ELSE disabled_at END WHERE id = ?")
-        .run(status, reason || null, context.actorUserId, now, expiresAt, status, id);
-      if (status !== "active") invalidateAccountAccess(database, id);
-      return readAdminUser(database, id);
-    });
-  }
-
-  replaceGroups(userId: number, value: unknown, context: AdminMutationContext): UserView {
-    const id = positiveAdminId(userId, "user_id");
-    const groupIds = normalizeAdminGroupIds(value);
-    return this.mutate(context, "user.groups.replace", "user", String(id), (database) => {
-      this.ensureEditors(database);
-      readAdminUser(database, id);
-      this.groups.assertGroups(database, groupIds);
-      const before = (database.prepare("SELECT group_id FROM user_groups WHERE user_id = ? ORDER BY group_id").all(id) as Array<{ group_id: number }>).map((row) => row.group_id);
-      if (before.join(",") !== [...groupIds].sort((a, b) => a - b).join(",")) {
-        this.groups.setGroups(database, id, groupIds);
-        database.prepare("DELETE FROM api_tokens WHERE user_id = ?").run(id);
-        markRevokedBefore(database, id);
-      }
-      return readAdminUser(database, id);
-    });
-  }
-
-  deleteUser(userId: number, context: AdminMutationContext): { readonly user_id: number } {
-    const id = positiveAdminId(userId, "user_id");
-    return this.mutate(context, "user.delete", "user", String(id), (database) => {
-      this.ensureEditors(database);
-      const current = readAdminUser(database, id);
-      if (id === context.actorUserId) throw new AdminError("self_deletion_forbidden", 409, "administrators cannot delete themselves");
-      if (current.role === "admin") {
-        const count = Number((database.prepare("SELECT COUNT(*) AS count FROM users WHERE role = 'admin'").get() as { count: number }).count);
-        if (count <= 1) throw new AdminError("final_administrator_required", 409, "at least one administrator must remain");
-      }
-      database.prepare("DELETE FROM api_tokens WHERE user_id = ?").run(id);
-      markRevokedBefore(database, id);
-      database.prepare("DELETE FROM users WHERE id = ?").run(id);
-      return { user_id: id };
-    });
-  }
-
-  listGroups(limit: number): { readonly groups: readonly GroupView[]; readonly limit: number } {
+  /** Lists administrative groups. */
+  listGroups(limit: number): {
+    readonly groups: readonly GroupView[];
+    readonly limit: number;
+  } {
     return this.groups.listGroups(limit);
   }
 
-  createGroup(nameValue: unknown, context: AdminMutationContext): GroupView {
+  /** Creates one administrative group. */
+  createGroup(
+    nameValue: unknown,
+    context: AdminMutationContext,
+  ): GroupView {
     return this.groups.createGroup(nameValue, context);
   }
 
-  renameGroup(groupId: number, nameValue: unknown, context: AdminMutationContext): GroupView {
+  /** Renames one administrative group. */
+  renameGroup(
+    groupId: number,
+    nameValue: unknown,
+    context: AdminMutationContext,
+  ): GroupView {
     return this.groups.renameGroup(groupId, nameValue, context);
   }
 
-  deleteGroup(groupId: number, context: AdminMutationContext): { readonly group_id: number } {
+  /** Deletes one administrative group. */
+  deleteGroup(
+    groupId: number,
+    context: AdminMutationContext,
+  ): { readonly group_id: number } {
     return this.groups.deleteGroup(groupId, context);
   }
 
+  /** Lists the available administrative roles. */
   roles(): readonly Record<string, unknown>[] {
     return listAdminRoles(this.database);
   }
 
-  listAudit(limitValue = 100): { readonly events: readonly Record<string, unknown>[]; readonly limit: number } {
+  /** Lists bounded administrative audit events. */
+  listAudit(limitValue = 100): {
+    readonly events: readonly Record<string, unknown>[];
+    readonly limit: number;
+  } {
     return listAdminAudit(this.database, limitValue);
+  }
+
+  private get database(): Database.Database {
+    return typeof this.source === "function" ? this.source() : this.source;
   }
 }
