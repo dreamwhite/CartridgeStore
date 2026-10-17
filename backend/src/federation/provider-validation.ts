@@ -1,11 +1,15 @@
-import crypto from "node:crypto";
-
 import {
   type FederationProtocol,
   type FederationProviderConfig,
   type ProviderInput,
 } from "./provider-contracts.js";
 import { clientAuthMethod, FederationProviderError } from "./provider-codecs.js";
+import {
+  samlCertificate,
+  samlClockSkew,
+  samlNameIdFormat,
+  samlTrustedCertificates,
+} from "./provider-saml-validation.js";
 
 const PROVIDER_ID_RE = /^[a-z][a-z0-9._-]{0,63}$/;
 const REFERENCE_RE = new RegExp(
@@ -13,8 +17,6 @@ const REFERENCE_RE = new RegExp(
     "(oidc-client-secret|saml-sp-signing-private-key|" +
     "saml-sp-decryption-private-key)$",
 );
-const MAX_SAML_TRUSTED_CERTIFICATES = 2;
-
 function text(
   value: unknown,
   label: string,
@@ -158,113 +160,6 @@ function booleanOption(
   return value;
 }
 
-function samlCertificate(value: unknown): string | null {
-  const normalized = text(value, "saml_idp_certificate_pem", 65536);
-  if (normalized === null) return null;
-  if (
-    !normalized.includes("BEGIN CERTIFICATE") &&
-    !normalized.includes("BEGIN PUBLIC KEY")
-  ) {
-    throw new FederationProviderError(
-      "federation_provider_invalid",
-      400,
-      "saml_idp_certificate_pem is invalid",
-    );
-  }
-  try {
-    if (normalized.includes("BEGIN CERTIFICATE")) {
-      new crypto.X509Certificate(normalized);
-    } else {
-      crypto.createPublicKey(normalized);
-    }
-  } catch {
-    throw new FederationProviderError(
-      "federation_provider_invalid",
-      400,
-      "saml_idp_certificate_pem is invalid",
-    );
-  }
-  return normalized;
-}
-
-function certificateFingerprint(value: string): string {
-  return crypto
-    .createHash("sha256")
-    .update(value.replace(/\r\n/g, "\n").trim(), "utf8")
-    .digest("hex");
-}
-
-function samlTrustedCertificates(
-  value: unknown,
-  legacy: string | null,
-): string[] {
-  if (value === undefined || value === null) {
-    return legacy === null ? [] : [legacy];
-  }
-  if (
-    !Array.isArray(value) ||
-    value.length > MAX_SAML_TRUSTED_CERTIFICATES
-  ) {
-    throw new FederationProviderError(
-      "federation_provider_invalid",
-      400,
-      "saml_trusted_certificates_pem is invalid",
-    );
-  }
-  const result = value.map((item) => samlCertificate(item));
-  if (result.some((item): item is null => item === null)) {
-    throw new FederationProviderError(
-      "federation_provider_invalid",
-      400,
-      "saml_trusted_certificates_pem is invalid",
-    );
-  }
-  const certificates = result.filter(
-    (item): item is string => item !== null,
-  );
-  if (
-    new Set(certificates.map(certificateFingerprint)).size !==
-    certificates.length
-  ) {
-    throw new FederationProviderError(
-      "federation_provider_invalid",
-      400,
-      "saml_trusted_certificates_pem contains duplicates",
-    );
-  }
-  return certificates;
-}
-
-function samlNameIdFormat(value: unknown): string | null {
-  const normalized = text(value, "saml_name_id_format", 160);
-  if (normalized === null) return null;
-  if (normalized !== "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent") {
-    throw new FederationProviderError(
-      "federation_provider_invalid",
-      400,
-      "saml_name_id_format must be persistent",
-    );
-  }
-  return normalized;
-}
-
-function samlClockSkew(value: unknown): number {
-  if (value === undefined || value === null) return 0;
-  if (
-    typeof value !== "number" ||
-    !Number.isSafeInteger(value) ||
-    value < 0 ||
-    value > 300000
-  ) {
-    throw new FederationProviderError(
-      "federation_provider_invalid",
-      400,
-      "saml_accepted_clock_skew_ms is invalid",
-    );
-  }
-  return value;
-}
-
 /** Normalizes and validates one OIDC or SAML provider definition. */
 export function normalizeProvider(
   input: ProviderInput,
@@ -291,13 +186,23 @@ export function normalizeProvider(
   const idpEntityId = text(input.idpEntityId, "idp_entity_id", 512);
   const spEntityId = text(input.spEntityId, "sp_entity_id", 512);
   const samlEntryPoint = url(input.samlEntryPoint, "saml_entry_point", allowHttp);
-  const samlNameIdFormatValue = samlNameIdFormat(input.samlNameIdFormat);
-  const samlIdpCertificatePemValue = samlCertificate(input.samlIdpCertificatePem);
+  const samlNameIdFormatValue = samlNameIdFormat(
+    input.samlNameIdFormat,
+    text,
+  );
+  const samlIdpCertificatePemValue = samlCertificate(
+    input.samlIdpCertificatePem,
+    text,
+  );
   const samlTrustedCertificatesPemValue = samlTrustedCertificates(
     input.samlTrustedCertificatesPem,
     samlIdpCertificatePemValue,
+    text,
   );
-  const samlSpCertificatePemValue = samlCertificate(input.samlSpCertificatePem);
+  const samlSpCertificatePemValue = samlCertificate(
+    input.samlSpCertificatePem,
+    text,
+  );
   const samlWantAssertionsSigned = booleanOption(
     input.samlWantAssertionsSigned,
     "saml_want_assertions_signed",
