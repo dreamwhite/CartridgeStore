@@ -4,7 +4,7 @@ import path from "node:path";
 
 import type Database from "better-sqlite3";
 
-import { INDEX_ABI, safeGameId, safeVersion } from "../catalog/catalog.js";
+import { safeGameId, safeVersion } from "../catalog/catalog.js";
 import { encodePythonJson } from "../compatibility/serialization.js";
 import {
   normalizeArchitecture,
@@ -14,7 +14,6 @@ import {
 import {
   applyReviewMetadata,
   catalogColophon,
-  clone,
   fail,
   imageMime,
   isoNow,
@@ -50,6 +49,12 @@ import {
   writeAtomic
 } from "./publication-files.js";
 import { reconcilePublication } from "./reconciliation.js";
+import {
+  indexForCatalogMutation,
+  indexForPublication,
+  loadPublicationIndex,
+  PUBLICATION_INDEX_MAX_BYTES,
+} from "./publication-index.js";
 
 export { applyReviewMetadata } from "./publication-codecs.js";
 export {
@@ -82,7 +87,6 @@ interface SubmissionRow {
 }
 
 const MAX_JOURNAL_BYTES = 4 * 1024 * 1024;
-const MAX_INDEX_BYTES = 16 * 1024 * 1024;
 const MAX_CARTRIDGE_BYTES = 128 * 1024 * 1024;
 const LOCK_FILE = "publication.lock";
 const JOURNAL_ROOT = "publication-operations";
@@ -135,18 +139,6 @@ export class PublicationConsistencyService {
   }
 
   private withLock<T>(callback: () => T): T { return withPublicationLock(this.lockPath, callback); }
-
-  private loadIndex(): { index: Record<string, unknown>; hash: string | null } {
-    const indexPath = path.join(this.root, "index.json");
-    if (!fs.existsSync(indexPath)) return { index: { abi: INDEX_ABI, updated_at: isoNow(), games: {} }, hash: null };
-    const bytes = readBounded(indexPath, MAX_INDEX_BYTES, "index_corrupt");
-    let parsed: unknown;
-    try { parsed = JSON.parse(bytes.toString("utf8")) as unknown; } catch { fail("catalog index is malformed", "index_corrupt"); }
-    const index = object(parsed, "catalog index is malformed");
-    if (index.abi !== undefined && index.abi !== INDEX_ABI) fail("catalog index ABI is unsupported", "index_corrupt");
-    if (index.games === null || typeof index.games !== "object" || Array.isArray(index.games)) fail("catalog index games is malformed", "index_corrupt");
-    return { index: clone(index), hash: sha256(bytes) };
-  }
 
   private pendingRow(submissionId: number): SubmissionRow {
     const row = this.database.prepare("SELECT id, game_id, version, status, pending_dir, metadata_json, architectures_json FROM cartridge_submissions WHERE id = ?").get(submissionId) as SubmissionRow | undefined;
@@ -210,7 +202,7 @@ export class PublicationConsistencyService {
         indexSource.push({ architecture, sourceRelative, image, parsed });
       }
       this.hit("after-pending-validation");
-      const loaded = this.loadIndex();
+      const loaded = loadPublicationIndex(this.root);
       const operationId = `pub-${crypto.randomUUID()}`;
       const createdAt = isoNow();
       const variants: PublicationVariantPlan[] = indexSource.map(({ architecture, sourceRelative, image, parsed }) => {
@@ -240,7 +232,13 @@ export class PublicationConsistencyService {
           hasSignature: parsed.blocks.some((block) => block.type === "SIGN")
         };
       });
-      const expectedIndex = this.indexForOperation(loaded.index, gameId, version, variants, createdAt);
+      const expectedIndex = indexForPublication(
+        loaded.index,
+        gameId,
+        version,
+        variants,
+        createdAt,
+      );
       const expectedIndexBytes = serializeJson(expectedIndex);
       const operation: PublicationOperation = {
         journalVersion: 1,
@@ -267,7 +265,7 @@ export class PublicationConsistencyService {
   private prepareCatalogUnlocked(options: CatalogMutationOptions): PublicationOperation {
     const gameId = safeGameId(options.gameId);
     const version = safeVersion(options.version);
-    const loaded = this.loadIndex();
+    const loaded = loadPublicationIndex(this.root);
     const games = object(loaded.index.games, "catalog index games is malformed");
     if (!Object.hasOwn(games, gameId)) fail("game not found", "catalog_not_found");
     const game = object(games[gameId], "game not found");
@@ -317,7 +315,14 @@ export class PublicationConsistencyService {
       });
     }
     const createdAt = isoNow();
-    const expectedIndex = this.catalogIndexForOperation(loaded.index, gameId, version, variants, action, createdAt);
+    const expectedIndex = indexForCatalogMutation(
+      loaded.index,
+      gameId,
+      version,
+      variants,
+      action,
+      createdAt,
+    );
     const expectedIndexBytes = serializeJson(expectedIndex);
     const operation: PublicationOperation = {
       journalVersion: 1,
@@ -342,120 +347,12 @@ export class PublicationConsistencyService {
     return written;
   }
 
-  private catalogIndexForOperation(
-    index: Record<string, unknown>,
-    gameId: string,
-    version: string,
-    variants: readonly PublicationVariantPlan[],
-    action: CatalogMutationAction,
-    updatedAt: string
-  ): Record<string, unknown> {
-    const next = clone(index);
-    next.abi = INDEX_ABI;
-    next.updated_at = updatedAt;
-    const games = object(next.games, "catalog index games is malformed");
-    const game = object(games[gameId], "game not found");
-    const versions = object(game.versions, "catalog versions are malformed");
-    const versionRecord = object(versions[version], "version not found");
-    const architectures = object(versionRecord.architectures, "catalog architectures are malformed");
-    if (action === "delete") {
-      for (const variant of variants) delete architectures[variant.architecture];
-      if (Object.keys(architectures).length === 0) delete versions[version];
-      else versionRecord.architectures = architectures;
-      if (Object.keys(versions).length === 0) delete games[gameId];
-      else {
-        if (game.latest_version === version && !Object.hasOwn(versions, version)) game.latest_version = Object.keys(versions).sort().at(-1);
-        game.updated_at = updatedAt;
-      }
-      next.games = games;
-      return next;
-    }
-    const first = variants[0];
-    if (!first?.metadata) fail("catalog metadata is unavailable", "catalog_inconsistent");
-    const metadata = first.metadata;
-    game.title = metadata.title;
-    game.summary = typeof metadata.summary === "string" ? metadata.summary : "";
-    game.authors = Array.isArray(metadata.authors) ? metadata.authors : [];
-    game.tags = Array.isArray(metadata.tags) ? metadata.tags : [];
-    game.updated_at = updatedAt;
-    for (const variant of variants) {
-      const previous = object(architectures[variant.architecture], "catalog variant is malformed");
-      architectures[variant.architecture] = {
-        ...previous,
-        architecture: variant.architecture,
-        filename: variant.targetRelative,
-        size: variant.size,
-        sha256: variant.expectedSha256,
-        icon_mime: variant.iconMime,
-        screenshot_mime: variant.screenshotMime,
-        has_screenshot: variant.hasScreenshot,
-        has_signature: variant.hasSignature,
-        updated_at: updatedAt
-      };
-    }
-    versionRecord.metadata = metadata;
-    versionRecord.colophon = first.colophon;
-    versionRecord.architectures = architectures;
-    versionRecord.updated_at = updatedAt;
-    versions[version] = versionRecord;
-    game.versions = versions;
-    games[gameId] = game;
-    next.games = games;
-    return next;
-  }
-
-  private indexForOperation(index: Record<string, unknown>, gameId: string, version: string, variants: readonly PublicationVariantPlan[], updatedAt: string): Record<string, unknown> {
-    const next = clone(index);
-    next.abi = INDEX_ABI;
-    next.updated_at = updatedAt;
-    const games = object(next.games ?? {}, "catalog index games is malformed");
-    const currentGame = object(games[gameId] ?? { id: gameId, created_at: next.updated_at, versions: {} }, "catalog game is malformed");
-    const versions = object(currentGame.versions ?? {}, "catalog versions are malformed");
-    const currentVersion = object(versions[version] ?? { version, published_at: next.updated_at, architectures: {} }, "catalog version is malformed");
-    const architectures = object(currentVersion.architectures ?? {}, "catalog architectures are malformed");
-    const first = variants[0];
-    if (!first) fail("publication has no variants", "submission_metadata_corrupt");
-    const metadata = first.metadata;
-    currentGame.id = gameId;
-    currentGame.title = metadata.title;
-    currentGame.summary = typeof metadata.summary === "string" ? metadata.summary : "";
-    currentGame.authors = Array.isArray(metadata.authors) ? metadata.authors : [];
-    currentGame.tags = Array.isArray(metadata.tags) ? metadata.tags : [];
-    currentGame.latest_version = version;
-    currentGame.updated_at = next.updated_at;
-    for (const variant of variants) {
-      const previous = object(architectures[variant.architecture] ?? {}, "catalog variant is malformed");
-      architectures[variant.architecture] = {
-        ...previous,
-        architecture: variant.architecture,
-        filename: variant.targetRelative,
-        size: variant.size,
-        sha256: variant.expectedSha256,
-        icon_mime: variant.iconMime,
-        screenshot_mime: variant.screenshotMime,
-        has_screenshot: variant.hasScreenshot,
-        has_signature: variant.hasSignature,
-        updated_at: next.updated_at
-      };
-    }
-    currentVersion.version = version;
-    currentVersion.updated_at = next.updated_at;
-    currentVersion.metadata = metadata;
-    currentVersion.colophon = first.colophon;
-    currentVersion.architectures = architectures;
-    versions[version] = currentVersion;
-    currentGame.versions = versions;
-    games[gameId] = currentGame;
-    next.games = games;
-    return next;
-  }
-
   stage(operationId: string): PublicationOperation {
     return this.withLock(() => {
       let operation = this.readOperation(operationId);
       if (operation.state === "STAGED" || operation.state === "VERIFIED") return operation;
       if (operation.state !== "PREPARED") fail("operation cannot be staged from its current state", "invalid_operation_transition");
-      const loaded = this.loadIndex();
+      const loaded = loadPublicationIndex(this.root);
       if (loaded.hash !== operation.previousIndexSha256) fail("catalog index changed after preparation", "publication_index_changed");
       for (const variant of operation.variants) {
         const sourcePath = assertInside(this.root, path.join(this.root, variant.sourceRelative), "pending file");
@@ -466,7 +363,13 @@ export class PublicationConsistencyService {
         ensureDirectory(this.root, path.dirname(path.relative(this.root, stagePath)));
         writeAtomic(this.root, variant.stagedRelative, image);
       }
-      const expectedIndex = this.indexForOperation(loaded.index, operation.gameId, operation.version, operation.variants, operation.createdAt);
+      const expectedIndex = indexForPublication(
+        loaded.index,
+        operation.gameId,
+        operation.version,
+        operation.variants,
+        operation.createdAt,
+      );
       const indexBytes = serializeJson(expectedIndex);
       if (sha256(indexBytes) !== operation.expectedIndexSha256) fail("planned index identity changed", "publication_plan_mismatch");
       this.hit("before-index-temp-write");
@@ -489,7 +392,7 @@ export class PublicationConsistencyService {
         if (sha256(image) !== variant.expectedSha256) fail("staged file hash mismatch", "staged_hash_mismatch", variant);
         validateCartridgeBinary(image);
       }
-      const indexBytes = readBounded(assertInside(this.root, path.join(this.root, operation.indexStagedRelative), "staged index"), MAX_INDEX_BYTES, "staged_index_corrupt");
+      const indexBytes = readBounded(assertInside(this.root, path.join(this.root, operation.indexStagedRelative), "staged index"), PUBLICATION_INDEX_MAX_BYTES, "staged_index_corrupt");
       if (sha256(indexBytes) !== operation.expectedIndexSha256) fail("staged index hash mismatch", "staged_index_mismatch");
       this.hit("after-staged-verification");
       operation = this.transition(operation, "VERIFIED");
@@ -623,7 +526,7 @@ export class PublicationConsistencyService {
   }
 
   private stageUnlocked(operation: PublicationOperation): PublicationOperation {
-    const loaded = this.loadIndex();
+    const loaded = loadPublicationIndex(this.root);
     if (loaded.hash !== operation.previousIndexSha256) fail("catalog index changed after preparation", "publication_index_changed");
     for (const variant of operation.variants) {
       if (operation.operationKind === "catalog" && operation.catalogAction === "delete") continue;
@@ -638,8 +541,21 @@ export class PublicationConsistencyService {
       writeAtomic(this.root, variant.stagedRelative, image);
     }
     const index = operation.operationKind === "catalog"
-      ? this.catalogIndexForOperation(loaded.index, operation.gameId, operation.version, operation.variants, operation.catalogAction as CatalogMutationAction, operation.createdAt)
-      : this.indexForOperation(loaded.index, operation.gameId, operation.version, operation.variants, operation.createdAt);
+      ? indexForCatalogMutation(
+          loaded.index,
+          operation.gameId,
+          operation.version,
+          operation.variants,
+          operation.catalogAction as CatalogMutationAction,
+          operation.createdAt,
+        )
+      : indexForPublication(
+          loaded.index,
+          operation.gameId,
+          operation.version,
+          operation.variants,
+          operation.createdAt,
+        );
     const indexBytes = serializeJson(index);
     if (sha256(indexBytes) !== operation.expectedIndexSha256) fail("planned index identity changed", "publication_plan_mismatch");
     this.hit("before-index-temp-write");
@@ -657,7 +573,7 @@ export class PublicationConsistencyService {
       if (sha256(image) !== variant.expectedSha256) fail("staged file hash mismatch", "staged_hash_mismatch");
       validateCartridgeBinary(image);
     }
-    const index = readBounded(assertInside(this.root, path.join(this.root, operation.indexStagedRelative), "staged index"), MAX_INDEX_BYTES, "staged_index_corrupt");
+    const index = readBounded(assertInside(this.root, path.join(this.root, operation.indexStagedRelative), "staged index"), PUBLICATION_INDEX_MAX_BYTES, "staged_index_corrupt");
     if (sha256(index) !== operation.expectedIndexSha256) fail("staged index hash mismatch", "staged_index_mismatch");
     this.hit("after-staged-verification");
     return this.transition(operation, "VERIFIED");
@@ -833,7 +749,7 @@ export class PublicationConsistencyService {
     return reconcilePublication({
       root: this.root,
       database: this.database,
-      loadIndex: () => this.loadIndex().index,
+      loadIndex: () => loadPublicationIndex(this.root).index,
       readOperation: (operationId) => this.readOperation(operationId),
     });
   }
