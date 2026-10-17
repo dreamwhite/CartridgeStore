@@ -11,15 +11,12 @@ import {
   BACKUP_ENCRYPTION_MAGIC,
   BACKUP_V2_ABI,
   BackupError,
-  type BackupInventoryEntry,
   validateManifest
 } from "./format.js";
 import {
-  createZip,
   decryptBackup,
-  encryptBackup,
   extractZipArchive,
-  scanZipArchive
+  scanZipArchive,
 } from "./archive.js";
 import type { SecretStore } from "../secrets/service.js";
 import {
@@ -36,6 +33,7 @@ import {
   type BackupServiceOptions,
   type RestoreResult,
 } from "./service-contracts.js";
+import { buildBackupArtifact } from "./exporter.js";
 import {
   acquireLock,
   ensureDirectory,
@@ -44,13 +42,9 @@ import {
   readJson,
   releaseLock,
   safeDirectory,
-  sha256,
   writeAtomic,
 } from "./operations.js";
-import {
-  restoreDatabase,
-  schemaFingerprint,
-} from "./database.js";
+import { restoreDatabase } from "./database.js";
 import { validateStagedBackup } from "./validation.js";
 
 export type {
@@ -199,61 +193,19 @@ export class BackupService {
     return { directory, databasePath, dataPath };
   }
 
-  private async buildArtifact(password: string): Promise<BackupArtifact> {
-    const job = fs.mkdtempSync(path.join(this.stagingRoot, "export-"));
-    const databasePath = path.join(job, "database.sqlite");
-    const archivePath = path.join(this.stagingRoot, "backup-" + crypto.randomUUID() + ".zip");
-    try {
-      const secretMetadata = this.secrets?.preflight(this.database) ?? { keyIds: [], encryptedSettings: 0 };
-      if (this.config.secretEncryptionEnabled && !password) {
-        throw new BackupError("encrypted backup password is required", "backup_encryption_required", 400);
-      }
-      await this.database.backup(databasePath);
-      const databaseBytes = fs.readFileSync(databasePath);
-      const dataFiles = collectFiles(this.root, this.config.databasePath, this.config);
-      const inventory: BackupInventoryEntry[] = [
-        { path: "database.sqlite", size: databaseBytes.byteLength, sha256: sha256(databaseBytes) },
-        ...dataFiles.map((file) => ({ path: file.archivePath, size: file.size, sha256: file.sha256 }))
-      ];
-      if (inventory.length + 1 > this.config.backupMaxEntries) throw new BackupError("backup contains too many entries", "backup_too_many_entries", 413);
-      const expandedBytes = inventory.reduce((sum, item) => sum + item.size, 0);
-      if (expandedBytes > this.config.backupMaxExpandedBytes) throw new BackupError("backup expanded data is too large", "backup_expanded_too_large", 413);
-      const schema = inspectSchema(this.database);
-      const manifest = {
-        abi: BACKUP_V2_ABI,
-        format_version: 2,
-        created_at: now(),
-        database: "database.sqlite",
-        data_dir: "data/",
-        application: "prg32-cartridge-store",
-        inventory,
-        schema: { fingerprint: schemaFingerprint(schema), tables: schema.tables.map((table) => table.name).sort() },
-        ...(secretMetadata.encryptedSettings > 0 || this.config.secretEncryptionEnabled
-          ? { secret_encryption: { envelope_version: 1, required_key_ids: secretMetadata.keyIds, encrypted_settings: secretMetadata.encryptedSettings } }
-          : {})
-      };
-      const manifestBytes = jsonBytes(manifest);
-      if (manifestBytes.byteLength > this.config.backupMaxManifestBytes) throw new BackupError("backup manifest is too large", "backup_manifest_too_large", 413);
-      const entries: Record<string, Uint8Array> = { "manifest.json": manifestBytes, "database.sqlite": databaseBytes };
-      for (const file of dataFiles) entries[file.archivePath] = fs.readFileSync(file.path);
-      const archive = createZip(entries);
-      if (archive.byteLength > this.config.backupMaxArchiveBytes) throw new BackupError("backup archive is too large", "backup_archive_too_large", 413);
-      fs.writeFileSync(archivePath, archive, { mode: 0o600 });
-      scanZipArchive(archivePath, this.config);
-      if (!password) {
-        return { path: archivePath, encrypted: false, filename: "prg32-cartridge-store-backup-v2.zip" };
-      }
-      const encryptedPath = archivePath + ".enc";
-      encryptBackup(archivePath, encryptedPath, password);
-      fs.rmSync(archivePath, { force: true });
-      return { path: encryptedPath, encrypted: true, filename: "prg32-cartridge-store-backup-v2.zip.enc" };
-    } finally {
-      fs.rmSync(job, { recursive: true, force: true });
-    }
-  }
-
   async export(password = ""): Promise<BackupArtifact> {
-    return this.withMaintenanceLock(() => this.buildArtifact(password));
+    return this.withMaintenanceLock(() =>
+      buildBackupArtifact(
+        {
+          config: this.config,
+          database: this.database,
+          root: this.root,
+          stagingRoot: this.stagingRoot,
+          ...(this.secrets ? { secrets: this.secrets } : {}),
+        },
+        password,
+      ),
+    );
   }
 
   private replaceData(sourceData: string): void {
