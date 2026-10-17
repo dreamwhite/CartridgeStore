@@ -1,152 +1,45 @@
 import type Database from "better-sqlite3";
 
-import type { BackendConfig } from "../config/env.js";
 import type { Principal } from "../auth/principal.js";
 import { AuthorizationService } from "../authorization/service.js";
-import { MetricsError } from "./errors.js";
+import type { BackendConfig } from "../config/env.js";
 import type { RuntimePolicy } from "../settings/runtime-policy.js";
+import { MetricsError } from "./errors.js";
+import {
+  cleanText,
+  formatOne,
+  formatTwo,
+  intValue,
+  ownerCanView,
+  recordBody,
+  rowAsRun,
+  rowAsSample,
+  summarizeSamples,
+} from "./codecs.js";
+import type {
+  DatabaseSource,
+  MetricsServiceOptions,
+  MetricsSummary,
+  RunRecord,
+  SampleRecord,
+} from "./contracts.js";
 
-type DatabaseSource = Database.Database | (() => Database.Database);
+export type {
+  DatabaseSource,
+  MetricsServiceOptions,
+  MetricsSummary,
+  RunRecord,
+  SampleRecord,
+} from "./contracts.js";
+export { summarizeSamples } from "./codecs.js";
 
-export interface RunRecord {
-  readonly run_id: string;
-  readonly board_id: string;
-  readonly target: string;
-  readonly display_backend: string;
-  readonly firmware_version: string;
-  readonly firmware_git_sha: string;
-  readonly game_name: string;
-  readonly sample_period_frames: number;
-  readonly started_at: number;
-  readonly finished_at: number | null;
-  readonly dropped_samples: number;
-  readonly created_at: number;
-  readonly submitted_by: string;
-  readonly user_id: number | null;
-  readonly sample_count?: number;
-}
-
-export interface SampleRecord {
-  readonly frame: number;
-  readonly timestamp_ms: number;
-  readonly update_us: number;
-  readonly draw_us: number;
-  readonly present_us: number;
-  readonly frame_us: number;
-  readonly heap_free: number;
-  readonly heap_min_free: number;
-  readonly input_mask: number;
-  readonly fps_x100: number;
-  readonly upload_queue_depth: number;
-  readonly deadline_missed: number;
-}
-
-export interface MetricsSummary {
-  readonly sample_count: number;
-  readonly frame_us_avg: number;
-  readonly frame_us_median: number;
-  readonly frame_us_p95: number;
-  readonly frame_us_max: number;
-  readonly update_us_avg: number;
-  readonly draw_us_avg: number;
-  readonly present_us_avg: number;
-  readonly fps_avg: number;
-  readonly deadline_missed: number;
-}
-
-export interface MetricsServiceOptions {
-  readonly config: BackendConfig;
-  readonly database: DatabaseSource;
-  readonly writeEnabled: boolean;
-  readonly canonicalMode?: boolean;
-  readonly authorization?: AuthorizationService;
-  readonly fault?: (point: "after-batch-sample" | "before-batch-commit") => void;
-  readonly policy?: RuntimePolicy;
-}
-
-function fail(message: string, code: ConstructorParameters<typeof MetricsError>[1], statusCode = 400): never {
+function fail(
+  message: string,
+  code: ConstructorParameters<typeof MetricsError>[1],
+  statusCode = 400,
+): never {
   throw new MetricsError(message, code, statusCode);
 }
-
-function scalar(value: unknown, fallback = ""): string {
-  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") return String(value);
-  return fallback;
-}
-
-function cleanText(payload: Record<string, unknown>, key: string, maxLength: number, fallback = ""): string {
-  return scalar(payload[key], fallback).trim().slice(0, maxLength);
-}
-
-function intValue(value: unknown, fallback = 0, minimum = 0): number {
-  if (value === null || value === undefined || value === "") return Math.max(fallback, minimum);
-  const numeric = typeof value === "boolean" ? (value ? 1 : 0) : typeof value === "number" ? value : typeof value === "string" ? Number(value) : Number.NaN;
-  if (!Number.isFinite(numeric)) return Math.max(fallback, minimum);
-  return Math.max(Math.trunc(numeric), minimum);
-}
-
-function recordBody(value: unknown): Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) fail("invalid metrics payload", "invalid_metrics_payload");
-  return value as Record<string, unknown>;
-}
-
-function rowAsRun(row: Record<string, unknown>): RunRecord {
-  return row as unknown as RunRecord;
-}
-
-function rowAsSample(row: Record<string, unknown>): SampleRecord {
-  return row as unknown as SampleRecord;
-}
-
-function ownerCanView(run: RunRecord, principal: Principal, authorization: AuthorizationService): boolean {
-  if (run.user_id === null) return authorization.hasPermission(principal, "runs:read:any");
-  return authorization.canAccessResource(principal, "runs:read:self", { ownerId: run.user_id })
-    || authorization.hasPermission(principal, "runs:read:any");
-}
-
-function average(values: readonly number[]): number {
-  return values.length === 0 ? 0 : values.reduce((total, value) => total + value, 0) / values.length;
-}
-
-function median(values: readonly number[]): number {
-  if (values.length === 0) return 0;
-  const ordered = [...values].sort((left, right) => left - right);
-  const middle = Math.floor(ordered.length / 2);
-  return ordered.length % 2 === 0 ? ((ordered[middle - 1] ?? 0) + (ordered[middle] ?? 0)) / 2 : ordered[middle] ?? 0;
-}
-
-function quantile(values: readonly number[], q: number): number {
-  if (values.length === 0) return 0;
-  const ordered = [...values].sort((left, right) => left - right);
-  if (ordered.length === 1) return ordered[0] ?? 0;
-  const position = (ordered.length - 1) * q;
-  const low = Math.floor(position);
-  const high = Math.min(low + 1, ordered.length - 1);
-  const fraction = position - low;
-  return (ordered[low] ?? 0) * (1 - fraction) + (ordered[high] ?? 0) * fraction;
-}
-
-export function summarizeSamples(samples: readonly SampleRecord[]): MetricsSummary {
-  const frameTimes = samples.map((sample) => sample.frame_us);
-  const updateTimes = samples.map((sample) => sample.update_us);
-  const drawTimes = samples.map((sample) => sample.draw_us);
-  const presentTimes = samples.map((sample) => sample.present_us);
-  const fpsValues = samples.map((sample) => sample.fps_x100 / 100);
-  return {
-    sample_count: samples.length,
-    frame_us_avg: average(frameTimes),
-    frame_us_median: median(frameTimes),
-    frame_us_p95: quantile(frameTimes, 0.95),
-    frame_us_max: frameTimes.length === 0 ? 0 : Math.max(...frameTimes),
-    update_us_avg: average(updateTimes),
-    draw_us_avg: average(drawTimes),
-    present_us_avg: average(presentTimes),
-    fps_avg: average(fpsValues),
-    deadline_missed: samples.reduce((count, sample) => count + (sample.deadline_missed ? 1 : 0), 0)
-  };
-}
-
-function formatOne(value: number): string { return value.toFixed(1); }
-function formatTwo(value: number): string { return value.toFixed(2); }
 
 export class MetricsService {
   private readonly databaseSource: DatabaseSource;
