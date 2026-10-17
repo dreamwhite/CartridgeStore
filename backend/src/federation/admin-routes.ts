@@ -15,6 +15,7 @@ import { AuditUnavailableError } from "../admin/audit.js";
 import { FederationIdentityError, ValidatedExternalIdentity, type FederationIdentityService } from "./identity.js";
 import { FederationProviderError, type FederationProviderService, type FederationProtocol, type ProviderInput } from "./provider.js";
 import type { FederationProviderOperations } from "./operations.js";
+import { safeFederationProvider } from "./admin-provider-view.js";
 import { FederationLinkChallengeError, type FederationLinkChallengeService } from "./link-challenges.js";
 import type { FederationSecretPurpose } from "../secrets/service.js";
 
@@ -180,50 +181,6 @@ function providerInput(value: JsonObject, requireIdentity = true): ProviderInput
   return provider;
 }
 
-function safeProvider(provider: ReturnType<FederationProviderService["get"]>, operations: FederationProviderOperations): Record<string, unknown> {
-  const certificates = provider.samlTrustedCertificatesPem.map((certificate) => {
-    const fingerprint = crypto.createHash("sha256").update(certificate.replace(/\r\n/g, "\n").trim(), "utf8").digest("hex");
-    let validity: Record<string, string> = {};
-    try {
-      const parsed = new crypto.X509Certificate(certificate);
-      validity = { valid_from: parsed.validFrom, valid_to: parsed.validTo };
-    } catch { /* public-key fixtures do not contain certificate validity fields */ }
-    return { fingerprint, ...validity };
-  });
-  return {
-    provider_id: provider.providerId,
-    protocol: provider.protocol,
-    display_name: provider.displayName,
-    issuer: provider.issuer,
-    enabled: provider.enabled,
-    generation: provider.generation,
-    created_at: provider.createdAt,
-    updated_at: provider.updatedAt,
-    client_id: provider.clientId,
-    discovery_issuer: provider.discoveryIssuer,
-    redirect_uri: provider.redirectUri,
-    scopes: provider.scopes,
-    idp_entity_id: provider.idpEntityId,
-    sp_entity_id: provider.spEntityId,
-    acs_url: provider.acsUrl,
-    saml_entry_point: provider.samlEntryPoint,
-    saml_name_id_format: provider.samlNameIdFormat,
-    saml_want_assertions_signed: provider.samlWantAssertionsSigned,
-    saml_want_authn_response_signed: provider.samlWantAuthnResponseSigned,
-    saml_sign_authn_requests: provider.samlSignAuthnRequests,
-    saml_accepted_clock_skew_ms: provider.samlAcceptedClockSkewMs,
-    client_auth_method: provider.clientAuthMethod,
-    client_secret_configured: provider.clientSecretReference !== null,
-    configuration_complete: provider.protocol === "oidc"
-      ? Boolean(provider.issuer && provider.clientId && provider.redirectUri && (provider.clientAuthMethod === "none" || provider.clientSecretReference !== null))
-      : Boolean(provider.idpEntityId && provider.spEntityId && provider.acsUrl && provider.samlEntryPoint && provider.samlTrustedCertificatesPem.length > 0),
-    pending_transactions: operations.status(provider.providerId).pendingTransactions,
-    certificates,
-    trusted_certificate_count: certificates.length,
-    trusted_certificate_capacity: 2
-  };
-}
-
 function operationError(reply: FastifyReply, request: FastifyRequest, error: unknown): FastifyReply {
   request.log.warn({ err: error, requestId: request.id }, "federation administration request rejected");
   if (error instanceof FederationProviderError || error instanceof FederationIdentityError || error instanceof FederationLinkChallengeError) return json(reply, { ok: false, error: error.message, code: error.code }, error.statusCode ?? 400);
@@ -267,7 +224,7 @@ export function registerFederationAdminRoutes(app: FastifyInstance, options: Fed
   app.get("/api/admin/federation/providers", async (request, reply) => {
     const current = requireAdmin(request, reply, options, listPermission, false, false);
     if (!current) return reply;
-    try { return json(reply, { ok: true, providers: options.providers.list().map((provider) => safeProvider(provider, options.operations)) }); }
+    try { return json(reply, { ok: true, providers: options.providers.list().map((provider) => safeFederationProvider(provider, options.operations)) }); }
     catch (error) { return operationError(reply, request, error); }
   });
 
@@ -283,14 +240,14 @@ export function registerFederationAdminRoutes(app: FastifyInstance, options: Fed
       const configured = input.client_secret === undefined ? inputConfig : { ...inputConfig, clientSecretReference: `federated-provider:${inputConfig.providerId}:oidc-client-secret` };
       const created = options.providers.create(configured, mutationContext(current, request));
       if (input.client_secret !== undefined) options.operations.rotateProviderSecret(created.providerId, "oidc-client-secret", text(input.client_secret, "client_secret", 16384, true) as string, mutationContext(current, request));
-      return json(reply, { ok: true, provider: safeProvider(options.providers.get(created.providerId), options.operations) }, 201);
+      return json(reply, { ok: true, provider: safeFederationProvider(options.providers.get(created.providerId), options.operations) }, 201);
     } catch (error) { return operationError(reply, request, error); }
   });
 
   app.get<{ Params: ProviderParams }>("/api/admin/federation/providers/:providerId", async (request, reply) => {
     const current = requireAdmin(request, reply, options, listPermission, false, false);
     if (!current) return reply;
-    try { return json(reply, { ok: true, provider: safeProvider(options.providers.get(providerId(request.params.providerId)), options.operations) }); }
+    try { return json(reply, { ok: true, provider: safeFederationProvider(options.providers.get(providerId(request.params.providerId)), options.operations) }); }
     catch (error) { return operationError(reply, request, error); }
   });
 
@@ -304,14 +261,14 @@ export function registerFederationAdminRoutes(app: FastifyInstance, options: Fed
       const merged = providerInput({ provider_id: currentProvider.providerId, protocol: currentProvider.protocol, issuer: currentProvider.issuer, ...input });
       const changes = Object.fromEntries(Object.entries(merged).filter(([key]) => !["providerId", "protocol", "issuer"].includes(key))) as Partial<Omit<ProviderInput, "providerId" | "protocol" | "issuer">>;
       const updated = options.providers.update(currentProvider.providerId, changes, mutationContext(current, request));
-      return json(reply, { ok: true, provider: safeProvider(updated, options.operations) });
+      return json(reply, { ok: true, provider: safeFederationProvider(updated, options.operations) });
     } catch (error) { return operationError(reply, request, error); }
   });
 
   app.get<{ Params: ProviderParams }>("/api/admin/federation/providers/:providerId/status", async (request, reply) => {
     const current = requireAdmin(request, reply, options, listPermission, false, false);
     if (!current) return reply;
-    try { return json(reply, { ok: true, provider: safeProvider(options.providers.get(providerId(request.params.providerId)), options.operations) }); }
+    try { return json(reply, { ok: true, provider: safeFederationProvider(options.providers.get(providerId(request.params.providerId)), options.operations) }); }
     catch (error) { return operationError(reply, request, error); }
   });
 
