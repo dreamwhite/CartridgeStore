@@ -27,6 +27,10 @@ import { CANONICAL_OPERATIONAL_WORKFLOW_MODE, CANONICAL_WRITE_AUTHORIZATION, CAN
 import { assertSubmissionStagingSafe } from "./staging-audit.js";
 import type { RuntimePolicy } from "../settings/runtime-policy.js";
 import {
+  materializeCanonicalPayloads,
+  type CanonicalPayloadArtifact,
+} from "./workflow-payloads.js";
+import {
   json,
   mediaType,
   object,
@@ -69,12 +73,10 @@ interface CanonicalSubmissionRow {
   readonly revision_number: number;
 }
 
-interface CanonicalArtifactRow {
+interface CanonicalArtifactRow extends CanonicalPayloadArtifact {
   readonly submission_artifact_id: string;
   readonly submission_id: number;
-  readonly architecture: "esp32c6" | "qemu";
   readonly source_filename: string;
-  readonly staging_key: string;
   readonly sha256: string;
   readonly size_bytes: number;
   readonly media_type: string;
@@ -129,7 +131,7 @@ function inside(root: string, relative: string): string {
   return candidate;
 }
 
-function readStaged(root: string, row: CanonicalArtifactRow): Buffer {
+function readStaged(root: string, row: CanonicalPayloadArtifact): Buffer {
   const target = inside(root, row.staging_key);
   const stats = fs.lstatSync(target);
   if (!stats.isFile() || stats.size !== row.size_bytes) fail("staged artifact is missing or has changed", "review_operation_failed", 500);
@@ -409,29 +411,6 @@ export class CanonicalWorkflowService implements ReviewWorkflowService {
     return { row, manifest };
   }
 
-  private payloads(manifest: WorkflowManifest): Map<string, Buffer> {
-    const result = new Map<string, Buffer>();
-    const artifacts = this.artifactRows(manifest.submissionId);
-    for (const artifact of artifacts) {
-      const source = readStaged(this.root, artifact);
-      const parsed = validateCartridgeBinary(source);
-      const originalMetadata = safeMetadata(parsed.metadata);
-      const updatedMetadata = reviewedMetadata(originalMetadata, manifest.reviewUpdates);
-      const colophon = parsed.colophon ? { ...parsed.colophon, title: updatedMetadata.title, version: updatedMetadata.version } : null;
-      const image = Buffer.from(buildSubmissionCartridge(parsed.legacyPayload, updatedMetadata, parsed.icon ?? Buffer.alloc(0), artifact.architecture, parsed.screenshot, colophon));
-      const artifactPlan = manifest.objects.find((item) => item.objectKind === "artifact" && item.architecture === artifact.architecture);
-      if (!artifactPlan || sha256(image) !== artifactPlan.sha256 || image.byteLength !== artifactPlan.sizeBytes) fail("publication artifact plan does not match staged bytes", "review_operation_failed", 500);
-      result.set(artifactPlan.objectId, image);
-      const rebuilt = parseCartridge(image);
-      for (const plan of manifest.objects.filter((item) => item.sourceStagingKey === artifact.staging_key && item.objectKind === "media")) {
-        const media = plan.targetRole === "icon" ? rebuilt.icon : rebuilt.screenshot;
-        if (!media || sha256(media) !== plan.sha256 || media.byteLength !== plan.sizeBytes) fail("publication media plan does not match staged bytes", "review_operation_failed", 500);
-        result.set(plan.objectId, Buffer.from(media));
-      }
-    }
-    return result;
-  }
-
   private verifyFile(item: ObjectPlan): boolean {
     return verifyCanonicalObject(this.root, item);
   }
@@ -493,7 +472,15 @@ export class CanonicalWorkflowService implements ReviewWorkflowService {
   execute(operationId: string): void {
     const { row, manifest } = this.operation(operationId);
     if (row.state === "completed") return;
-    const payloads = this.payloads(manifest);
+    const payloads = materializeCanonicalPayloads(
+      manifest,
+      this.artifactRows(manifest.submissionId),
+      {
+        readStaged: (row) => readStaged(this.root, row),
+        safeMetadata,
+        fail,
+      },
+    );
     if (row.state === "prepared" || row.state === "objects_staged") {
       for (const item of manifest.objects) {
         this.hit("before-object-promotion");
