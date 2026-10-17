@@ -15,16 +15,17 @@ import { SecretStorageError, type SecretStore } from "../secrets/service.js";
 import { BoundedRateLimiter } from "../security/rate-limiter.js";
 import { createSamlCorrelation, parseSamlCorrelation } from "./correlation.js";
 import { signatureDiagnosticCode } from "./signature-diagnostics.js";
+import {
+  boundedSamlValue,
+  SAML_PERSISTENT_NAME_ID,
+  samlDigest,
+  SamlError,
+  safeSamlReturnPath,
+  validateSamlCertificate,
+} from "./validation.js";
 
 const SAML_TRANSACTION_TTL_SECONDS = 300;
-const PERSISTENT_NAME_ID = "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent";
-
-export class SamlError extends Error {
-  constructor(readonly code: string, readonly statusCode: number, message: string, readonly details?: { readonly link_challenge?: string }) {
-    super(message);
-    this.name = "SamlError";
-  }
-}
+export { SamlError } from "./validation.js";
 
 interface SamlRequestContext {
   readonly requestId: string;
@@ -52,19 +53,6 @@ interface PendingRow {
 function withRequestId(pending: { readonly requestId: string | null; readonly transactionId: string; readonly callbackBinding: string; readonly expiresAt: number }): PendingRow {
   if (!pending.requestId) throw new SamlError("saml_transaction_invalid", 500, "SAML transaction is unavailable");
   return { requestId: pending.requestId, transactionId: pending.transactionId, callbackBinding: pending.callbackBinding, expiresAt: pending.expiresAt };
-}
-
-function digest(value: string): string {
-  return crypto.createHash("sha256").update(value, "utf8").digest("hex");
-}
-
-function hasControlCharacter(value: string): boolean {
-  return [...value].some((character) => character.charCodeAt(0) <= 31 || character.charCodeAt(0) === 127);
-}
-
-function bounded(value: string | null | undefined, max: number): string | null {
-  if (!value || value.length > max || hasControlCharacter(value)) return null;
-  return value;
 }
 
 class SamlEnvelopeError extends Error {
@@ -108,37 +96,10 @@ function profileAttribute(profile: Profile, names: readonly string[], max: numbe
   for (const name of names) {
     const candidate = values[name];
     const value = Array.isArray(candidate) ? candidate.find((item): item is string => typeof item === "string") : candidate;
-    const result = bounded(typeof value === "string" ? value : null, max);
+    const result = boundedSamlValue(typeof value === "string" ? value : null, max);
     if (result) return result;
   }
   return null;
-}
-
-function safeReturnPath(value: string | null): string {
-  const candidate = value ?? "/";
-  if (candidate.length > 512 || !candidate.startsWith("/") || candidate.startsWith("//") || candidate.includes("\\") || hasControlCharacter(candidate)) {
-    throw new SamlError("saml_return_path_invalid", 400, "SAML return path is invalid");
-  }
-  return candidate;
-}
-
-function certificate(value: string | null, label: string): string {
-  if (!value || value.length > 65536 || (!value.includes("BEGIN CERTIFICATE") && !value.includes("BEGIN PUBLIC KEY"))) {
-    throw new SamlError("saml_provider_incomplete", 503, label + " is unavailable");
-  }
-  if (value.includes("BEGIN CERTIFICATE")) {
-    try {
-      const parsed = new crypto.X509Certificate(value);
-      const now = Date.now();
-      if (now < Date.parse(parsed.validFrom) || now > Date.parse(parsed.validTo)) {
-        throw new SamlError("saml_certificate_expired", 401, "SAML signing certificate is not currently valid");
-      }
-    } catch (error) {
-      if (error instanceof SamlError) throw error;
-      throw new SamlError("saml_provider_invalid", 503, label + " is invalid");
-    }
-  }
-  return value;
 }
 
 function assertionId(profile: Profile): string {
@@ -212,7 +173,7 @@ function samlProvider(provider: FederationProviderConfig, config: BackendConfig)
   if (acs.origin !== origin.origin || acs.pathname !== expectedPath || acs.search || acs.hash || acs.username || acs.password) {
     throw new SamlError("saml_acs_invalid", 503, "SAML ACS configuration is invalid");
   }
-  if (provider.issuer !== provider.idpEntityId || provider.samlNameIdFormat !== PERSISTENT_NAME_ID || !provider.samlWantAssertionsSigned || !provider.samlWantAuthnResponseSigned) {
+  if (provider.issuer !== provider.idpEntityId || provider.samlNameIdFormat !== SAML_PERSISTENT_NAME_ID || !provider.samlWantAssertionsSigned || !provider.samlWantAuthnResponseSigned) {
     throw new SamlError("saml_provider_invalid", 503, "SAML provider configuration is invalid");
   }
   return provider;
@@ -276,11 +237,11 @@ export class SamlService {
   async start(providerId: string, returnTo: string | null, context: SamlRequestContext): Promise<SamlLoginResult> {
     if (!this.loginLimiter.allow(context.ip + ":" + providerId)) throw new SamlError("saml_rate_limited", 429, "too many SAML requests");
     const provider = this.requireProvider(providerId);
-    const returnPath = safeReturnPath(returnTo);
+    const returnPath = safeSamlReturnPath(returnTo);
     const browserBinding = crypto.randomBytes(32).toString("base64url");
     const state = crypto.randomBytes(32).toString("base64url");
     const requestId = "_" + crypto.randomBytes(32).toString("base64url");
-    const callbackBinding = digest(provider.acsUrl + "\u0000" + browserBinding);
+    const callbackBinding = samlDigest(provider.acsUrl + "\u0000" + browserBinding);
     const transaction = this.transactions.create({ protocol: "saml", providerId: provider.providerId, callbackBinding, state, requestId, returnPath, ttlSeconds: SAML_TRANSACTION_TTL_SECONDS });
     const pending = this.transactions.pending(transaction.transactionId);
     if (!pending?.requestId) throw new SamlError("saml_transaction_invalid", 500, "SAML transaction is unavailable");
@@ -302,7 +263,7 @@ export class SamlService {
     const provider = this.requireProvider(providerId);
     const correlation = this.config.authSessionSecret ? parseSamlCorrelation(this.config.authSessionSecret, correlationCookie) : null;
     if (!correlation) throw new SamlError("saml_browser_binding_failed", 401, "SAML browser correlation failed");
-    const callbackBinding = digest(provider.acsUrl + "\u0000" + correlation.binding);
+    const callbackBinding = samlDigest(provider.acsUrl + "\u0000" + correlation.binding);
     const pending = this.transactions.pending(correlation.transactionId);
     if (!pending && this.transactions.wasConsumed(correlation.transactionId)) throw new SamlError("saml_replay_rejected", 409, "SAML response was already used");
     if (!pending || pending.protocol !== "saml" || pending.providerId !== provider.providerId || pending.callbackBinding !== callbackBinding || !pending.requestId) {
@@ -310,7 +271,7 @@ export class SamlService {
     }
     const pendingWithRequestId = withRequestId(pending);
     if (pending.expiresAt <= Date.now()) throw new SamlError("saml_transaction_expired", 400, "SAML transaction expired");
-    const safeRelayState = bounded(relayState, this.config.samlMaxRelayStateBytes);
+    const safeRelayState = boundedSamlValue(relayState, this.config.samlMaxRelayStateBytes);
     if (!safeRelayState || safeRelayState.length < 32) throw new SamlError("saml_relay_state_invalid", 400, "SAML RelayState is invalid");
     if (Buffer.byteLength(samlResponse, "utf8") > this.config.samlMaxResponseBytes || !/^[A-Za-z0-9+/=_-]+$/.test(samlResponse)) {
       throw new SamlError("saml_response_too_large", 413, "SAML response is too large");
@@ -339,7 +300,7 @@ export class SamlService {
       if (error instanceof SamlError) throw error;
       throw new SamlError("saml_response_invalid", 401, "SAML authentication response is invalid");
     }
-    if (!profile || profile.issuer !== provider.idpEntityId || profile.nameIDFormat !== PERSISTENT_NAME_ID || !bounded(profile.nameID, 512)) {
+    if (!profile || profile.issuer !== provider.idpEntityId || profile.nameIDFormat !== SAML_PERSISTENT_NAME_ID || !boundedSamlValue(profile.nameID, 512)) {
       throw new SamlError("saml_identity_invalid", 401, "SAML identity is invalid");
     }
     if (profile.inResponseTo !== pending.requestId) throw new SamlError("saml_in_response_to_invalid", 401, "SAML response correlation is invalid");
@@ -348,7 +309,7 @@ export class SamlService {
     let transaction;
     try {
       transaction = this.transactions.consumeByRequestId({ protocol: "saml", providerId: provider.providerId, requestId: pending.requestId, state: safeRelayState, callbackBinding });
-      this.transactions.recordReplays("saml", provider.providerId, ["assertion:" + assertionIdentifier, "response:" + envelope.responseId, "response-digest:" + digest(samlResponse)]);
+      this.transactions.recordReplays("saml", provider.providerId, ["assertion:" + assertionIdentifier, "response:" + envelope.responseId, "response-digest:" + samlDigest(samlResponse)]);
     } catch (error) {
       if (error instanceof FederationTransactionError && error.code === "federation_transaction_replayed") throw new SamlError("saml_replay_rejected", 409, "SAML response was already used");
       if (error instanceof FederationTransactionError && error.code === "federation_transaction_expired") throw new SamlError("saml_transaction_expired", 400, "SAML transaction expired");
@@ -382,18 +343,18 @@ export class SamlService {
     const current = this.auth.context(sessionCookie, undefined);
     const session = this.auth.rotateSession(current.session, resolved.userId);
     if (!session) throw new SamlError("saml_session_unavailable", 503, "authentication session is unavailable");
-    this.auditEvent("federation.saml.succeeded", provider.providerId, context.requestId, "committed", digest(provider.issuer + "\u0000" + profile.nameID).slice(0, 32));
+    this.auditEvent("federation.saml.succeeded", provider.providerId, context.requestId, "committed", samlDigest(provider.issuer + "\u0000" + profile.nameID).slice(0, 32));
     return { userId: resolved.userId, returnPath: transaction.returnPath, sessionCookie: session.cookieValue };
   }
 
   metadata(providerId: string): Promise<string> {
     const provider = this.requireProvider(providerId);
     const strategy = this.strategy(provider, null);
-    return Promise.resolve(strategy.generateServiceProviderMetadata(null, provider.samlSignAuthnRequests ? certificate(provider.samlSpCertificatePem, "saml_sp_certificate_pem") : null));
+    return Promise.resolve(strategy.generateServiceProviderMetadata(null, provider.samlSignAuthnRequests ? validateSamlCertificate(provider.samlSpCertificatePem, "saml_sp_certificate_pem") : null));
   }
 
   private strategy(provider: FederationProviderConfig, pending: PendingRow | null): SAML {
-    const idpCerts = provider.samlTrustedCertificatesPem.map((item) => certificate(item, "saml_idp_certificate_pem"));
+    const idpCerts = provider.samlTrustedCertificatesPem.map((item) => validateSamlCertificate(item, "saml_idp_certificate_pem"));
     let privateKey: string | undefined;
     if (provider.samlSignAuthnRequests) {
       if (!provider.signingKeyReference) throw new SamlError("saml_signing_key_missing", 503, "SAML signing key is unavailable");
@@ -427,7 +388,7 @@ export class SamlService {
       requestIdExpirationPeriodMs: SAML_TRANSACTION_TTL_SECONDS * 1000,
       cacheProvider,
       generateUniqueId: () => pending?.requestId ?? "_" + crypto.randomBytes(32).toString("base64url"),
-      ...(privateKey === undefined ? {} : { privateKey, publicCert: certificate(provider.samlSpCertificatePem, "saml_sp_certificate_pem"), signatureAlgorithm: "sha256" as const, digestAlgorithm: "sha256" })
+      ...(privateKey === undefined ? {} : { privateKey, publicCert: validateSamlCertificate(provider.samlSpCertificatePem, "saml_sp_certificate_pem"), signatureAlgorithm: "sha256" as const, digestAlgorithm: "sha256" })
     });
   }
 
