@@ -9,6 +9,7 @@ import { useState } from "react";
 
 import { federationAdminApi } from "../../lib/api/federation-admin";
 import { federationQueryKeys } from "../../lib/api/query-keys";
+import type { IdentityLinkFormState } from "./identity-link-types";
 
 /** Owns identity-link queries, mutations and form state. */
 export function useIdentityLinks() {
@@ -23,7 +24,7 @@ export function useIdentityLinks() {
     queryFn: federationAdminApi.listProviders,
     retry: false,
   });
-  const [form, setForm] = useState({
+  const [form, setForm] = useState<IdentityLinkFormState>({
     protocol: "oidc" as "oidc" | "saml",
     provider_id: "",
     issuer: "",
