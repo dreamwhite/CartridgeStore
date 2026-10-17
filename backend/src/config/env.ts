@@ -9,7 +9,6 @@ import {
   nonEmpty,
   optionalNonEmpty,
   positiveInteger,
-  proxyCidrs,
   requiredSecret,
 } from "./env-values.js";
 import type { BackendConfig } from "./env-contracts.js";
@@ -19,6 +18,7 @@ import {
   validatePublicOriginConfig,
 } from "./env-origins.js";
 import { resolveRuntimeMode } from "./env-runtime-mode.js";
+import { resolveNetworkConfig } from "./env-network.js";
 import { resolveSessionCookieConfig } from "./env-session.js";
 import { resolveWebAuthnConfig } from "./env-webauthn.js";
 
@@ -243,19 +243,13 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
     authCookieSameSite,
     authCookieDomain,
   } = resolveSessionCookieConfig(environment);
-  const mdnsEnabled = booleanValue("PRG32_BACKEND_MDNS_ENABLED", environment.PRG32_BACKEND_MDNS_ENABLED, false);
-  const trustProxy = booleanValue("PRG32_BACKEND_TRUST_PROXY", environment.PRG32_BACKEND_TRUST_PROXY, false);
-  const trustProxyHops = positiveInteger("PRG32_BACKEND_TRUST_PROXY_HOPS", environment.PRG32_BACKEND_TRUST_PROXY_HOPS, 1);
-  if (trustProxyHops > 4) throw new Error("PRG32_BACKEND_TRUST_PROXY_HOPS must not exceed 4");
-  const trustedProxyCidrs = proxyCidrs(environment.PRG32_BACKEND_TRUST_PROXY_CIDRS);
-  if (!trustProxy && trustedProxyCidrs.length > 0) throw new Error("PRG32_BACKEND_TRUST_PROXY_CIDRS requires PRG32_BACKEND_TRUST_PROXY=true");
-  const mdnsInterface = optionalNonEmpty(environment.PRG32_BACKEND_MDNS_INTERFACE);
-  if (mdnsEnabled && (environment.NODE_ENV ?? "").trim().toLowerCase() === "production") {
-    throw new Error("PRG32_BACKEND_MDNS_ENABLED is disabled in production until the advertised endpoint is explicitly reviewed");
-  }
-  if (mdnsEnabled && !mdnsInterface) {
-    throw new Error("PRG32_BACKEND_MDNS_INTERFACE is required when mDNS is enabled");
-  }
+  const {
+    mdnsEnabled,
+    trustProxy,
+    trustProxyHops,
+    trustedProxyCidrs,
+    mdnsInterface,
+  } = resolveNetworkConfig(environment);
   if (candidateRuntimeMode !== undefined) {
     const candidateRoot = path.resolve(canonicalStorageRoot ?? "");
     const canonicalDatabase = path.join(candidateRoot, "store.sqlite");
