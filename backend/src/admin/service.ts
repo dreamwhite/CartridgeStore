@@ -7,6 +7,18 @@ import { ROLE_LEVELS, normalizeRole, type Role } from "../auth/principal.js";
 import type { BackendConfig } from "../config/env.js";
 import { AdminAuditLog } from "./audit.js";
 import {
+  normalizeAdminEmail,
+  normalizeAdminGroupIds,
+  normalizeAdminGroupName,
+  normalizeAdminRole,
+  normalizeAdminUsername,
+  parseAdminAuditSummary,
+  parseAdminGroups,
+  positiveAdminId,
+  sqliteErrorCode,
+} from "./codecs.js";
+import { AdminError } from "./errors.js";
+import {
   type AdminMutationContext,
   type GroupView,
   type UserCreateInput,
@@ -22,87 +34,8 @@ export type {
   UserView,
 } from "./service-contracts.js";
 
-const EMAIL_RE = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
-const USERNAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,79}$/;
-const GROUP_RE = /^[a-z][a-z0-9_-]{0,63}$/;
-const MAX_GROUP_IDS = 50;
-
 type DatabaseSource = Database.Database | (() => Database.Database);
-
-export class AdminError extends Error {
-  constructor(readonly code: string, readonly statusCode: number, message: string) {
-    super(message);
-    this.name = "AdminError";
-  }
-}
-
-function text(value: unknown): string {
-  return typeof value === "string" ? value.trim() : "";
-}
-
-function positiveId(value: unknown, label: string): number {
-  if (!Number.isSafeInteger(value) || Number(value) <= 0) throw new AdminError("invalid_identifier", 400, `${label} is invalid`);
-  return Number(value);
-}
-
-function normalizeUsername(value: unknown): string {
-  const username = text(value);
-  if (!USERNAME_RE.test(username)) throw new AdminError("invalid_username", 400, "username is invalid");
-  return username;
-}
-
-function normalizeEmail(value: unknown): string {
-  const email = text(value).toLowerCase();
-  if (email.length > 254 || !EMAIL_RE.test(email)) throw new AdminError("invalid_email", 400, "email is invalid");
-  return email;
-}
-
-function normalizeRoleValue(value: unknown): Role {
-  if (typeof value !== "string") throw new AdminError("invalid_role", 400, "role is invalid");
-  try {
-    return normalizeRole(value);
-  } catch {
-    throw new AdminError("invalid_role", 400, "role is invalid");
-  }
-}
-
-function normalizeGroupIds(value: unknown): number[] {
-  if (value === undefined) return [];
-  if (!Array.isArray(value) || value.length > MAX_GROUP_IDS) throw new AdminError("invalid_group_ids", 400, "group_ids is invalid");
-  const ids = value.map((item) => positiveId(item, "group id"));
-  if (new Set(ids).size !== ids.length) throw new AdminError("duplicate_group_ids", 400, "group_ids contains duplicates");
-  return ids;
-}
-
-function normalizeGroupName(value: unknown): string {
-  const name = text(value).toLowerCase();
-  if (!GROUP_RE.test(name)) throw new AdminError("invalid_group_name", 400, "group name is invalid");
-  return name;
-}
-
-function sqliteCode(error: unknown): string | undefined {
-  return error instanceof Error && "code" in error && typeof error.code === "string" ? error.code : undefined;
-}
-
-function jsonGroups(value: unknown): GroupView[] {
-  if (typeof value !== "string") return [];
-  try {
-    const parsed: unknown = JSON.parse(value);
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((item): item is GroupView => {
-      if (item === null || typeof item !== "object") return false;
-      const row = item as Record<string, unknown>;
-      return Number.isSafeInteger(row.id) && typeof row.name === "string";
-    }).map((item) => ({
-      id: Number(item.id),
-      name: item.name,
-      created_at: typeof item.created_at === "string" ? item.created_at : "",
-      user_count: 0
-    }));
-  } catch {
-    return [];
-  }
-}
+export { AdminError } from "./errors.js";
 
 export class AdminIdentityService {
   private readonly source: DatabaseSource;
@@ -155,7 +88,7 @@ export class AdminIdentityService {
       external_provider: row.external_provider,
       created_at: row.created_at,
       last_login: row.last_login,
-      groups: jsonGroups(row.groups_json ?? "[]")
+      groups: parseAdminGroups(row.groups_json ?? "[]")
       ,disabled_at: row.disabled_at,
       account_status: accountStatus(database, row.id),
       status_reason: row.status_reason ?? null,
@@ -187,7 +120,7 @@ export class AdminIdentityService {
         // Preserve the original stable mutation error.
       }
       if (error instanceof AdminError) throw error;
-      const code = sqliteCode(error);
+      const code = sqliteErrorCode(error);
       if (code === "SQLITE_CONSTRAINT_UNIQUE") throw new AdminError("identity_conflict", 409, "identity value already exists");
       if (code === "SQLITE_CONSTRAINT_FOREIGNKEY") throw new AdminError("user_delete_restricted", 409, "user has protected historical references");
       throw new AdminError("admin_operation_failed", 500, "administrative operation failed");
@@ -204,8 +137,8 @@ export class AdminIdentityService {
       filters.push("(users.username LIKE ? ESCAPE '\\' OR users.email LIKE ? ESCAPE '\\')");
       values.push(`%${escaped}%`, `%${escaped}%`);
     }
-    if (options.role) { const role = normalizeRoleValue(options.role); filters.push("users.role = ?"); values.push(role); }
-    if (options.groupId !== undefined) { positiveId(options.groupId, "group_id"); filters.push("EXISTS (SELECT 1 FROM user_groups filter_ug WHERE filter_ug.user_id = users.id AND filter_ug.group_id = ?)"); values.push(options.groupId); }
+    if (options.role) { const role = normalizeAdminRole(options.role); filters.push("users.role = ?"); values.push(role); }
+    if (options.groupId !== undefined) { positiveAdminId(options.groupId, "group_id"); filters.push("EXISTS (SELECT 1 FROM user_groups filter_ug WHERE filter_ug.user_id = users.id AND filter_ug.group_id = ?)"); values.push(options.groupId); }
     const where = filters.length ? `WHERE ${filters.join(" AND ")}` : "";
     const database = this.database;
     const disabledColumn = hasAccountStateColumn(database) ? "users.disabled_at" : "NULL AS disabled_at";
@@ -231,18 +164,18 @@ export class AdminIdentityService {
     let role: Role;
     try { role = normalizeRole(row.role); } catch { throw new AdminError("admin_identity_inconsistent", 503, "stored user role is invalid"); }
     const status = row.disabled_at !== null ? "disabled" : (row.account_status === "suspended" || row.account_status === "banned" ? row.account_status : "active");
-    return { id: row.id, username: row.username, email: row.email, role, external_provider: row.external_provider, created_at: row.created_at, last_login: row.last_login, groups: jsonGroups(row.groups_json ?? "[]"), disabled_at: row.disabled_at, account_status: status, status_reason: row.status_reason ?? null, status_changed_at: row.status_changed_at ?? null, status_expires_at: row.status_expires_at ?? null };
+    return { id: row.id, username: row.username, email: row.email, role, external_provider: row.external_provider, created_at: row.created_at, last_login: row.last_login, groups: parseAdminGroups(row.groups_json ?? "[]"), disabled_at: row.disabled_at, account_status: status, status_reason: row.status_reason ?? null, status_changed_at: row.status_changed_at ?? null, status_expires_at: row.status_expires_at ?? null };
   }
 
-  getUser(userId: number): UserView { return this.user(this.database, positiveId(userId, "user_id")); }
+  getUser(userId: number): UserView { return this.user(this.database, positiveAdminId(userId, "user_id")); }
 
   createUser(input: UserCreateInput, context: AdminMutationContext): UserView {
-    const username = normalizeUsername(input.username);
-    const email = normalizeEmail(input.email);
+    const username = normalizeAdminUsername(input.username);
+    const email = normalizeAdminEmail(input.email);
     if (typeof input.password !== "string" || !input.password) throw new AdminError("invalid_password", 400, "password is required");
     validatePassword(input.password, input.passwordConfirm ?? input.password);
-    const role = input.role === undefined ? "user" : normalizeRoleValue(input.role);
-    const groupIds = normalizeGroupIds(input.groupIds);
+    const role = input.role === undefined ? "user" : normalizeAdminRole(input.role);
+    const groupIds = normalizeAdminGroupIds(input.groupIds);
     const passwordHash = generateWerkzeugScryptHash(input.password);
     return this.mutate(context, "user.create", "user", "pending", (database) => {
       this.ensureEditors(database);
@@ -255,10 +188,10 @@ export class AdminIdentityService {
   }
 
   updateUser(userId: number, input: UserUpdateInput, context: AdminMutationContext): UserView {
-    const id = positiveId(userId, "user_id");
+    const id = positiveAdminId(userId, "user_id");
     if (input.username === undefined && input.email === undefined && input.password === undefined) throw new AdminError("empty_user_update", 400, "user update is empty");
-    const username = input.username === undefined ? undefined : normalizeUsername(input.username);
-    const email = input.email === undefined ? undefined : normalizeEmail(input.email);
+    const username = input.username === undefined ? undefined : normalizeAdminUsername(input.username);
+    const email = input.email === undefined ? undefined : normalizeAdminEmail(input.email);
     if (input.password !== undefined) {
       if (!input.password) throw new AdminError("invalid_password", 400, "password must not be empty");
       validatePassword(input.password, input.passwordConfirm ?? input.password);
@@ -283,8 +216,8 @@ export class AdminIdentityService {
   }
 
   setRole(userId: number, roleValue: unknown, context: AdminMutationContext): UserView {
-    const id = positiveId(userId, "user_id");
-    const role = normalizeRoleValue(roleValue);
+    const id = positiveAdminId(userId, "user_id");
+    const role = normalizeAdminRole(roleValue);
     return this.mutate(context, "user.role.update", "user", String(id), (database) => {
       this.ensureEditors(database);
       const current = this.user(database, id);
@@ -304,7 +237,7 @@ export class AdminIdentityService {
 
   setDisabled(userId: number, disabledValue: unknown, context: AdminMutationContext): UserView {
     if (typeof disabledValue !== "boolean") throw new AdminError("invalid_account_state", 400, "disabled must be boolean");
-    const id = positiveId(userId, "user_id");
+    const id = positiveAdminId(userId, "user_id");
     return this.mutate(context, disabledValue ? "user.account.disabled" : "user.account.enabled", "user", String(id), (database) => {
       if (!hasAccountStateColumn(database)) throw new AdminError("account_state_unavailable", 503, "account state is unavailable");
       this.ensureEditors(database);
@@ -331,7 +264,7 @@ export class AdminIdentityService {
     const expiresAt = expiresValue === undefined || expiresValue === null || expiresValue === ""
       ? null
       : typeof expiresValue === "string" && !Number.isNaN(Date.parse(expiresValue)) ? new Date(expiresValue).toISOString() : (() => { throw new AdminError("invalid_status_expiry", 400, "expires_at is invalid"); })();
-    const id = positiveId(userId, "user_id");
+    const id = positiveAdminId(userId, "user_id");
     return this.mutate(context, `user.account.${status}`, "user", String(id), (database) => {
       if (!hasAccountStatusColumn(database)) throw new AdminError("account_status_unavailable", 503, "account status is unavailable");
       this.ensureEditors(database);
@@ -350,8 +283,8 @@ export class AdminIdentityService {
   }
 
   replaceGroups(userId: number, value: unknown, context: AdminMutationContext): UserView {
-    const id = positiveId(userId, "user_id");
-    const groupIds = normalizeGroupIds(value);
+    const id = positiveAdminId(userId, "user_id");
+    const groupIds = normalizeAdminGroupIds(value);
     return this.mutate(context, "user.groups.replace", "user", String(id), (database) => {
       this.ensureEditors(database);
       this.user(database, id);
@@ -367,7 +300,7 @@ export class AdminIdentityService {
   }
 
   deleteUser(userId: number, context: AdminMutationContext): { readonly user_id: number } {
-    const id = positiveId(userId, "user_id");
+    const id = positiveAdminId(userId, "user_id");
     return this.mutate(context, "user.delete", "user", String(id), (database) => {
       this.ensureEditors(database);
       const current = this.user(database, id);
@@ -396,7 +329,7 @@ export class AdminIdentityService {
   }
 
   createGroup(nameValue: unknown, context: AdminMutationContext): GroupView {
-    const name = normalizeGroupName(nameValue);
+    const name = normalizeAdminGroupName(nameValue);
     return this.mutate(context, "group.create", "group", "pending", (database) => {
       this.ensureEditors(database);
       const result = database.prepare("INSERT INTO groups(name) VALUES (?)").run(name);
@@ -405,8 +338,8 @@ export class AdminIdentityService {
   }
 
   renameGroup(groupId: number, nameValue: unknown, context: AdminMutationContext): GroupView {
-    const id = positiveId(groupId, "group_id");
-    const name = normalizeGroupName(nameValue);
+    const id = positiveAdminId(groupId, "group_id");
+    const name = normalizeAdminGroupName(nameValue);
     return this.mutate(context, "group.rename", "group", String(id), (database) => {
       this.ensureEditors(database);
       const current = this.group(database, id);
@@ -417,7 +350,7 @@ export class AdminIdentityService {
   }
 
   deleteGroup(groupId: number, context: AdminMutationContext): { readonly group_id: number } {
-    const id = positiveId(groupId, "group_id");
+    const id = positiveAdminId(groupId, "group_id");
     return this.mutate(context, "group.delete", "group", String(id), (database) => {
       this.ensureEditors(database);
       const current = this.group(database, id);
@@ -443,7 +376,7 @@ export class AdminIdentityService {
     const hasTable = Boolean(database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'admin_audit_events'").get());
     if (!hasTable) return { events: [], limit };
     const rows = database.prepare("SELECT event_id, timestamp, actor_user_id, target_type, target_id, action, outcome, summary_json, request_id FROM admin_audit_events ORDER BY timestamp DESC, event_id DESC LIMIT ?").all(limit) as Array<{ event_id: string; timestamp: string; actor_user_id: number | null; target_type: string; target_id: string; action: string; outcome: string; summary_json: string; request_id: string }>;
-    return { limit, events: rows.map((row) => ({ event_id: row.event_id, timestamp: row.timestamp, actor_user_id: row.actor_user_id, target_type: row.target_type, target_id: row.target_id, action: row.action, outcome: row.outcome, summary: safeAuditSummary(row.summary_json), request_id: row.request_id })) };
+    return { limit, events: rows.map((row) => ({ event_id: row.event_id, timestamp: row.timestamp, actor_user_id: row.actor_user_id, target_type: row.target_type, target_id: row.target_id, action: row.action, outcome: row.outcome, summary: parseAdminAuditSummary(row.summary_json), request_id: row.request_id })) };
   }
 
   private group(database: Database.Database, groupId: number): GroupView {
@@ -468,11 +401,4 @@ export class AdminIdentityService {
     const insert = database.prepare("INSERT INTO user_groups(user_id, group_id) VALUES (?, ?)");
     for (const groupId of groupIds) insert.run(userId, groupId);
   }
-}
-
-function safeAuditSummary(value: string): Record<string, unknown> {
-  try {
-    const parsed: unknown = JSON.parse(value);
-    return parsed !== null && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {};
-  } catch { return {}; }
 }
