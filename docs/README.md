@@ -15,13 +15,13 @@ compatibility path, but it is not a target for further refactoring.
 | Review trust boundaries and security rules | [Security](security.md) |
 | Run the Docker profiles | [Docker](docker.md) |
 | Operate a deployment | [Operations](operations.md) and [Deployment](deployment.md) |
-| Integrate firmware or tools | [API](api.md) and the compatibility contracts |
+| Integrate firmware or tools | [API](api.md) |
 | Follow the active work plan | [Modernization roadmap](modernization/ROADMAP.md) |
 
 ## Documentation rules
 
-- Code and tests are authoritative for current behavior; modernization reports
-  preserve historical decisions and evidence.
+- Code and tests are authoritative for current behavior; the modernization
+  roadmap records only active work and acceptance gates.
 - Public route names, response fields, identifiers, architecture strings, and
   ABI names must remain compatible with PRG32 firmware and tools.
 - Environment variable examples use placeholders or local-only defaults. Never
@@ -47,5 +47,5 @@ CartridgeStore/
 ├── tests/                       Python compatibility and integration tests
 ├── backend/tests/               Fastify/API contract and security tests
 ├── frontend/src/**/*.test.*     Next.js component and client tests
-└── docs/modernization/          Audits, decisions, reports, and roadmap
+└── docs/modernization/          Active modernization roadmap only
 ```
