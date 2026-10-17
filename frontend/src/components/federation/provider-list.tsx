@@ -1,45 +1,25 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
-import { useState } from "react";
 
-import { federationAdminApi, type FederationProvider } from "../../lib/api/federation-admin";
-import { federationQueryKeys } from "../../lib/api/query-keys";
+import type { FederationProvider } from "../../lib/api/federation-admin";
 import { useCurrentUser } from "../../lib/auth/use-current-user";
 import { useFederationStore } from "../../stores/federation-store";
 import { Button } from "../ui/button";
 import { hasFederationPermission } from "./FederationAdminGuard";
 import { Notice, Panel, StatusBadge } from "./presentation";
 import { useSensitiveActions } from "./use-sensitive-actions";
+import { useProviderList } from "./use-provider-list";
 
 /** Lists configured federation providers and exposes their state toggle. */
 export function ProviderList() {
   const current = useCurrentUser();
   const manage = hasFederationPermission(current.user, "federation:manage");
-  const queryClient = useQueryClient();
   const setSelectedProviderId = useFederationStore(
     (state) => state.setSelectedProviderId,
   );
-  const query = useQuery({
-    queryKey: federationQueryKeys.providers(),
-    queryFn: federationAdminApi.listProviders,
-    retry: false,
-  });
   const actions = useSensitiveActions();
-  const [success, setSuccess] = useState("");
-  const mutation = useMutation({
-    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
-      enabled
-        ? federationAdminApi.enableProvider(id)
-        : federationAdminApi.disableProvider(id),
-    onSuccess: () => {
-      setSuccess("Provider state updated.");
-      void queryClient.invalidateQueries({
-        queryKey: federationQueryKeys.providers(),
-      });
-    },
-  });
+  const { query, mutation, success, setSuccess } = useProviderList();
 
   const changeState = (provider: FederationProvider) => {
     if (
