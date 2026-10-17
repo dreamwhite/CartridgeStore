@@ -13,6 +13,10 @@ import {
   type SetupState,
   type SetupStep,
 } from "./service-contracts.js";
+import {
+  readApplicationMdnsPreference,
+  readSetupInfrastructure,
+} from "./infrastructure.js";
 
 export { SETUP_STATES, SETUP_STEPS } from "./service-contracts.js";
 export type {
@@ -69,40 +73,8 @@ export class SetupService {
     return row;
   }
 
-  private infrastructure(): Record<string, unknown> {
-    if (!this.options.database) return {
-      ready: false,
-      fastify: true,
-      canonical_sqlite: false,
-      storage: false,
-      writer_lease: false,
-      secret_registry: false,
-      bootstrap_authorization: Boolean(this.options.config.authBootstrapToken),
-      mdns_infrastructure_allowed: false
-    };
-    const database = this.options.database;
-    const metadata = database.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'storage_metadata'").get();
-    const storage = metadata
-      ? (database.prepare("SELECT state FROM storage_metadata WHERE singleton_id = 1").get() as { state?: string } | undefined)?.state === "ready"
-      : true;
-    const secretRegistry = this.options.config.secretEncryptionEnabled
-      ? Boolean(this.options.config.secretKeyRegistryPath)
-      : true;
-    const writer = Boolean(this.options.config.authWriteEnabled && this.options.auth.isWriteEnabled());
-    return {
-      ready: storage && secretRegistry && writer && Boolean(this.options.config.authSessionSecret) && Boolean(this.options.config.authBootstrapToken),
-      fastify: true,
-      canonical_sqlite: storage,
-      storage: storage,
-      writer_lease: writer,
-      secret_registry: secretRegistry,
-      bootstrap_authorization: Boolean(this.options.config.authBootstrapToken),
-      mdns_infrastructure_allowed: this.options.config.mdnsEnabled
-    };
-  }
-
   status(): Record<string, unknown> {
-    const infrastructure = this.infrastructure();
+    const infrastructure = readSetupInfrastructure(this.options);
     if (!this.options.database) return {
       ok: true,
       state: "INFRASTRUCTURE_NOT_READY",
@@ -126,21 +98,14 @@ export class SetupService {
       },
       mdns: {
         infrastructure_allowed: this.options.config.mdnsEnabled,
-        application_enabled: this.applicationMdnsPreference(),
-        effective_enabled: this.options.config.mdnsEnabled && this.applicationMdnsPreference(),
+        application_enabled: readApplicationMdnsPreference(this.database),
+        effective_enabled: this.options.config.mdnsEnabled && readApplicationMdnsPreference(this.database),
         service_type: "_prg32store._tcp.local.",
         abi: "prg32-store-discovery-1.0",
         port: this.options.config.mdnsPort,
         restart_required: true
       }
     };
-  }
-
-  private applicationMdnsPreference(): boolean {
-    try {
-      const row = this.database.prepare("SELECT value_json FROM application_settings WHERE setting_key = 'discovery.mdns_enabled'").get() as { value_json?: string } | undefined;
-      return row?.value_json === "true";
-    } catch { return false; }
   }
 
   progress(session: SetupSession): Record<string, unknown> {
@@ -160,7 +125,7 @@ export class SetupService {
   }
 
   authorize(token: string): { readonly session: SetupSession; readonly progress: Record<string, unknown> } {
-    const infrastructure = this.infrastructure();
+    const infrastructure = readSetupInfrastructure(this.options);
     const state = this.row().state;
     if (!infrastructure.ready) throw new SetupError("infrastructure_not_ready", 503, "installation infrastructure is not ready");
     if (state === "INSTALLATION_COMPLETE") throw new SetupError("setup_already_complete", 409, "installation is already complete");
