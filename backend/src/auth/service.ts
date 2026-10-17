@@ -1,11 +1,11 @@
-import crypto from "node:crypto";
-
 import type Database from "better-sqlite3";
 
 import type { BackendConfig } from "../config/env.js";
 import { openAuthWriteDatabase, type ReadonlyDatabase, type ReadonlyDatabaseManager } from "../db/readonly.js";
 import { isAccountEnabled } from "./account-state.js";
 import { verifyWerkzeugPasswordHash } from "./password.js";
+import { PasswordWorkflow } from "./password-workflow.js";
+import { generateWerkzeugScryptHash } from "./password-hash.js";
 import { revokedBefore } from "./revocation.js";
 import {
   ANONYMOUS,
@@ -17,27 +17,24 @@ import {
   type Role
 } from "./principal.js";
 import { SessionStore, type SessionRecord } from "./session.js";
-import { hashApiToken } from "./tokens.js";
 import {
   createUserToken,
   listUserTokens,
   revokeUserToken,
   updateUserToken,
 } from "./token-management.js";
-import { EmailDeliveryError, type EmailService } from "../email/service.js";
+import type { EmailService } from "../email/service.js";
 import type { RuntimePolicy } from "../settings/runtime-policy.js";
 import {
   AuthConflictError,
-  AuthValidationError,
   AuthWriteDisabledError,
 } from "./errors.js";
 import {
   authScalar,
-  AUTH_USERNAME_MAX_LENGTH,
-  isValidAuthEmail,
   validateAccountInput,
-  validatePassword,
 } from "./validation.js";
+import { RegistrationWorkflow } from "./registration-workflow.js";
+import type { AuthWorkflowDependencies } from "./workflow-context.js";
 
 export {
   AuthConflictError,
@@ -62,6 +59,8 @@ export interface AuthRequestContext {
 export class AuthService {
   readonly sessions: SessionStore | null;
   private readonly writeDatabase: ReadonlyDatabase | null;
+  private readonly registrationWorkflow: RegistrationWorkflow;
+  private readonly passwordWorkflow: PasswordWorkflow;
   private runtimePolicy: RuntimePolicy | undefined;
 
   constructor(private readonly options: AuthServiceOptions) {
@@ -70,6 +69,15 @@ export class AuthService {
     this.sessions = this.writeDatabase && options.config.authSessionSecret
       ? new SessionStore(options.config.authSessionSecret, () => this.runtimePolicy?.sessionLifetimeSeconds() ?? options.config.authSessionLifetimeSeconds, this.writeDatabase.sqlite)
       : null;
+    const workflowDependencies: AuthWorkflowDependencies = {
+      database: () => this.database(),
+      writableDatabase: () => this.writableDatabase(),
+      email: () => this.options.email,
+      runtimePolicy: () => this.runtimePolicy,
+      sessions: () => this.sessions,
+    };
+    this.registrationWorkflow = new RegistrationWorkflow(workflowDependencies);
+    this.passwordWorkflow = new PasswordWorkflow(workflowDependencies);
   }
 
   setRuntimePolicy(policy: RuntimePolicy): void { this.runtimePolicy = policy; }
@@ -229,92 +237,15 @@ export class AuthService {
   }
 
   async requestRegistration(email: string): Promise<void> {
-    await this.requestRegistrationDetails({ email });
+    await this.registrationWorkflow.requestRegistration(email);
   }
 
   async requestRegistrationDetails(payload: Record<string, unknown>): Promise<{ readonly email: string }> {
-    const db = this.writableDatabase();
-    ensureAuthWorkflowSchema(db);
-    const normalized = authScalar(payload.email).trim().toLowerCase();
-    if (!isValidAuthEmail(normalized)) throw new AuthValidationError("email must be valid");
-    const username = authScalar(payload.username, normalized).trim();
-    const password = authScalar(payload.password);
-    const confirmation = authScalar(payload.password_confirm, password);
-    if (payload.username !== undefined || payload.password !== undefined || payload.password_confirm !== undefined) {
-      if (!username || username.length > AUTH_USERNAME_MAX_LENGTH) throw new AuthValidationError("username is required and must be at most 80 characters");
-      validatePassword(password, confirmation);
-    }
-    let token = "";
-    try {
-      db.exec("BEGIN IMMEDIATE");
-      if (this.runtimePolicy && !this.runtimePolicy.registrationEnabled()) throw new AuthValidationError("registration is closed");
-      if (!this.runtimePolicy) {
-        const setting = db.prepare("SELECT value FROM store_settings WHERE key = 'auth_allow_registration'").get() as { value?: string } | undefined;
-        if (setting?.value === "false") throw new AuthValidationError("registration is closed");
-      }
-      const requiredDomain = registrationDomain(db);
-      if (requiredDomain && !normalized.endsWith(`@${requiredDomain}`)) {
-        throw new AuthValidationError(`email must belong to ${requiredDomain}`);
-      }
-      const existing = db.prepare("SELECT id FROM users WHERE email = ? OR username = ?").get(normalized, username);
-      if (existing) {
-        db.exec("COMMIT");
-        return { email: normalized };
-      }
-      token = crypto.randomBytes(32).toString("base64url");
-      db.prepare("UPDATE registration_tokens SET used_at = datetime('now') WHERE email = ? AND used_at IS NULL").run(normalized);
-      db.prepare(
-        "INSERT INTO registration_tokens(email, username, password_hash, token_hash, expires_at) VALUES (?, ?, ?, ?, datetime('now', '+24 hours'))"
-      ).run(normalized, username, password ? generateWerkzeugScryptHash(password) : null, hashApiToken(token));
-      db.exec("COMMIT");
-    } catch (error) {
-      if (db.inTransaction) db.exec("ROLLBACK");
-      throw error;
-    }
-    if (!this.options.email) throw new AuthValidationError("registration email delivery is unavailable");
-    try { await this.options.email.sendRegistration(normalized, token); }
-    catch (error) {
-      try { db.prepare("UPDATE registration_tokens SET used_at = datetime('now') WHERE token_hash = ? AND used_at IS NULL").run(hashApiToken(token)); } catch { /* diagnostics stay server-side */ }
-      if (error instanceof EmailDeliveryError) throw error;
-      throw new EmailDeliveryError();
-    }
-    return { email: normalized };
+    return this.registrationWorkflow.requestRegistrationDetails(payload);
   }
 
   completeRegistration(payload: Record<string, unknown>): Principal {
-    const db = this.writableDatabase();
-    ensureAuthWorkflowSchema(db);
-    const token = authScalar(payload.token);
-    const password = authScalar(payload.password);
-    const confirmation = authScalar(payload.password_confirm, password);
-    try {
-      db.exec("BEGIN IMMEDIATE");
-      const record = db.prepare(
-        "SELECT id, email, username, password_hash FROM registration_tokens WHERE token_hash = ? AND used_at IS NULL AND expires_at > datetime('now')"
-      ).get(hashApiToken(token)) as { id: number; email: string; username: string | null; password_hash: string | null } | undefined;
-      if (!record) throw new AuthValidationError("registration link is invalid or expired");
-      if (!record.password_hash) validatePassword(password, confirmation);
-      const existing = db.prepare("SELECT id FROM users WHERE email = ? OR username = ?").get(record.email, record.username ?? record.email);
-      if (existing) {
-        db.prepare("UPDATE registration_tokens SET used_at = datetime('now') WHERE id = ? AND used_at IS NULL").run(record.id);
-        db.exec("COMMIT");
-        throw new AuthValidationError("account already exists");
-      }
-      const finalPasswordHash = record.password_hash ?? generateWerkzeugScryptHash(password);
-      const finalUsername = record.username?.trim() || record.email;
-      const result = db.prepare(
-        "INSERT INTO users(username, email, password_hash, role) VALUES (?, ?, ?, 'user')"
-      ).run(finalUsername, record.email, finalPasswordHash);
-      const consumed = db.prepare(
-        "UPDATE registration_tokens SET used_at = datetime('now') WHERE id = ? AND used_at IS NULL AND expires_at > datetime('now')"
-      ).run(record.id).changes;
-      if (consumed !== 1) throw new AuthValidationError("registration link is invalid or expired");
-      db.exec("COMMIT");
-      return loadPrincipalById(db, Number(result.lastInsertRowid), "session");
-    } catch (error) {
-      if (db.inTransaction) db.exec("ROLLBACK");
-      throw error;
-    }
+    return this.registrationWorkflow.completeRegistration(payload);
   }
 
   emailMessages(): readonly Record<string, unknown>[] {
@@ -322,56 +253,15 @@ export class AuthService {
   }
 
   changePassword(userId: number, currentPassword: string, password: string, confirmation: string): void {
-    validatePassword(password, confirmation);
-    const db = this.writableDatabase();
-    const row = db.prepare("SELECT password_hash, external_provider, email FROM users WHERE id = ? AND disabled_at IS NULL").get(userId) as { password_hash: string | null; external_provider: string | null; email: string } | undefined;
-    if (!row?.password_hash || row.external_provider) throw new AuthValidationError("local password management is unavailable for this account");
-    if (verifyWerkzeugPasswordHash(row.password_hash, currentPassword).status !== "valid") throw new AuthValidationError("current password is incorrect");
-    db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(generateWerkzeugScryptHash(password), userId);
-    db.prepare("UPDATE password_reset_tokens SET used_at = datetime('now') WHERE user_id = ? AND used_at IS NULL").run(userId);
-    this.sessions?.invalidateUser(userId);
+    this.passwordWorkflow.changePassword(userId, currentPassword, password, confirmation);
   }
 
   async requestPasswordReset(identifier: string): Promise<void> {
-    const db = this.writableDatabase();
-    ensureAuthWorkflowSchema(db);
-    const normalized = identifier.trim();
-    if (!normalized) return;
-    const row = db.prepare("SELECT id, email, password_hash, external_provider, disabled_at FROM users WHERE lower(email) = lower(?) OR username = ? LIMIT 1").get(normalized, normalized) as { id: number; email: string; password_hash: string | null; external_provider: string | null; disabled_at: string | null } | undefined;
-    if (!row || row.disabled_at !== null || !row.password_hash || row.external_provider) return;
-    const token = crypto.randomBytes(32).toString("base64url");
-    db.exec("BEGIN IMMEDIATE");
-    try {
-      db.prepare("UPDATE password_reset_tokens SET used_at = datetime('now') WHERE user_id = ? AND used_at IS NULL").run(row.id);
-      db.prepare("INSERT INTO password_reset_tokens(user_id, token_hash, expires_at) VALUES (?, ?, datetime('now', '+1 hour'))").run(row.id, hashApiToken(token));
-      db.exec("COMMIT");
-    } catch (error) { if (db.inTransaction) db.exec("ROLLBACK"); throw error; }
-    if (!this.options.email) throw new EmailDeliveryError();
-    try { await this.options.email.sendPasswordReset(row.email, token); }
-    catch (error) {
-      db.prepare("UPDATE password_reset_tokens SET used_at = datetime('now') WHERE token_hash = ? AND used_at IS NULL").run(hashApiToken(token));
-      if (error instanceof EmailDeliveryError) throw error;
-      throw new EmailDeliveryError();
-    }
+    await this.passwordWorkflow.requestPasswordReset(identifier);
   }
 
   completePasswordReset(token: string, password: string, confirmation: string): void {
-    validatePassword(password, confirmation);
-    const db = this.writableDatabase();
-    ensureAuthWorkflowSchema(db);
-    db.exec("BEGIN IMMEDIATE");
-    try {
-      const row = db.prepare("SELECT id, user_id FROM password_reset_tokens WHERE token_hash = ? AND used_at IS NULL AND expires_at > datetime('now')").get(hashApiToken(token)) as { id: number; user_id: number } | undefined;
-      if (!row) throw new AuthValidationError("password reset link is invalid or expired");
-      const user = db.prepare("SELECT password_hash, external_provider, disabled_at FROM users WHERE id = ?").get(row.user_id) as { password_hash: string | null; external_provider: string | null; disabled_at: string | null } | undefined;
-      if (!user?.password_hash || user.external_provider || user.disabled_at !== null) throw new AuthValidationError("password reset link is invalid or expired");
-      db.prepare("UPDATE users SET password_hash = ? WHERE id = ?").run(generateWerkzeugScryptHash(password), row.user_id);
-      const consumed = db.prepare("UPDATE password_reset_tokens SET used_at = datetime('now') WHERE id = ? AND used_at IS NULL").run(row.id).changes;
-      if (consumed !== 1) throw new AuthValidationError("password reset link is invalid or expired");
-      db.prepare("UPDATE password_reset_tokens SET used_at = datetime('now') WHERE user_id = ? AND used_at IS NULL").run(row.user_id);
-      this.sessions?.invalidateUser(row.user_id);
-      db.exec("COMMIT");
-    } catch (error) { if (db.inTransaction) db.exec("ROLLBACK"); throw error; }
+    this.passwordWorkflow.completePasswordReset(token, password, confirmation);
   }
 
   listTokens(userId: number): Array<Record<string, unknown>> {
@@ -391,39 +281,7 @@ export class AuthService {
   }
 }
 
-function registrationDomain(database: Database.Database): string {
-  const setting = database.prepare("SELECT value FROM store_settings WHERE key = 'auth_require_email_domain'").get() as { value?: string } | undefined;
-  return typeof setting?.value === "string" ? setting.value.trim().toLowerCase().replace(/^@+/, "") : "";
-}
-
-function ensureAuthWorkflowSchema(database: Database.Database): void {
-  database.exec(`
-    CREATE TABLE IF NOT EXISTS password_reset_tokens (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-      token_hash TEXT NOT NULL UNIQUE,
-      created_at TEXT NOT NULL DEFAULT (datetime('now')),
-      expires_at TEXT NOT NULL,
-      used_at TEXT
-    );
-    CREATE INDEX IF NOT EXISTS password_reset_tokens_user_idx ON password_reset_tokens(user_id, used_at, expires_at);
-  `);
-  for (const [column, definition] of [["username", "TEXT"], ["password_hash", "TEXT"]] as const) {
-    const present = (database.prepare("PRAGMA table_info(registration_tokens)").all() as Array<{ name: string }>).some((row) => row.name === column);
-    if (!present) database.exec(`ALTER TABLE registration_tokens ADD COLUMN "${column}" ${definition}`);
-  }
-}
-
-export function generateWerkzeugScryptHash(password: string): string {
-  const salt = crypto.randomBytes(16).toString("hex");
-  const digest = crypto.scryptSync(password, salt, 64, {
-    N: 2 ** 15,
-    r: 8,
-    p: 1,
-    maxmem: 132 * (2 ** 15) * 8 * 1
-  });
-  return `scrypt:32768:8:1$${salt}$${digest.toString("hex")}`;
-}
+export { generateWerkzeugScryptHash } from "./password-hash.js";
 
 export function configuredRole(value: string): Role {
   return normalizeRole(value);
