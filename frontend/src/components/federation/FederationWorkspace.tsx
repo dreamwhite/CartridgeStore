@@ -1,6 +1,6 @@
 "use client";
 
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
@@ -11,7 +11,6 @@ import { federationAdminApi, federationErrorMessage, type FederationProvider, ty
 import { federationQueryKeys } from "../../lib/api/query-keys";
 import { hasFederationPermission } from "./FederationAdminGuard";
 import { useCurrentUser } from "../../lib/auth/use-current-user";
-import { useFederationStore } from "../../stores/federation-store";
 import { publicApiPath } from "../../lib/api/origin";
 import {
   CertificatePanel,
@@ -25,25 +24,13 @@ import {
 import { useProviderForm } from "./use-provider-form";
 import { useProviderDetails } from "./use-provider-details";
 import { useIdentityLinks } from "./use-identity-links";
+export { ProviderList } from "./provider-list";
 
 export function FederationOverview() {
   const query = useQuery({ queryKey: federationQueryKeys.providers(), queryFn: federationAdminApi.listProviders, retry: false });
   const providers = useMemo(() => query.data?.providers ?? [], [query.data]);
   const counts = useMemo(() => ({ enabled: providers.filter((item) => item.enabled).length, disabled: providers.filter((item) => !item.enabled).length, oidc: providers.filter((item) => item.protocol === "oidc").length, saml: providers.filter((item) => item.protocol === "saml").length, incomplete: providers.filter((item) => !item.configuration_complete).length }), [providers]);
   return <div className="space-y-5"><div><p className="text-sm font-semibold uppercase tracking-wide text-violet-700">Standards-based identity</p><h2 className="mt-1 text-3xl font-bold tracking-tight">Federation overview</h2><p className="mt-2 max-w-2xl text-sm text-[var(--color-text-muted)]">Manage generic OIDC and SAML 2.0 provider metadata. Authentication, authorization, and protocol validation remain backend responsibilities.</p></div><Notice error={query.error} />{query.isLoading ? <p role="status">Loading federation status…</p> : <><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">{[["Providers", providers.length], ["Enabled", counts.enabled], ["Disabled", counts.disabled], ["OIDC / SAML", `${counts.oidc} / ${counts.saml}`], ["Incomplete", counts.incomplete]].map(([label, value]) => <div key={String(label)} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4"><p className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">{label}</p><p className="mt-2 text-2xl font-bold">{value}</p></div>)}</div><Panel title="Next steps"><div className="flex flex-wrap gap-3"><Link className="rounded-md bg-violet-700 px-4 py-2 text-sm font-semibold text-white" href="/admin/federation/providers">Review providers</Link><Link className="rounded-md border border-[var(--color-border)] px-4 py-2 text-sm font-semibold" href="/admin/federation/identities">Review identity links</Link></div></Panel></>}</div>;
-}
-
-export function ProviderList() {
-  const current = useCurrentUser();
-  const manage = hasFederationPermission(current.user, "federation:manage");
-  const queryClient = useQueryClient();
-  const setSelectedProviderId = useFederationStore((state) => state.setSelectedProviderId);
-  const query = useQuery({ queryKey: federationQueryKeys.providers(), queryFn: federationAdminApi.listProviders, retry: false });
-  const actions = useSensitiveActions();
-  const [success, setSuccess] = useState("");
-  const mutation = useMutation({ mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => enabled ? federationAdminApi.enableProvider(id) : federationAdminApi.disableProvider(id), onSuccess: () => { setSuccess("Provider state updated."); void queryClient.invalidateQueries({ queryKey: federationQueryKeys.providers() }); } });
-  const changeState = (provider: FederationProvider) => { if (!provider.enabled && !window.confirm(`Enable ${provider.display_name}?`)) return; if (provider.enabled && !window.confirm(`Disable ${provider.display_name}? New federated logins will stop.`)) return; setSuccess(""); actions.request(() => mutation.mutate({ id: provider.provider_id, enabled: !provider.enabled })); };
-  return <div className="space-y-5">{actions.dialog}<div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-sm font-semibold uppercase tracking-wide text-violet-700">Provider registry</p><h2 className="mt-1 text-3xl font-bold">Providers</h2></div>{manage && <Link className="rounded-md bg-violet-700 px-4 py-2 text-sm font-semibold text-white" href="/admin/federation/providers/new">Add provider</Link>}</div><Notice error={query.error ?? mutation.error} success={success} />{query.isLoading ? <p role="status">Loading providers…</p> : query.data?.providers.length === 0 ? <Panel title="No providers configured"><p className="text-sm text-[var(--color-text-muted)]">Create a generic OIDC or SAML provider to make it available for later interoperability testing.</p></Panel> : <div className="grid gap-3">{query.data?.providers.map((provider) => <article key={provider.provider_id} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-4"><div className="flex flex-wrap items-start justify-between gap-3"><div><div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold">{provider.display_name}</h3><span className="rounded-full bg-[var(--color-surface-muted)] px-2 py-1 text-xs font-semibold uppercase">{provider.protocol}</span><StatusBadge enabled={provider.enabled} /></div><p className="mt-1 font-mono text-xs text-[var(--color-text-muted)]">{provider.provider_id}</p><p className="mt-2 text-sm text-[var(--color-text-muted)]">{provider.protocol === "oidc" ? provider.issuer : provider.idp_entity_id ?? provider.issuer}</p></div><div className="flex gap-2"><Link className="rounded-md border border-[var(--color-border)] px-3 py-2 text-sm font-semibold" href={`/admin/federation/providers/${encodeURIComponent(provider.provider_id)}`} onClick={() => setSelectedProviderId(provider.provider_id)}>Details</Link>{manage && <Button variant="secondary" className="min-h-9 px-3 py-1 text-xs" onClick={() => changeState(provider)} disabled={mutation.isPending}>{provider.enabled ? "Disable" : "Enable"}</Button>}</div></div><div className="mt-4 flex flex-wrap gap-x-5 gap-y-2 text-xs text-[var(--color-text-muted)]"><span>Configuration: <strong className="text-[var(--color-text)]">{provider.configuration_complete ? "complete" : "incomplete"}</strong></span><span>Generation: <strong className="text-[var(--color-text)]">{provider.generation}</strong></span><span>Pending transactions: <strong className="text-[var(--color-text)]">{provider.pending_transactions}</strong></span>{provider.protocol === "saml" && <span>Certificates: <strong className="text-[var(--color-text)]">{provider.trusted_certificate_count}/{provider.trusted_certificate_capacity}</strong></span>}</div></article>)}</div>}</div>;
 }
 
 type ProviderFormProps = { protocol: "oidc" | "saml"; provider?: FederationProvider; onSubmit: (input: FederationProviderInput | Omit<FederationProviderInput, "provider_id" | "protocol" | "issuer">) => void; pending: boolean; error?: unknown; onCancel: () => void; clearSensitive?: () => void };
