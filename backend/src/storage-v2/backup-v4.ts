@@ -15,23 +15,20 @@ import {
 import { CanonicalWriterLease } from "./writer-lock.js";
 import { TARGET_VERSION_TUPLE } from "./schema.js";
 import {
-  ENCRYPTED_BACKUP_CHUNK_BYTES,
   parseEncryptedBackupEnvelope,
   requireRegularBackupFile,
   resolveEncryptedBackupPath,
   sha256EncryptedBackupFile,
   writeEncryptedBackupEnvelope,
-  type ParsedEncryptedBackupEnvelope,
 } from "./backup-v4-files.js";
+import { decryptAndVerify } from "./backup-v4-decryption.js";
 import {
   BACKUP_V4_KEY_BYTES,
   BACKUP_V4_NONCE_BYTES,
   BACKUP_V4_TAG_BYTES,
   canonicalBackupJson,
-  decodeBackupV4Base64,
   encryptedBackupLimits,
   requireEncryptedBackupAuthorization,
-  unwrapBackupV4DataKey,
   wrapBackupV4DataKey,
 } from "./backup-v4-codecs.js";
 import {
@@ -40,9 +37,7 @@ import {
   ENCRYPTED_BACKUP_V4_OPERATIONAL_AUTHORIZATION,
   ENCRYPTED_BACKUP_V4_VERSION,
   RETENTION_AUTHORIZATION,
-  type BackupKeyProvider,
   type CreateEncryptedBackupOptions,
-  type EncryptedBackupV4FaultPoint,
   type EncryptedBackupV4Header,
   type EncryptedBackupV4Limits,
   type EncryptedBackupV4Result,
@@ -92,49 +87,6 @@ function writeMarker(archivePath: string, header: EncryptedBackupV4Header, bytes
   fs.renameSync(temporary, marker); const directory = fs.openSync(path.dirname(marker), fs.constants.O_RDONLY); try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); } return marker;
 }
 
-function decryptPayload(parsed: ParsedEncryptedBackupEnvelope, archivePath: string, provider: BackupKeyProvider, destination: string, value: EncryptedBackupV4Limits, fault?: (point: EncryptedBackupV4FaultPoint) => void): void {
-  fault?.("before-decryption");
-  const dataKey = unwrapBackupV4DataKey(parsed.header, provider);
-  const temporary = `${destination}.partial-${process.pid}-${crypto.randomUUID()}`;
-  const fdIn = fs.openSync(archivePath, "r"); const fdOut = fs.openSync(temporary, fs.constants.O_CREAT | fs.constants.O_EXCL | fs.constants.O_WRONLY, 0o600);
-  const decipher = crypto.createDecipheriv("aes-256-gcm", dataKey, decodeBackupV4Base64(parsed.header.nonce, BACKUP_V4_NONCE_BYTES, "nonce"), { authTagLength: BACKUP_V4_TAG_BYTES });
-  decipher.setAAD(parsed.headerRaw); decipher.setAuthTag(parsed.tag);
-  const hash = crypto.createHash("sha256"); let position = 0;
-  try {
-    const input = Buffer.alloc(ENCRYPTED_BACKUP_CHUNK_BYTES);
-    while (position < parsed.ciphertextBytes) {
-      const count = fs.readSync(fdIn, input, 0, Math.min(input.length, parsed.ciphertextBytes - position), parsed.ciphertextOffset + position);
-      if (count === 0) throw new BackupError("backup v4 ciphertext is truncated", "backup_v4_archive_truncated");
-      position += count; const plain = decipher.update(input.subarray(0, count)); if (plain.length > 0) { hash.update(plain); fs.writeSync(fdOut, plain); } fault?.("during-decryption");
-    }
-    const final = decipher.final(); if (final.length > 0) { hash.update(final); fs.writeSync(fdOut, final); }
-    fs.fsyncSync(fdOut);
-  } catch (error) {
-    if (error instanceof BackupError) throw error;
-    throw new BackupError("backup v4 authentication failed", "backup_v4_authentication_failed", 400, { cause: error });
-  } finally { fs.closeSync(fdIn); fs.closeSync(fdOut); }
-  const stats = requireRegularBackupFile(temporary, "backup_v4_payload_invalid");
-  if (stats.size !== parsed.header.payload_archive_bytes || hash.digest("hex") !== parsed.header.payload_archive_sha256) {
-    fs.rmSync(temporary, { force: true }); throw new BackupError("backup v4 payload integrity failed", "backup_v4_payload_integrity");
-  }
-  fs.renameSync(temporary, destination); fault?.("after-decryption");
-  void value;
-}
-
-function decryptAndVerify(archivePath: string, provider: BackupKeyProvider, value: EncryptedBackupV4Limits, fault?: (point: EncryptedBackupV4FaultPoint) => void): { readonly parsed: ParsedEncryptedBackupEnvelope; readonly payloadPath: string; readonly payload: ReturnType<typeof verifyCanonicalBackup> } {
-  const parsed = parseEncryptedBackupEnvelope(archivePath, value);
-  const temporaryDirectory = fs.mkdtempSync(path.join(os.tmpdir(), "prg32-backup-v4-verify-"));
-  const payloadPath = path.join(temporaryDirectory, "payload-v3.zip");
-  try {
-    decryptPayload(parsed, archivePath, provider, payloadPath, value, fault);
-    const payload = verifyCanonicalBackup(payloadPath, value.canonical === undefined ? {} : { limits: value.canonical });
-    if (payload.archiveSha256 !== parsed.header.payload_archive_sha256 || payload.manifest.backup_id !== parsed.header.backup_id || payload.manifest.canonical_manifest_sha256 !== parsed.header.payload_manifest_sha256) {
-      throw new BackupError("backup v4 payload metadata does not match the authenticated header", "backup_v4_metadata_mismatch");
-    }
-    return { parsed, payloadPath, payload };
-  } catch (error) { fs.rmSync(temporaryDirectory, { recursive: true, force: true }); throw error; }
-}
-
 export async function createEncryptedCanonicalBackup(options: CreateEncryptedBackupOptions): Promise<EncryptedBackupV4Result> {
   requireEncryptedBackupAuthorization(options.authorization);
   const snapshotMode = options.snapshotMode ?? "exclusive";
@@ -173,14 +125,14 @@ function parseCompletionMarker(archivePath: string): void {
 }
 
 export function verifyEncryptedBackup(archivePathValue: string, options: VerifyEncryptedBackupOptions): VerifiedEncryptedBackupV4 {
-  const archivePath = resolveEncryptedBackupPath(archivePathValue, "archive path"); const value = encryptedBackupLimits(options.limits); parseCompletionMarker(archivePath); const verified = decryptAndVerify(archivePath, options.keyProvider, value, options.fault);
+  const archivePath = resolveEncryptedBackupPath(archivePathValue, "archive path"); const value = encryptedBackupLimits(options.limits); parseCompletionMarker(archivePath); const verified = decryptAndVerify(archivePath, options.keyProvider, value, verifyCanonicalBackup, options.fault);
   return { backupId: verified.parsed.header.backup_id, archivePath, completionMarker: markerPath(archivePath), header: verified.parsed.header, envelopeBytes: verified.parsed.sizeBytes, payloadManifest: verified.payload.manifest, payloadArchiveSha256: verified.payload.archiveSha256 };
 }
 
 export function restoreEncryptedBackup(options: RestoreEncryptedBackupOptions): CanonicalRestoreResult {
   requireEncryptedBackupAuthorization(options.authorization);
   const archivePath = resolveEncryptedBackupPath(options.archivePath, "archive path"); const targetRoot = resolveEncryptedBackupPath(options.targetRoot, "target root"); const value = encryptedBackupLimits(options.limits); parseCompletionMarker(archivePath);
-  const verified = decryptAndVerify(archivePath, options.keyProvider, value, options.fault);
+  const verified = decryptAndVerify(archivePath, options.keyProvider, value, verifyCanonicalBackup, options.fault);
   const temporaryDirectory = path.dirname(verified.payloadPath);
   try {
     return restoreCanonicalBackup({ archivePath: verified.payloadPath, targetRoot, authorization: CANONICAL_BACKUP_AUTHORIZATION, ...(value.canonical === undefined ? {} : { limits: value.canonical }), ...(options.restoreFault === undefined ? {} : { fault: options.restoreFault }) });
