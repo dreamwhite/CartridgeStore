@@ -2,10 +2,8 @@ import crypto from "node:crypto";
 
 import type Database from "better-sqlite3";
 
-import type { ProviderInput } from "../federation/provider.js";
-import { loadSamlMetadata, parseSamlMetadata, ProviderValidationError, validateOidcDiscovery, validateParsedSamlMetadata } from "./provider-validation.js";
 import { SetupError } from "./errors.js";
-import { isSetupRecord, parseSetupSteps, setupBooleanValue, setupStringValue, type SetupRow } from "./codecs.js";
+import { isSetupRecord, parseSetupSteps, setupBooleanValue, type SetupRow } from "./codecs.js";
 import {
   SETUP_STEPS,
   type SetupServiceOptions,
@@ -18,6 +16,11 @@ import {
   readSetupInfrastructure,
 } from "./infrastructure.js";
 import { buildSetupProgress, buildSetupStatus } from "./read-model.js";
+import {
+  importSamlSetupMetadata,
+  SetupProviderStepHandlers,
+  validateOidcSetup,
+} from "./provider-step-handlers.js";
 
 export { SETUP_STATES, SETUP_STEPS } from "./service-contracts.js";
 export type {
@@ -36,9 +39,17 @@ function now(): string { return new Date().toISOString(); }
 
 export class SetupService {
   private readonly sessions = new Map<string, SetupSession>();
+  private readonly providerStepHandlers: SetupProviderStepHandlers;
   private activeSessionId: string | null = null;
 
   constructor(private readonly options: SetupServiceOptions) {
+    this.providerStepHandlers = new SetupProviderStepHandlers({
+      options,
+      apiOrigin: () => this.apiOrigin(),
+      adminUserId: () => this.row().admin_user_id as number,
+      markStep: (session, step, requestId) =>
+        this.markStep(session, step, requestId),
+    });
     this.reconcileExistingInstallation();
   }
 
@@ -218,62 +229,11 @@ export class SetupService {
   }
 
   private saveOidc(session: SetupSession, payload: Record<string, unknown>, requestId: string): void {
-    if (!setupBooleanValue(payload.enabled, "enabled", false)) return this.markStep(session, "oidc", requestId);
-    if (!this.options.providers || !this.options.operations) throw new SetupError("federation_unavailable", 503, "federation administration is unavailable");
-    const providerId = setupStringValue(payload.provider_id, "provider_id", 64, true) as string;
-    const apiOrigin = this.apiOrigin();
-    const clientAuthMethod = setupStringValue(payload.client_auth_method, "client_auth_method", 40) ?? "client_secret_basic";
-    if (clientAuthMethod !== "client_secret_basic" && clientAuthMethod !== "client_secret_post" && clientAuthMethod !== "none") throw new SetupError("setup_invalid_value", 400, "client_auth_method is invalid");
-    const clientSecret = setupStringValue(payload.client_secret, "client_secret", 16384, clientAuthMethod !== "none");
-    const discoveryIssuer = setupStringValue(payload.discovery_issuer, "discovery_issuer", 512);
-    const input: ProviderInput = {
-      providerId,
-      protocol: "oidc",
-      displayName: setupStringValue(payload.display_name, "display_name", 160, true) as string,
-      issuer: setupStringValue(payload.issuer, "issuer", 512, true) as string,
-      clientId: setupStringValue(payload.client_id, "client_id", 240, true) as string,
-      clientAuthMethod,
-      ...(discoveryIssuer === undefined ? {} : { discoveryIssuer }),
-      redirectUri: `${apiOrigin}/api/auth/oidc/${encodeURIComponent(providerId)}/callback`,
-      scopes: Array.isArray(payload.scopes) ? payload.scopes.filter((item): item is string => typeof item === "string") : ["openid", "profile", "email"]
-    };
-    const actor = this.row().admin_user_id as number;
-    const context = { actorUserId: actor, requestId };
-    const created = this.options.providers.create(input, context);
-    if (clientSecret) {
-      this.options.operations.rotateProviderSecret(created.providerId, "oidc-client-secret", clientSecret, context);
-      this.options.providers.update(created.providerId, { clientSecretReference: `federated-provider:${created.providerId}:oidc-client-secret` }, context);
-    }
-    this.options.operations.setEnabled(created.providerId, true, context);
-    this.markStep(session, "oidc", requestId);
+    this.providerStepHandlers.saveOidc(session, payload, requestId);
   }
 
   private saveSaml(session: SetupSession, payload: Record<string, unknown>, requestId: string): void {
-    if (!setupBooleanValue(payload.enabled, "enabled", false)) return this.markStep(session, "saml", requestId);
-    if (!this.options.providers || !this.options.operations) throw new SetupError("federation_unavailable", 503, "federation administration is unavailable");
-    const providerId = setupStringValue(payload.provider_id, "provider_id", 64, true) as string;
-    const apiOrigin = this.apiOrigin();
-    const idpEntityId = setupStringValue(payload.idp_entity_id, "idp_entity_id", 512, true) as string;
-    const input: ProviderInput = {
-      providerId,
-      protocol: "saml",
-      displayName: setupStringValue(payload.display_name, "display_name", 160, true) as string,
-      issuer: idpEntityId,
-      idpEntityId,
-      spEntityId: `${apiOrigin}/api/auth/saml/${encodeURIComponent(providerId)}/metadata`,
-      acsUrl: `${apiOrigin}/api/auth/saml/${encodeURIComponent(providerId)}/acs`,
-      samlEntryPoint: setupStringValue(payload.saml_entry_point, "saml_entry_point", 512, true) as string,
-      samlNameIdFormat: "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent",
-      samlIdpCertificatePem: setupStringValue(payload.saml_idp_certificate_pem, "saml_idp_certificate_pem", 65536, true) as string,
-      samlWantAssertionsSigned: true,
-      samlWantAuthnResponseSigned: true,
-      samlSignAuthnRequests: false
-    };
-    const actor = this.row().admin_user_id as number;
-    const context = { actorUserId: actor, requestId };
-    const created = this.options.providers.create(input, context);
-    this.options.operations.setEnabled(created.providerId, true, context);
-    this.markStep(session, "saml", requestId);
+    this.providerStepHandlers.saveSaml(session, payload, requestId);
   }
 
   private saveMdns(session: SetupSession, payload: Record<string, unknown>, requestId: string): void {
@@ -337,17 +297,21 @@ export class SetupService {
   }
 
   async validateOidc(session: SetupSession, issuer: string): Promise<Record<string, unknown>> {
-    this.requireSession(session);
-    try { return { ok: true, discovery: await validateOidcDiscovery(issuer, this.options.config) }; }
-    catch (error) { if (error instanceof ProviderValidationError) throw new SetupError(error.code, 400, error.message); throw new SetupError("oidc_metadata_invalid", 400, "OIDC discovery metadata is invalid"); }
+    return validateOidcSetup(
+      session,
+      issuer,
+      this.options,
+      (current) => this.requireSession(current),
+    );
   }
 
   async importSamlMetadata(session: SetupSession, input: { readonly url?: string; readonly xml?: string }): Promise<Record<string, unknown>> {
-    this.requireSession(session);
-    try {
-      const metadata = input.xml !== undefined ? await validateParsedSamlMetadata(parseSamlMetadata(input.xml), this.options.config) : input.url !== undefined ? await loadSamlMetadata(input.url, this.options.config) : (() => { throw new ProviderValidationError("saml_metadata_required", "SAML metadata URL or XML is required"); })();
-      return { ok: true, metadata };
-    } catch (error) { if (error instanceof ProviderValidationError) throw new SetupError(error.code, 400, error.message); throw new SetupError("saml_metadata_invalid", 400, "SAML metadata is invalid"); }
+    return importSamlSetupMetadata(
+      session,
+      input,
+      this.options,
+      (current) => this.requireSession(current),
+    );
   }
 
   private audit(_session: SetupSession, action: string, targetId: string, requestId: string, actorUserId: number | null): void {
