@@ -54,6 +54,10 @@ import {
 import { canonicalWorkflowPrincipal } from "./workflow-authorization.js";
 import { prepareCanonicalSubmissionBundle } from "./workflow-input.js";
 import { buildCanonicalPublicationPlan } from "./workflow-publication-plan.js";
+import {
+  commitCanonicalVisibility,
+  type CanonicalWorkflowManifest,
+} from "./workflow-visibility.js";
 
 export type {
   CanonicalDownloadEvent,
@@ -66,20 +70,6 @@ const MAX_OPERATION_BYTES = 2 * 1024 * 1024;
 const MAX_SUBMISSION_PAGE = 100;
 
 type ObjectPlan = CanonicalObjectPlan;
-
-interface WorkflowManifest {
-  readonly journalVersion: 1;
-  readonly operationId: string;
-  readonly releaseId: string;
-  readonly submissionId: number;
-  readonly cartridgeId: string;
-  readonly version: string;
-  readonly reviewUpdates: Record<string, unknown>;
-  readonly metadata: Record<string, unknown>;
-  readonly colophon: Record<string, unknown> | null;
-  readonly reviewer: { readonly id: number; readonly name: string };
-  readonly objects: readonly ObjectPlan[];
-}
 
 interface OperationRow {
   readonly operation_id: string;
@@ -287,7 +277,7 @@ export class CanonicalWorkflowService implements ReviewWorkflowService {
       fail,
     });
     const { colophon, metadata: reviewed, objects } = publicationPlan;
-    const manifest: WorkflowManifest = { journalVersion: WORKFLOW_JOURNAL_VERSION, operationId, releaseId, submissionId, cartridgeId: row.cartridge_id, version: row.version, reviewUpdates: JSON.parse(JSON.stringify(metadataUpdates)) as Record<string, unknown>, metadata: reviewed, colophon, reviewer, objects };
+    const manifest: CanonicalWorkflowManifest = { journalVersion: WORKFLOW_JOURNAL_VERSION, operationId, releaseId, submissionId, cartridgeId: row.cartridge_id, version: row.version, reviewUpdates: JSON.parse(JSON.stringify(metadataUpdates)) as Record<string, unknown>, metadata: reviewed, colophon, reviewer, objects };
     this.hit("before-durable-intent");
     this.database.exec("BEGIN IMMEDIATE");
     try {
@@ -321,11 +311,11 @@ export class CanonicalWorkflowService implements ReviewWorkflowService {
     return this.detail(submissionId);
   }
 
-  private operation(operationId: string): { row: OperationRow; manifest: WorkflowManifest } {
+  private operation(operationId: string): { row: OperationRow; manifest: CanonicalWorkflowManifest } {
     const row = this.database.prepare("SELECT operation_id, submission_id, release_id, state, manifest_json FROM publication_operations WHERE operation_id = ?").get(operationId) as OperationRow | undefined;
     if (!row) fail("publication operation not found", "review_operation_failed", 500);
     if (row.manifest_json.length > MAX_OPERATION_BYTES) fail("publication operation is too large", "review_operation_failed", 500);
-    const manifest = object(parseJson(row.manifest_json, "publication manifest"), "publication manifest") as unknown as WorkflowManifest;
+    const manifest = object(parseJson(row.manifest_json, "publication manifest"), "publication manifest") as unknown as CanonicalWorkflowManifest;
     if (manifest.journalVersion !== 1 || manifest.operationId !== operationId || !Array.isArray(manifest.objects)) fail("publication journal is corrupt", "review_operation_failed", 500);
     return { row, manifest };
   }
@@ -359,35 +349,6 @@ export class CanonicalWorkflowService implements ReviewWorkflowService {
     } catch (error) { if (this.database.inTransaction) this.database.exec("ROLLBACK"); throw error; }
   }
 
-  private commitVisibility(operationId: string, manifest: WorkflowManifest): void {
-    this.hit("before-visibility");
-    this.database.exec("BEGIN IMMEDIATE");
-    try {
-      const existing = this.database.prepare("SELECT release_id, state FROM releases WHERE cartridge_id = ? AND version = ? AND state = 'published'").get(manifest.cartridgeId, manifest.version) as { release_id?: string; state?: string } | undefined;
-      let releaseId = manifest.releaseId;
-      if (existing && existing.release_id !== releaseId) fail("published version already exists", "review_state_conflict");
-      if (!existing) {
-        const order = Number((this.database.prepare("SELECT COALESCE(MAX(published_order), 0) AS value FROM releases").get() as { value: number }).value) + 1;
-        const title = typeof manifest.metadata.title === "string" ? manifest.metadata.title : manifest.cartridgeId;
-        const summary = typeof manifest.metadata.summary === "string" ? manifest.metadata.summary : "";
-        this.database.prepare("INSERT INTO releases(release_id, cartridge_id, version, revision, state, title, summary, authors_json, tags_json, metadata_json, colophon_json, created_at, submitted_at, published_at, published_order, created_by_user_id, reviewer_user_id) VALUES (?, ?, ?, 1, 'published', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)").run(releaseId, manifest.cartridgeId, manifest.version, title, summary, json(manifest.metadata.authors ?? []), json(manifest.metadata.tags ?? []), json(manifest.metadata), manifest.colophon ? json(manifest.colophon) : null, now(), now(), now(), order, null, manifest.reviewer.id);
-        for (const artifact of manifest.objects.filter((item) => item.objectKind === "artifact")) {
-          const compatibility = { legacyPublicVariant: { architecture: artifact.architecture, size: artifact.sizeBytes, sha256: artifact.sha256, has_screenshot: manifest.objects.some((item) => item.objectKind === "media" && item.targetRole === "screenshot" && item.architecture === artifact.architecture), has_signature: false } };
-          this.database.prepare("INSERT INTO artifacts(artifact_id, release_id, architecture, object_id, compatibility_json, state, created_at) VALUES (?, ?, ?, ?, ?, 'published', ?)").run(artifact.artifactId, releaseId, artifact.architecture, artifact.objectId, json(compatibility), now());
-        }
-        for (const media of manifest.objects.filter((item) => item.objectKind === "media")) {
-          this.database.prepare("INSERT INTO media(media_id, release_id, architecture, kind, object_id, created_at) VALUES (?, ?, ?, ?, ?, ?)").run(media.mediaId, releaseId, media.architecture, media.targetRole, media.objectId, now());
-        }
-      } else releaseId = String(existing.release_id);
-      this.database.prepare("UPDATE submission_artifacts SET validation_state = 'promoted' WHERE submission_id = ?").run(manifest.submissionId);
-      this.database.prepare("UPDATE submissions SET status = 'published', reviewed_by_user_id = ?, reviewed_by = ?, reviewed_at = COALESCE(reviewed_at, ?), published_release_id = ? WHERE submission_id = ? AND status IN ('pending_review', 'approved')").run(manifest.reviewer.id, manifest.reviewer.name, now(), releaseId, manifest.submissionId);
-      this.database.prepare("UPDATE publication_operations SET release_id = ?, state = 'database_committed', committed_at = COALESCE(committed_at, ?), updated_at = ? WHERE operation_id = ? AND state IN ('objects_verified', 'objects_staged', 'prepared')").run(releaseId, now(), now(), operationId);
-      this.database.prepare("INSERT INTO publication_events(operation_id, from_state, to_state, event_code, details_json, created_at) VALUES (?, 'objects_verified', 'database_committed', 'canonical_visibility_committed', '{}', ?)").run(operationId, now());
-      this.database.exec("COMMIT");
-    } catch (error) { if (this.database.inTransaction) this.database.exec("ROLLBACK"); throw error; }
-    this.hit("after-visibility");
-  }
-
   execute(operationId: string): void {
     const { row, manifest } = this.operation(operationId);
     if (row.state === "completed") return;
@@ -415,7 +376,17 @@ export class CanonicalWorkflowService implements ReviewWorkflowService {
       this.transition(operationId, "objects_staged", "objects_verified", "objects_verified");
     }
     const current = this.operation(operationId).row;
-    if (current.state === "objects_verified") this.commitVisibility(operationId, manifest);
+    if (current.state === "objects_verified") {
+      commitCanonicalVisibility({
+        database: this.database,
+        manifest,
+        operationId,
+        now,
+        fail,
+        beforeVisibility: () => this.hit("before-visibility"),
+        afterVisibility: () => this.hit("after-visibility"),
+      });
+    }
     const afterVisibility = this.operation(operationId).row;
     if (afterVisibility.state === "database_committed" || afterVisibility.state === "cleanup_pending") {
       this.hit("before-completion");
