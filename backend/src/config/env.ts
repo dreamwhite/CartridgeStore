@@ -14,6 +14,10 @@ import {
 } from "./env-values.js";
 import type { BackendConfig } from "./env-contracts.js";
 import { resolveEmailConfig } from "./env-email.js";
+import {
+  resolvePublicOriginConfig,
+  validatePublicOriginConfig,
+} from "./env-origins.js";
 import { resolveRuntimeMode } from "./env-runtime-mode.js";
 import { resolveWebAuthnConfig } from "./env-webauthn.js";
 
@@ -72,9 +76,14 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
     environment.PRG32_BACKEND_FEDERATION_LIFECYCLE_TEST_ENABLED,
     false
   );
-  const oidcPublicOrigin = optionalNonEmpty(environment.PRG32_BACKEND_OIDC_PUBLIC_ORIGIN);
-  const federationPublicOrigin = optionalNonEmpty(environment.PRG32_BACKEND_FEDERATION_PUBLIC_ORIGIN ?? oidcPublicOrigin);
-  const frontendPublicOrigin = optionalNonEmpty(environment.PRG32_BACKEND_FRONTEND_PUBLIC_ORIGIN);
+  const {
+    oidcPublicOrigin,
+    federationPublicOrigin,
+    frontendPublicOrigin,
+    corsAllowedOrigins,
+  } = resolvePublicOriginConfig(
+    environment,
+  );
   const {
     emailTransport,
     emailFrom,
@@ -88,10 +97,6 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
     authWriteMode,
     frontendPublicOrigin,
   );
-  const corsAllowedOrigins = (environment.PRG32_BACKEND_CORS_ORIGINS ?? "")
-    .split(",")
-    .map((value) => value.trim())
-    .filter(Boolean);
   const {
     webauthnEnabled,
     webauthnRpId,
@@ -99,6 +104,17 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
     webauthnOrigins,
     setupNetworkTestAllowlist,
   } = resolveWebAuthnConfig(environment, authWriteEnabled);
+  validatePublicOriginConfig(
+    environment,
+    {
+      oidcPublicOrigin,
+      federationPublicOrigin,
+      frontendPublicOrigin,
+      corsAllowedOrigins,
+    },
+    authWriteMode,
+    operationalMode,
+  );
   const secretEncryptionEnabled = booleanValue(
     "PRG32_BACKEND_SECRET_ENCRYPTION_ENABLED",
     environment.PRG32_BACKEND_SECRET_ENCRYPTION_ENABLED,
@@ -242,31 +258,6 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
   }
   if (authCookieDomain?.includes("..")) {
     throw new Error("PRG32_BACKEND_SESSION_COOKIE_DOMAIN must not contain empty labels");
-  }
-  if (oidcPublicOrigin) {
-    let parsed: URL;
-    try { parsed = new URL(oidcPublicOrigin); } catch { throw new Error("PRG32_BACKEND_OIDC_PUBLIC_ORIGIN must be a valid origin"); }
-    if (parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== "/" || (parsed.protocol !== "https:" && authWriteMode !== "test")) {
-      throw new Error("PRG32_BACKEND_OIDC_PUBLIC_ORIGIN must be a trusted HTTPS origin");
-    }
-  }
-  if (federationPublicOrigin) {
-    let parsed: URL;
-    try { parsed = new URL(federationPublicOrigin); } catch { throw new Error("PRG32_BACKEND_FEDERATION_PUBLIC_ORIGIN must be a valid origin"); }
-    if (parsed.username || parsed.password || parsed.search || parsed.hash || parsed.pathname !== "/" || (parsed.protocol !== "https:" && authWriteMode !== "test")) {
-      throw new Error("PRG32_BACKEND_FEDERATION_PUBLIC_ORIGIN must be a trusted HTTPS origin");
-    }
-  }
-  for (const origin of [frontendPublicOrigin, ...corsAllowedOrigins]) {
-    if (!origin) continue;
-    let parsed: URL;
-    try { parsed = new URL(origin); } catch { throw new Error("PRG32_BACKEND_FRONTEND_PUBLIC_ORIGIN and PRG32_BACKEND_CORS_ORIGINS must contain valid origins"); }
-    if (parsed.username || parsed.password || parsed.pathname !== "/" || parsed.search || parsed.hash || (parsed.protocol !== "https:" && authWriteMode !== "test")) {
-      throw new Error("PRG32_BACKEND_FRONTEND_PUBLIC_ORIGIN and PRG32_BACKEND_CORS_ORIGINS must contain trusted HTTPS origins");
-    }
-  }
-  if ((environment.NODE_ENV ?? "").trim().toLowerCase() === "production" && corsAllowedOrigins.length > 0 && !operationalMode) {
-    throw new Error("PRG32_BACKEND_CORS_ORIGINS is disabled for production builds until a deployment-specific allowlist is reviewed");
   }
   const mdnsEnabled = booleanValue("PRG32_BACKEND_MDNS_ENABLED", environment.PRG32_BACKEND_MDNS_ENABLED, false);
   const trustProxy = booleanValue("PRG32_BACKEND_TRUST_PROXY", environment.PRG32_BACKEND_TRUST_PROXY, false);
