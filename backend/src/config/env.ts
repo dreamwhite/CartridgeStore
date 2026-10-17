@@ -14,6 +14,7 @@ import {
 import type { BackendConfig } from "./env-contracts.js";
 import { resolveAuthLimitsConfig } from "./env-auth-limits.js";
 import { resolveEmailConfig } from "./env-email.js";
+import { resolveHttpLimitsConfig } from "./env-http-limits.js";
 import { resolveMultiplayerConfig } from "./env-multiplayer.js";
 import {
   resolvePublicOriginConfig,
@@ -342,36 +343,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
     webauthnRpName,
     webauthnOrigins,
     setupNetworkTestAllowlist,
-    httpRequestTimeoutMs: positiveInteger(
-      "PRG32_BACKEND_HTTP_REQUEST_TIMEOUT_MS",
-      environment.PRG32_BACKEND_HTTP_REQUEST_TIMEOUT_MS,
-      120_000
-    ),
-    httpKeepAliveTimeoutMs: positiveInteger(
-      "PRG32_BACKEND_HTTP_KEEPALIVE_TIMEOUT_MS",
-      environment.PRG32_BACKEND_HTTP_KEEPALIVE_TIMEOUT_MS,
-      5_000
-    ),
-    httpCatalogRateLimitMax: positiveInteger(
-      "PRG32_BACKEND_HTTP_CATALOG_RATE_LIMIT_MAX",
-      environment.PRG32_BACKEND_HTTP_CATALOG_RATE_LIMIT_MAX,
-      120
-    ),
-    httpDownloadRateLimitMax: positiveInteger(
-      "PRG32_BACKEND_HTTP_DOWNLOAD_RATE_LIMIT_MAX",
-      environment.PRG32_BACKEND_HTTP_DOWNLOAD_RATE_LIMIT_MAX,
-      60
-    ),
-    httpRateLimitWindowSeconds: positiveInteger(
-      "PRG32_BACKEND_HTTP_RATE_LIMIT_WINDOW_SECONDS",
-      environment.PRG32_BACKEND_HTTP_RATE_LIMIT_WINDOW_SECONDS,
-      60
-    ),
-    httpRateLimitMaxClients: positiveInteger(
-      "PRG32_BACKEND_HTTP_RATE_LIMIT_MAX_CLIENTS",
-      environment.PRG32_BACKEND_HTTP_RATE_LIMIT_MAX_CLIENTS,
-      4096
-    ),
+    ...resolveHttpLimitsConfig(environment),
     emailTransport,
     emailFrom,
     emailPublicOrigin,
