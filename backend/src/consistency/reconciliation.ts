@@ -29,8 +29,8 @@ import {
   scanPublishedCartridges,
   scanTemporaryPublicationWorkspaces,
 } from "./reconciliation-files.js";
+import { scanPublicationOperations } from "./reconciliation-operations.js";
 
-const JOURNAL_ROOT = "publication-operations";
 const PENDING_ROOT = "pending";
 const CARTRIDGE_ROOT = "cartridges";
 
@@ -361,43 +361,11 @@ export function reconcilePublication(
       });
     }
   }
-  const operations: PublicationOperation[] = [];
-  try {
-    for (const operationId of listDirectories(root, JOURNAL_ROOT)) {
-      try {
-        operations.push(options.readOperation(operationId));
-      } catch (error) {
-        add({
-          code: "JOURNAL_CORRUPT",
-          classification: "CORRUPT",
-          message: error instanceof Error
-            ? error.message
-            : "publication journal is corrupt",
-          operationId,
-        });
-      }
-    }
-  } catch (error) {
-    add({
-      code: "JOURNAL_SCAN_FAILED",
-      classification: "CORRUPT",
-      message: error instanceof Error
-        ? error.message
-        : "publication journal cannot be scanned",
-    });
-  }
-  const intentionallyDeletedTargets = new Set(
-    operations
-      .filter(
-        (operation) =>
-          operation.operationKind === "catalog" &&
-          operation.catalogAction === "delete" &&
-          operation.state === "COMPLETED",
-      )
-      .flatMap((operation) =>
-        operation.variants.map((variant) => variant.targetRelative),
-      ),
-  );
+  const { operations, intentionallyDeletedTargets } = scanPublicationOperations({
+    root,
+    readOperation: options.readOperation,
+    add,
+  });
   for (let index = findings.length - 1; index >= 0; index -= 1) {
     const finding = findings[index];
     if (
