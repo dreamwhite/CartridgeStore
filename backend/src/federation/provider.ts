@@ -2,84 +2,26 @@ import crypto from "node:crypto";
 import type Database from "better-sqlite3";
 
 import type { AdminAuditLog } from "../admin/audit.js";
+import {
+  type FederationProtocol,
+  type FederationProviderConfig,
+  type OidcClientAuthMethod,
+  type ProviderInput,
+  type ProviderMutationContext,
+} from "./provider-contracts.js";
 
-export type FederationProtocol = "oidc" | "saml";
-export type OidcClientAuthMethod = "client_secret_basic" | "client_secret_post" | "none";
-export type FederationSecretPurpose =
-  | "oidc-client-secret"
-  | "saml-sp-signing-private-key"
-  | "saml-sp-decryption-private-key";
+export type {
+  FederationProtocol,
+  FederationProviderConfig,
+  FederationSecretPurpose,
+  OidcClientAuthMethod,
+  ProviderInput,
+  ProviderMutationContext,
+} from "./provider-contracts.js";
 
 const PROVIDER_ID_RE = /^[a-z][a-z0-9._-]{0,63}$/;
 const REFERENCE_RE = /^federated-provider:[a-z][a-z0-9._-]{0,63}:(oidc-client-secret|saml-sp-signing-private-key|saml-sp-decryption-private-key)$/;
 const MAX_SAML_TRUSTED_CERTIFICATES = 2;
-
-export interface FederationProviderConfig {
-  readonly providerId: string;
-  readonly protocol: FederationProtocol;
-  readonly displayName: string;
-  readonly issuer: string;
-  readonly enabled: boolean;
-  readonly clientId: string | null;
-  readonly clientAuthMethod: OidcClientAuthMethod;
-  readonly discoveryIssuer: string | null;
-  readonly redirectUri: string | null;
-  readonly scopes: readonly string[];
-  readonly clientSecretReference: string | null;
-  readonly idpEntityId: string | null;
-  readonly spEntityId: string | null;
-  readonly acsUrl: string | null;
-  readonly metadataReference: string | null;
-  readonly trustedCertificateReference: string | null;
-  readonly signingKeyReference: string | null;
-  readonly samlEntryPoint: string | null;
-  readonly samlNameIdFormat: string | null;
-  readonly samlIdpCertificatePem: string | null;
-  readonly samlTrustedCertificatesPem: readonly string[];
-  readonly samlSpCertificatePem: string | null;
-  readonly samlWantAssertionsSigned: boolean;
-  readonly samlWantAuthnResponseSigned: boolean;
-  readonly samlSignAuthnRequests: boolean;
-  readonly samlAcceptedClockSkewMs: number;
-  readonly samlMetadataLifecyclePolicy: "manual";
-  readonly createdAt: string;
-  readonly updatedAt: string;
-  readonly generation: number;
-}
-
-export interface ProviderInput {
-  readonly providerId: string;
-  readonly protocol: FederationProtocol;
-  readonly displayName: string;
-  readonly issuer: string;
-  readonly clientId?: string;
-  readonly clientAuthMethod?: OidcClientAuthMethod;
-  readonly discoveryIssuer?: string;
-  readonly redirectUri?: string;
-  readonly scopes?: readonly string[];
-  readonly clientSecretReference?: string;
-  readonly idpEntityId?: string;
-  readonly spEntityId?: string;
-  readonly acsUrl?: string;
-  readonly metadataReference?: string;
-  readonly trustedCertificateReference?: string;
-  readonly signingKeyReference?: string;
-  readonly samlEntryPoint?: string;
-  readonly samlNameIdFormat?: string;
-  readonly samlIdpCertificatePem?: string;
-  readonly samlTrustedCertificatesPem?: readonly string[];
-  readonly samlSpCertificatePem?: string;
-  readonly samlWantAssertionsSigned?: boolean;
-  readonly samlWantAuthnResponseSigned?: boolean;
-  readonly samlSignAuthnRequests?: boolean;
-  readonly samlAcceptedClockSkewMs?: number;
-  readonly samlMetadataLifecyclePolicy?: "manual";
-}
-
-export interface ProviderMutationContext {
-  readonly actorUserId: number;
-  readonly requestId: string;
-}
 
 export class FederationProviderError extends Error {
   constructor(readonly code: string, readonly statusCode: number, message: string) {
