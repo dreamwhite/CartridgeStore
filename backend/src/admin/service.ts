@@ -1,8 +1,15 @@
 import type Database from "better-sqlite3";
 
 import { markRevokedBefore } from "../auth/revocation.js";
-import { hasAccountStateColumn, hasAccountStatusColumn, invalidateAccountAccess } from "../auth/account-state.js";
-import { generateWerkzeugScryptHash, validatePassword } from "../auth/service.js";
+import {
+  hasAccountStateColumn,
+  hasAccountStatusColumn,
+  invalidateAccountAccess
+} from "../auth/account-state.js";
+import {
+  generateWerkzeugScryptHash,
+  validatePassword
+} from "../auth/service.js";
 import type { BackendConfig } from "../config/env.js";
 import { AdminAuditLog } from "./audit.js";
 import {
@@ -11,10 +18,10 @@ import {
   normalizeAdminGroupName,
   normalizeAdminRole,
   normalizeAdminUsername,
-  positiveAdminId,
-  sqliteErrorCode,
+  positiveAdminId
 } from "./codecs.js";
 import { AdminError } from "./errors.js";
+import { runAdminMutation } from "./mutation-runner.js";
 import {
   readAdminUser,
 } from "./user-view.js";
@@ -59,44 +66,21 @@ export class AdminIdentityService {
     return typeof this.source === "function" ? this.source() : this.source;
   }
 
-  private requireWriter(): Database.Database {
-    if (!this.writable) throw new AdminError("admin_write_unavailable", 503, "administrative writes are unavailable");
-    return this.writable;
-  }
-
   private ensureEditors(database: Database.Database): void {
     const row = database.prepare("SELECT id FROM groups WHERE name = 'editors'").get() as { id?: number } | undefined;
     if (!row?.id) throw new AdminError("admin_identity_inconsistent", 503, "protected editors group is unavailable");
   }
 
   private mutate<T>(context: AdminMutationContext, action: string, targetType: string, targetId: string, callback: (database: Database.Database) => T): T {
-    const database = this.requireWriter();
-    this.audit.ensureReady();
-    this.audit.append({ actor_user_id: context.actorUserId, target_type: targetType, target_id: targetId, action, outcome: "attempted", request_id: context.requestId });
-    try {
-      database.exec("BEGIN IMMEDIATE");
-      const result = callback(database);
-      database.exec("COMMIT");
-      try {
-        this.audit.append({ actor_user_id: context.actorUserId, target_type: targetType, target_id: targetId, action, outcome: "committed", request_id: context.requestId });
-      } catch {
-        // SQLite is already committed. The report documents this unavoidable
-        // two-persistence limitation; preflight remains fail-closed.
-      }
-      return result;
-    } catch (error) {
-      if (database.inTransaction) database.exec("ROLLBACK");
-      try {
-        this.audit.append({ actor_user_id: context.actorUserId, target_type: targetType, target_id: targetId, action, outcome: "failed", request_id: context.requestId });
-      } catch {
-        // Preserve the original stable mutation error.
-      }
-      if (error instanceof AdminError) throw error;
-      const code = sqliteErrorCode(error);
-      if (code === "SQLITE_CONSTRAINT_UNIQUE") throw new AdminError("identity_conflict", 409, "identity value already exists");
-      if (code === "SQLITE_CONSTRAINT_FOREIGNKEY") throw new AdminError("user_delete_restricted", 409, "user has protected historical references");
-      throw new AdminError("admin_operation_failed", 500, "administrative operation failed");
-    }
+    return runAdminMutation({
+      writableDatabase: this.writable,
+      audit: this.audit,
+      context,
+      action,
+      targetType,
+      targetId,
+      callback
+    });
   }
 
   listUsers(options: AdminUserListOptions): { readonly users: readonly UserView[]; readonly page: number; readonly limit: number; readonly total: number } {
