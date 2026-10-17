@@ -2,8 +2,10 @@ import crypto from "node:crypto";
 
 import type Database from "better-sqlite3";
 
-import type { FederationProviderService, ProviderInput } from "../federation/provider.js";
+import type { ProviderInput } from "../federation/provider.js";
 import { loadSamlMetadata, parseSamlMetadata, ProviderValidationError, validateOidcDiscovery, validateParsedSamlMetadata } from "./provider-validation.js";
+import { SetupError } from "./errors.js";
+import { isSetupRecord, parseSetupSteps, safeProviderSummary, setupBooleanValue, setupStringValue, type SetupRow } from "./codecs.js";
 import {
   SETUP_STEPS,
   type SetupServiceOptions,
@@ -19,72 +21,13 @@ export type {
   SetupState,
   SetupStep,
 } from "./service-contracts.js";
+export { SetupError } from "./errors.js";
 
 const SETUP_SESSION_SECONDS = 15 * 60;
 const SETUP_SESSION_COOKIE = "prg32_setup_session";
 const MAX_SETUP_PAYLOAD_BYTES = 64 * 1024;
 
-export class SetupError extends Error {
-  constructor(readonly code: string, readonly statusCode: number, message: string, options?: ErrorOptions) {
-    super(message, options);
-    this.name = "SetupError";
-  }
-}
-
-interface SetupRow {
-  state: SetupState;
-  completed_steps_json: string;
-  admin_user_id: number | null;
-  recovery_reason: string | null;
-  started_at: string | null;
-  completed_at: string | null;
-}
-
 function now(): string { return new Date().toISOString(); }
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return value !== null && typeof value === "object" && !Array.isArray(value);
-}
-
-function stringValue(value: unknown, field: string, max = 512, required = false): string | undefined {
-  if (value === undefined || value === null || value === "") {
-    if (required) throw new SetupError("setup_invalid_value", 400, `${field} is required`);
-    return undefined;
-  }
-  if (typeof value !== "string" || value.trim().length === 0 || value.length > max) throw new SetupError("setup_invalid_value", 400, `${field} is invalid`);
-  return value.trim();
-}
-
-function boolValue(value: unknown, field: string, fallback = false): boolean {
-  if (value === undefined) return fallback;
-  if (typeof value !== "boolean") throw new SetupError("setup_invalid_value", 400, `${field} is invalid`);
-  return value;
-}
-
-function parseSteps(value: string): SetupStep[] {
-  try {
-    const parsed = JSON.parse(value) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((item): item is SetupStep => typeof item === "string" && (SETUP_STEPS as readonly string[]).includes(item));
-  } catch { return []; }
-}
-
-function safeProvider(provider: ReturnType<FederationProviderService["get"]>): Record<string, unknown> {
-  return {
-    provider_id: provider.providerId,
-    protocol: provider.protocol,
-    display_name: provider.displayName,
-    issuer: provider.issuer,
-    enabled: provider.enabled,
-    client_id: provider.clientId,
-    redirect_uri: provider.redirectUri,
-    acs_url: provider.acsUrl,
-    client_auth_method: provider.clientAuthMethod,
-    client_secret_configured: provider.clientSecretReference !== null,
-    saml_certificate_count: provider.samlTrustedCertificatesPem.length,
-    updated_at: provider.updatedAt
-  };
-}
 
 export class SetupService {
   private readonly sessions = new Map<string, SetupSession>();
@@ -206,13 +149,13 @@ export class SetupService {
     return {
       ok: true,
       state: row.state,
-      completed_steps: parseSteps(row.completed_steps_json),
+      completed_steps: parseSetupSteps(row.completed_steps_json),
       admin_user_id: row.admin_user_id,
       started_at: row.started_at,
       completed_at: row.completed_at,
       csrf_token: session.csrfToken,
       settings: this.options.settings.read(),
-      providers: this.options.providers?.list().map((provider) => safeProvider(provider)) ?? []
+      providers: this.options.providers?.list().map((provider) => safeProviderSummary(provider)) ?? []
     };
   }
 
@@ -274,10 +217,10 @@ export class SetupService {
   saveStep(session: SetupSession, stepValue: unknown, payload: unknown, requestId: string): Record<string, unknown> {
     this.requireSession(session);
     if (typeof stepValue !== "string" || !(SETUP_STEPS as readonly string[]).includes(stepValue)) throw new SetupError("setup_step_invalid", 400, "installation step is invalid");
-    if (!isRecord(payload) || Buffer.byteLength(JSON.stringify(payload), "utf8") > MAX_SETUP_PAYLOAD_BYTES) throw new SetupError("setup_payload_invalid", 400, "installation step payload is invalid");
+    if (!isSetupRecord(payload) || Buffer.byteLength(JSON.stringify(payload), "utf8") > MAX_SETUP_PAYLOAD_BYTES) throw new SetupError("setup_payload_invalid", 400, "installation step payload is invalid");
     const step = stepValue as SetupStep;
     const row = this.row();
-    if (parseSteps(row.completed_steps_json).includes(step)) return this.progress(session);
+    if (parseSetupSteps(row.completed_steps_json).includes(step)) return this.progress(session);
     if (step === "admin") this.saveAdmin(session, payload, requestId);
     else if (step === "store") this.updateSettings(session, payload, ["application.store_name", "application.store_description", "application.contact_email"], requestId);
     else if (step === "registration") this.updateSettings(session, payload, ["registration.enabled", "registration.require_email_verification"], requestId);
@@ -295,7 +238,7 @@ export class SetupService {
     db.exec("BEGIN IMMEDIATE");
     try {
       const row = this.row();
-      if (row.admin_user_id !== null || parseSteps(row.completed_steps_json).includes("admin")) throw new SetupError("setup_admin_already_created", 409, "the initial administrator already exists");
+      if (row.admin_user_id !== null || parseSetupSteps(row.completed_steps_json).includes("admin")) throw new SetupError("setup_admin_already_created", 409, "the initial administrator already exists");
       const principal = this.options.auth.bootstrapWithinTransaction(payload, db);
       const steps = JSON.stringify(["admin"]);
       db.prepare("UPDATE setup_state SET state = 'INSTALLATION_IN_PROGRESS', completed_steps_json = ?, admin_user_id = ?, started_at = COALESCE(started_at, ?), updated_at = ? WHERE singleton_id = 1").run(steps, principal.id, now(), now());
@@ -328,20 +271,20 @@ export class SetupService {
   }
 
   private saveOidc(session: SetupSession, payload: Record<string, unknown>, requestId: string): void {
-    if (!boolValue(payload.enabled, "enabled", false)) return this.markStep(session, "oidc", requestId);
+    if (!setupBooleanValue(payload.enabled, "enabled", false)) return this.markStep(session, "oidc", requestId);
     if (!this.options.providers || !this.options.operations) throw new SetupError("federation_unavailable", 503, "federation administration is unavailable");
-    const providerId = stringValue(payload.provider_id, "provider_id", 64, true) as string;
+    const providerId = setupStringValue(payload.provider_id, "provider_id", 64, true) as string;
     const apiOrigin = this.apiOrigin();
-    const clientAuthMethod = stringValue(payload.client_auth_method, "client_auth_method", 40) ?? "client_secret_basic";
+    const clientAuthMethod = setupStringValue(payload.client_auth_method, "client_auth_method", 40) ?? "client_secret_basic";
     if (clientAuthMethod !== "client_secret_basic" && clientAuthMethod !== "client_secret_post" && clientAuthMethod !== "none") throw new SetupError("setup_invalid_value", 400, "client_auth_method is invalid");
-    const clientSecret = stringValue(payload.client_secret, "client_secret", 16384, clientAuthMethod !== "none");
-    const discoveryIssuer = stringValue(payload.discovery_issuer, "discovery_issuer", 512);
+    const clientSecret = setupStringValue(payload.client_secret, "client_secret", 16384, clientAuthMethod !== "none");
+    const discoveryIssuer = setupStringValue(payload.discovery_issuer, "discovery_issuer", 512);
     const input: ProviderInput = {
       providerId,
       protocol: "oidc",
-      displayName: stringValue(payload.display_name, "display_name", 160, true) as string,
-      issuer: stringValue(payload.issuer, "issuer", 512, true) as string,
-      clientId: stringValue(payload.client_id, "client_id", 240, true) as string,
+      displayName: setupStringValue(payload.display_name, "display_name", 160, true) as string,
+      issuer: setupStringValue(payload.issuer, "issuer", 512, true) as string,
+      clientId: setupStringValue(payload.client_id, "client_id", 240, true) as string,
       clientAuthMethod,
       ...(discoveryIssuer === undefined ? {} : { discoveryIssuer }),
       redirectUri: `${apiOrigin}/api/auth/oidc/${encodeURIComponent(providerId)}/callback`,
@@ -359,22 +302,22 @@ export class SetupService {
   }
 
   private saveSaml(session: SetupSession, payload: Record<string, unknown>, requestId: string): void {
-    if (!boolValue(payload.enabled, "enabled", false)) return this.markStep(session, "saml", requestId);
+    if (!setupBooleanValue(payload.enabled, "enabled", false)) return this.markStep(session, "saml", requestId);
     if (!this.options.providers || !this.options.operations) throw new SetupError("federation_unavailable", 503, "federation administration is unavailable");
-    const providerId = stringValue(payload.provider_id, "provider_id", 64, true) as string;
+    const providerId = setupStringValue(payload.provider_id, "provider_id", 64, true) as string;
     const apiOrigin = this.apiOrigin();
-    const idpEntityId = stringValue(payload.idp_entity_id, "idp_entity_id", 512, true) as string;
+    const idpEntityId = setupStringValue(payload.idp_entity_id, "idp_entity_id", 512, true) as string;
     const input: ProviderInput = {
       providerId,
       protocol: "saml",
-      displayName: stringValue(payload.display_name, "display_name", 160, true) as string,
+      displayName: setupStringValue(payload.display_name, "display_name", 160, true) as string,
       issuer: idpEntityId,
       idpEntityId,
       spEntityId: `${apiOrigin}/api/auth/saml/${encodeURIComponent(providerId)}/metadata`,
       acsUrl: `${apiOrigin}/api/auth/saml/${encodeURIComponent(providerId)}/acs`,
-      samlEntryPoint: stringValue(payload.saml_entry_point, "saml_entry_point", 512, true) as string,
+      samlEntryPoint: setupStringValue(payload.saml_entry_point, "saml_entry_point", 512, true) as string,
       samlNameIdFormat: "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent",
-      samlIdpCertificatePem: stringValue(payload.saml_idp_certificate_pem, "saml_idp_certificate_pem", 65536, true) as string,
+      samlIdpCertificatePem: setupStringValue(payload.saml_idp_certificate_pem, "saml_idp_certificate_pem", 65536, true) as string,
       samlWantAssertionsSigned: true,
       samlWantAuthnResponseSigned: true,
       samlSignAuthnRequests: false
@@ -387,7 +330,7 @@ export class SetupService {
   }
 
   private saveMdns(session: SetupSession, payload: Record<string, unknown>, requestId: string): void {
-    const enabled = boolValue(payload.enabled, "enabled", false);
+    const enabled = setupBooleanValue(payload.enabled, "enabled", false);
     if (enabled && !this.options.config.mdnsEnabled) throw new SetupError("mdns_infrastructure_denied", 409, "mDNS is disabled by deployment policy");
     this.updateSettings(session, { "discovery.mdns_enabled": enabled }, ["discovery.mdns_enabled"], requestId, "mdns");
   }
@@ -401,7 +344,7 @@ export class SetupService {
   private markStep(session: SetupSession, step: SetupStep, requestId: string): void {
     this.requireSession(session);
     const row = this.row();
-    const steps = parseSteps(row.completed_steps_json);
+    const steps = parseSetupSteps(row.completed_steps_json);
     if (!steps.includes(step)) steps.push(step);
     this.database.prepare("UPDATE setup_state SET state = CASE WHEN state = 'INSTALLATION_REQUIRED' THEN 'INSTALLATION_IN_PROGRESS' ELSE state END, completed_steps_json = ?, updated_at = ? WHERE singleton_id = 1").run(JSON.stringify(steps.sort()), now());
     if (row.admin_user_id !== null) this.audit(session, `setup.step.${step}`, step, requestId, row.admin_user_id);
@@ -414,7 +357,7 @@ export class SetupService {
     let adminId: number | null = null;
     try {
       const row = this.row();
-      const steps = parseSteps(row.completed_steps_json);
+      const steps = parseSetupSteps(row.completed_steps_json);
       const missing = SETUP_STEPS.filter((step) => !steps.includes(step));
       if (missing.length > 0 || row.admin_user_id === null) throw new SetupError("setup_steps_incomplete", 409, `installation steps are incomplete: ${missing.join(", ") || "admin"}`);
       if (row.state === "INSTALLATION_COMPLETE") throw new SetupError("setup_already_complete", 409, "installation is already complete");
