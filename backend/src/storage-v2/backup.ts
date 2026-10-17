@@ -14,11 +14,45 @@ import { expectedStorageKey } from "./objects.js";
 import { TARGET_TABLES, TARGET_VERSION_TUPLE, COMPATIBLE_TABLES } from "./schema.js";
 import { inspectSchema } from "../db/schema-inspection.js";
 import type { ObjectKind, StorageDatabase } from "./types.js";
+import {
+  CANONICAL_BACKUP_ABI,
+  CANONICAL_BACKUP_AUTHORIZATION,
+  CANONICAL_BACKUP_OPERATIONAL_AUTHORIZATION,
+  CANONICAL_BACKUP_VERSION,
+  DEFAULT_CANONICAL_BACKUP_LIMITS,
+  type CanonicalBackupFaultPoint,
+  type CanonicalBackupInventoryEntry,
+  type CanonicalBackupLimits,
+  type CanonicalBackupManifest,
+  type CanonicalBackupOptions,
+  type CanonicalBackupResult,
+  type CanonicalBackupSnapshotMode,
+  type CanonicalRestoreFaultPoint,
+  type CanonicalRestoreOptions,
+  type CanonicalRestoreReport,
+  type CanonicalRestoreResult,
+} from "./backup-contracts.js";
 
-export const CANONICAL_BACKUP_ABI = "prg32-cartridge-store-backup-3.0";
-export const CANONICAL_BACKUP_AUTHORIZATION = "PRG32_STORAGE_V2_DISPOSABLE_BACKUP";
-export const CANONICAL_BACKUP_OPERATIONAL_AUTHORIZATION = "PRG32_STORAGE_V2_OPERATIONAL_BACKUP";
-export const CANONICAL_BACKUP_VERSION = 3;
+export {
+  CANONICAL_BACKUP_ABI,
+  CANONICAL_BACKUP_AUTHORIZATION,
+  CANONICAL_BACKUP_OPERATIONAL_AUTHORIZATION,
+  CANONICAL_BACKUP_VERSION,
+  DEFAULT_CANONICAL_BACKUP_LIMITS,
+} from "./backup-contracts.js";
+export type {
+  CanonicalBackupFaultPoint,
+  CanonicalBackupInventoryEntry,
+  CanonicalBackupLimits,
+  CanonicalBackupManifest,
+  CanonicalBackupOptions,
+  CanonicalBackupResult,
+  CanonicalBackupSnapshotMode,
+  CanonicalRestoreFaultPoint,
+  CanonicalRestoreOptions,
+  CanonicalRestoreReport,
+  CanonicalRestoreResult,
+} from "./backup-contracts.js";
 
 const CHUNK_BYTES = 1024 * 1024;
 const SQLITE_SNAPSHOT_TIMEOUT_MS = 5 * 60 * 1000;
@@ -27,131 +61,6 @@ const INCOMPLETE_PUBLICATION_STATES = new Set([
   "prepared", "objects_staged", "objects_verified", "database_committed", "cleanup_pending",
   "recovery_required", "compensating"
 ]);
-
-export interface CanonicalBackupLimits {
-  readonly maxArchiveBytes: number;
-  readonly maxExpandedBytes: number;
-  readonly maxEntryBytes: number;
-  readonly maxManifestBytes: number;
-  readonly maxEntries: number;
-  readonly maxPathBytes: number;
-  readonly maxPathDepth: number;
-  readonly maxCompressionRatio: number;
-}
-
-export const DEFAULT_CANONICAL_BACKUP_LIMITS: CanonicalBackupLimits = {
-  maxArchiveBytes: 4 * 1024 * 1024 * 1024,
-  maxExpandedBytes: 8 * 1024 * 1024 * 1024,
-  maxEntryBytes: 128 * 1024 * 1024,
-  maxManifestBytes: 1024 * 1024,
-  maxEntries: 50_000,
-  maxPathBytes: 1024,
-  maxPathDepth: 32,
-  maxCompressionRatio: 200
-};
-
-export type CanonicalBackupFaultPoint =
-  | "before-sqlite-snapshot"
-  | "after-sqlite-snapshot"
-  | "during-object-inventory"
-  | "during-object-streaming"
-  | "before-archive-finalization"
-  | "after-archive-finalization";
-
-export type CanonicalBackupSnapshotMode = "exclusive" | "online";
-
-export type CanonicalRestoreFaultPoint =
-  | "before-target-initialization"
-  | "after-sqlite-restore"
-  | "during-object-extraction"
-  | "during-staging-restoration"
-  | "during-journal-restoration"
-  | "before-final-integrity-verification"
-  | "after-verification-before-completion";
-
-export interface CanonicalBackupOptions {
-  readonly sourceRoot: string;
-  readonly outputPath: string;
-  readonly authorization: string;
-  readonly writerQuiesced: boolean;
-  /** Exclusive is the historical, externally-quiesced path; online never owns the application writer lease. */
-  readonly snapshotMode?: CanonicalBackupSnapshotMode;
-  readonly limits?: Partial<CanonicalBackupLimits>;
-  readonly fault?: (point: CanonicalBackupFaultPoint) => void;
-}
-
-export interface CanonicalRestoreOptions {
-  readonly archivePath: string;
-  readonly targetRoot: string;
-  readonly authorization: string;
-  readonly limits?: Partial<CanonicalBackupLimits>;
-  readonly fault?: (point: CanonicalRestoreFaultPoint) => void;
-}
-
-export interface CanonicalBackupResult {
-  readonly backupId: string;
-  readonly archivePath: string;
-  readonly completionMarker: string;
-  readonly archiveSha256: string;
-  readonly archiveBytes: number;
-  readonly manifest: CanonicalBackupManifest;
-}
-
-export interface CanonicalRestoreResult {
-  readonly backupId: string;
-  readonly targetRoot: string;
-  readonly state: "completed" | "recovery_required";
-  readonly operationId: string;
-  readonly report: CanonicalRestoreReport;
-}
-
-export interface CanonicalBackupInventoryEntry {
-  readonly archivePath: string;
-  readonly sourceKey: string;
-  readonly kind: "sqlite_snapshot" | "object" | "submission_staging" | "journal" | "quarantine" | "compatibility";
-  readonly objectKind?: ObjectKind;
-  readonly objectId?: string;
-  readonly storageKey?: string;
-  readonly sizeBytes: number;
-  readonly sha256: string;
-  readonly classification: "required" | "optional" | "reconstructible" | "recovery_required";
-}
-
-export interface CanonicalBackupManifest {
-  readonly abi: typeof CANONICAL_BACKUP_ABI;
-  readonly format_version: typeof CANONICAL_BACKUP_VERSION;
-  readonly application: "prg32-cartridge-store";
-  readonly backup_id: string;
-  readonly created_at: string;
-  readonly snapshot: {
-    readonly identity: string;
-    readonly database: "database.sqlite";
-    readonly size_bytes: number;
-    readonly sha256: string;
-  };
-  readonly versions: typeof TARGET_VERSION_TUPLE;
-  readonly schema: { readonly fingerprint: string; readonly tables: readonly string[] };
-  readonly inventory: readonly CanonicalBackupInventoryEntry[];
-  readonly object_count: number;
-  readonly object_kinds: Readonly<Record<ObjectKind, number>>;
-  readonly staging_count: number;
-  readonly recovery_required: boolean;
-  readonly required_recovery_material: readonly string[];
-  readonly aggregate_bytes: { readonly expanded: number; readonly archive: number };
-  readonly archive_inventory_sha256: string;
-  readonly canonical_manifest_sha256: string;
-  readonly verification_state: "complete" | "recovery_required";
-}
-
-export interface CanonicalRestoreReport {
-  readonly databaseSha256: string;
-  readonly inventoryEntries: number;
-  readonly objectsVerified: number;
-  readonly stagingEntries: number;
-  readonly recoveryMaterialEntries: number;
-  readonly integrity: ReturnType<typeof auditStorage>;
-  readonly databaseFingerprint: string;
-}
 
 interface ArchiveEntrySource {
   readonly archivePath: string;
