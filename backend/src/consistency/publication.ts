@@ -6,8 +6,40 @@ import type Database from "better-sqlite3";
 
 import { INDEX_ABI, safeGameId, safeVersion } from "../catalog/catalog.js";
 import { encodePythonJson } from "../compatibility/serialization.js";
-import { buildSubmissionCartridge, normalizeArchitecture, validateCartridgeBinary, validateMetadata, type parseCartridge } from "../submission/prg32.js";
-import { PublicationConsistencyError } from "./errors.js";
+import {
+  normalizeArchitecture,
+  validateCartridgeBinary,
+  type parseCartridge,
+} from "../submission/prg32.js";
+import {
+  applyReviewMetadata,
+  catalogColophon,
+  clone,
+  fail,
+  imageMime,
+  isoNow,
+  object,
+  parseArchitectures,
+  parseObjectJson,
+  parseOperation,
+  reviewedImage,
+  serializeJson,
+  sha256,
+  statusForFindings,
+} from "./publication-codecs.js";
+import {
+  type CatalogMutationAction,
+  type CatalogMutationOptions,
+  type FaultPoint,
+  type PublicationConsistencyOptions,
+  type PublicationOperation,
+  type PublicationReviewOptions,
+  type PublicationState,
+  type PublicationVariantPlan,
+  type ReconciliationClassification,
+  type ReconciliationFinding,
+  type ReconciliationReport,
+} from "./publication-contracts.js";
 import {
   assertInside,
   assertNoSymlinkComponents,
@@ -22,121 +54,25 @@ import {
   writeAtomic
 } from "./publication-files.js";
 
-export const PUBLICATION_STATES = [
-  "PREPARED",
-  "STAGED",
-  "VERIFIED",
-  "FILES_REPLACED",
-  "INDEX_REPLACED",
-  "DATABASE_UPDATED",
-  "COMPLETED",
-  "COMPENSATING",
-  "COMPENSATED",
-  "RECOVERY_REQUIRED",
-  "FAILED"
-] as const;
-
-export type PublicationState = typeof PUBLICATION_STATES[number];
-export type FaultPoint =
-  | "after-operation-record"
-  | "after-pending-validation"
-  | "after-staging"
-  | "after-staged-verification"
-  | "before-binary-replacement"
-  | "after-binary-replacement"
-  | "before-index-temp-write"
-  | "after-index-temp-write"
-  | "before-index-replacement"
-  | "after-index-replacement"
-  | "before-database-update"
-  | "after-database-update"
-  | "before-completion"
-  | "after-completion"
-  | "before-compensation"
-  | "after-compensation";
-
-export interface PublicationVariantPlan {
-  readonly architecture: string;
-  readonly sourceRelative: string;
-  readonly targetRelative: string;
-  readonly stagedRelative: string;
-  readonly backupRelative: string;
-  readonly expectedSha256: string;
-  readonly previousSha256: string | null;
-  readonly size: number;
-  readonly metadata: Record<string, unknown>;
-  readonly colophon: Record<string, unknown> | null;
-  readonly iconMime: string | null;
-  readonly screenshotMime: string | null;
-  readonly hasScreenshot: boolean;
-  readonly hasSignature: boolean;
-}
-
-export type PublicationOperationKind = "submission" | "catalog";
-export type CatalogMutationAction = "update" | "delete";
-
-export interface PublicationOperation {
-  readonly journalVersion: 1;
-  readonly operationKind?: PublicationOperationKind;
-  readonly catalogAction?: CatalogMutationAction;
-  readonly operationId: string;
-  readonly submissionId: number;
-  readonly gameId: string;
-  readonly version: string;
-  readonly variants: readonly PublicationVariantPlan[];
-  readonly previousIndexSha256: string | null;
-  readonly expectedIndexSha256: string;
-  readonly indexStagedRelative: string;
-  readonly indexBackupRelative: string;
-  readonly state: PublicationState;
-  readonly createdAt: string;
-  readonly updatedAt: string;
-  readonly reviewedMetadata?: Record<string, unknown>;
-  readonly reviewer?: { readonly id: number; readonly name: string };
-  readonly error?: { readonly code: string; readonly message: string };
-}
-
-export interface PublicationReviewOptions {
-  readonly metadata?: Record<string, unknown>;
-  readonly reviewer?: { readonly id: number; readonly name: string };
-}
-
-export interface CatalogMutationOptions {
-  readonly gameId: string;
-  readonly version: string;
-  readonly metadata?: Record<string, unknown>;
-  readonly architecture?: string;
-}
-
-export const REVIEW_EDITABLE_METADATA_FIELDS = [
-  "title",
-  "summary",
-  "description",
-  "tags",
-  "license",
-  "homepage",
-  "repository"
-] as const;
-
-export type ReconciliationClassification = "CONSISTENT" | "RECOVERABLE" | "AMBIGUOUS" | "CORRUPT";
-
-export interface ReconciliationFinding {
-  readonly code: string;
-  readonly classification: Exclude<ReconciliationClassification, "CONSISTENT">;
-  readonly message: string;
-  readonly path?: string;
-  readonly operationId?: string;
-  readonly submissionId?: number;
-  readonly details?: Record<string, unknown>;
-}
-
-export interface ReconciliationReport {
-  readonly status: ReconciliationClassification;
-  readonly checkedAt: string;
-  readonly root: string;
-  readonly findings: readonly ReconciliationFinding[];
-  readonly counts: Record<string, number>;
-}
+export { applyReviewMetadata } from "./publication-codecs.js";
+export {
+  PUBLICATION_STATES,
+  REVIEW_EDITABLE_METADATA_FIELDS,
+} from "./publication-contracts.js";
+export type {
+  CatalogMutationAction,
+  CatalogMutationOptions,
+  FaultPoint,
+  PublicationConsistencyOptions,
+  PublicationOperation,
+  PublicationOperationKind,
+  PublicationReviewOptions,
+  PublicationState,
+  PublicationVariantPlan,
+  ReconciliationClassification,
+  ReconciliationFinding,
+  ReconciliationReport,
+} from "./publication-contracts.js";
 
 interface SubmissionRow {
   readonly id: number;
@@ -164,150 +100,6 @@ const STAGING_ROOT = "publication-staging";
 const BACKUP_ROOT = "publication-backups";
 const PENDING_ROOT = "pending";
 const CARTRIDGE_ROOT = "cartridges";
-
-function fail(message: string, code = "publication_consistency_failed", details?: unknown): never {
-  throw new PublicationConsistencyError(message, code, details);
-}
-
-function object(value: unknown, message: string): Record<string, unknown> {
-  if (value === null || typeof value !== "object" || Array.isArray(value)) fail(message, "journal_corrupt");
-  return value as Record<string, unknown>;
-}
-
-function clone<T>(value: T): T {
-  return JSON.parse(JSON.stringify(value)) as T;
-}
-
-export function applyReviewMetadata(original: Record<string, unknown>, updates: Record<string, unknown>): Record<string, unknown> {
-  const forbidden = ["id", "version", "authors"] as const;
-  for (const field of forbidden) {
-    if (Object.hasOwn(updates, field) && JSON.stringify(updates[field]) !== JSON.stringify(original[field])) {
-      fail(`metadata.${field} cannot be changed during review`, "review_metadata_invalid");
-    }
-  }
-  const metadata = clone(original);
-  for (const field of REVIEW_EDITABLE_METADATA_FIELDS) {
-    if (Object.hasOwn(updates, field)) metadata[field] = updates[field];
-  }
-  metadata.id = original.id;
-  metadata.version = original.version;
-  metadata.authors = original.authors ?? [];
-  try {
-    validateMetadata(metadata);
-  } catch (error) {
-    fail(error instanceof Error ? error.message : "review metadata is invalid", "review_metadata_invalid");
-  }
-  return metadata;
-}
-
-function reviewedImage(source: Uint8Array, architecture: string, metadata: Record<string, unknown> | undefined, colophonOverride?: Record<string, unknown> | null): { readonly image: Buffer; readonly parsed: ReturnType<typeof parseCartridge> } {
-  const original = validateCartridgeBinary(source);
-  if (!metadata) return { image: Buffer.from(source), parsed: original };
-  if (!original.metadata || !original.icon) fail("pending cartridge metadata or icon is missing", "pending_cartridge_invalid");
-  let normalizedArchitecture: "esp32c6" | "qemu";
-  try {
-    normalizedArchitecture = normalizeArchitecture(architecture);
-  } catch (error) {
-    fail(error instanceof Error ? error.message : "unsupported architecture", "pending_cartridge_invalid");
-  }
-  const variantMetadata = applyReviewMetadata(original.metadata, metadata);
-  const rebuilt = buildSubmissionCartridge(
-    original.legacyPayload,
-    variantMetadata,
-    original.icon,
-    normalizedArchitecture,
-    original.screenshot,
-    colophonOverride === undefined ? original.colophon : colophonOverride
-  );
-  return { image: Buffer.from(rebuilt), parsed: validateCartridgeBinary(rebuilt) };
-}
-
-function catalogColophon(original: Record<string, unknown> | null, metadata: Record<string, unknown>): Record<string, unknown> | null {
-  if (!original) return null;
-  const next = clone(original);
-  next.title = metadata.title;
-  next.version = metadata.version;
-  return next;
-}
-
-function isoNow(): string {
-  return new Date().toISOString();
-}
-
-function sha256(value: Uint8Array): string {
-  return crypto.createHash("sha256").update(value).digest("hex");
-}
-
-function sortedJson(value: unknown): unknown {
-  if (Array.isArray(value)) return value.map(sortedJson);
-  if (value !== null && typeof value === "object") {
-    return Object.fromEntries(
-      Object.entries(value as Record<string, unknown>)
-        .sort(([left], [right]) => left.localeCompare(right))
-        .map(([key, item]) => [key, sortedJson(item)])
-    );
-  }
-  return value;
-}
-
-function serializeJson(value: unknown): Buffer {
-  return Buffer.from(`${JSON.stringify(sortedJson(value), null, 2)}\n`, "utf8");
-}
-
-function parseObjectJson(value: string, label: string): Record<string, unknown> {
-  try { return object(JSON.parse(value) as unknown, label); } catch (error) {
-    if (error instanceof PublicationConsistencyError) throw error;
-    fail(`${label} is malformed`, "submission_metadata_corrupt");
-  }
-}
-
-function parseArchitectures(value: string): StoredArchitecture[] {
-  let parsed: unknown;
-  try { parsed = JSON.parse(value) as unknown; } catch { fail("submission architectures are malformed", "submission_metadata_corrupt"); }
-  if (!Array.isArray(parsed)) fail("submission architectures are not an array", "submission_metadata_corrupt");
-  return parsed.map((item) => object(item, "submission architecture is malformed") as StoredArchitecture);
-}
-
-function imageMime(data: Uint8Array | null): string | null {
-  if (!data) return null;
-  if (Buffer.from(data.subarray(0, 8)).equals(Buffer.from("89504e470d0a1a0a", "hex"))) return "image/png";
-  if (Buffer.from(data.subarray(0, 3)).equals(Buffer.from([0xff, 0xd8, 0xff]))) return "image/jpeg";
-  return null;
-}
-
-function parseOperation(value: unknown): PublicationOperation {
-  const raw = object(value, "publication operation is malformed");
-  if (raw.journalVersion !== 1 || typeof raw.operationId !== "string" || typeof raw.submissionId !== "number" || typeof raw.gameId !== "string" || typeof raw.version !== "string" || typeof raw.expectedIndexSha256 !== "string" || typeof raw.indexStagedRelative !== "string" || typeof raw.indexBackupRelative !== "string" || typeof raw.createdAt !== "string" || typeof raw.updatedAt !== "string" || !PUBLICATION_STATES.includes(raw.state as PublicationState) || !Array.isArray(raw.variants)) {
-    fail("publication operation is malformed", "journal_corrupt");
-  }
-  const variants = raw.variants.map((item) => {
-    const variant = object(item, "publication variant is malformed");
-    if (typeof variant.architecture !== "string" || typeof variant.sourceRelative !== "string" || typeof variant.targetRelative !== "string" || typeof variant.stagedRelative !== "string" || typeof variant.backupRelative !== "string" || typeof variant.expectedSha256 !== "string" || (variant.previousSha256 !== null && typeof variant.previousSha256 !== "string") || typeof variant.size !== "number" || variant.metadata === null || typeof variant.metadata !== "object" || Array.isArray(variant.metadata) || (variant.colophon !== null && (typeof variant.colophon !== "object" || Array.isArray(variant.colophon)))) fail("publication variant is malformed", "journal_corrupt");
-    return variant as unknown as PublicationVariantPlan;
-  });
-  if (raw.reviewedMetadata !== undefined && (raw.reviewedMetadata === null || typeof raw.reviewedMetadata !== "object" || Array.isArray(raw.reviewedMetadata))) fail("publication reviewed metadata is malformed", "journal_corrupt");
-  if (raw.reviewer !== undefined) {
-    const reviewer = object(raw.reviewer, "publication reviewer is malformed");
-    if (!Number.isSafeInteger(reviewer.id) || (reviewer.id as number) <= 0 || typeof reviewer.name !== "string" || !reviewer.name) fail("publication reviewer is malformed", "journal_corrupt");
-  }
-  const operationKind = raw.operationKind === undefined ? "submission" : raw.operationKind;
-  if (operationKind !== "submission" && operationKind !== "catalog") fail("publication operation kind is malformed", "journal_corrupt");
-  if (operationKind === "catalog" && raw.catalogAction !== "update" && raw.catalogAction !== "delete") fail("catalog operation action is malformed", "journal_corrupt");
-  return { ...raw, variants } as unknown as PublicationOperation;
-}
-
-function statusForFindings(findings: readonly ReconciliationFinding[]): ReconciliationClassification {
-  if (findings.length === 0) return "CONSISTENT";
-  if (findings.some((finding) => finding.classification === "CORRUPT")) return "CORRUPT";
-  if (findings.some((finding) => finding.classification === "AMBIGUOUS")) return "AMBIGUOUS";
-  return "RECOVERABLE";
-}
-
-export interface PublicationConsistencyOptions {
-  readonly root: string;
-  readonly database: Database.Database;
-  readonly fault?: (point: FaultPoint) => void;
-}
 
 export class PublicationConsistencyService {
   readonly root: string;
