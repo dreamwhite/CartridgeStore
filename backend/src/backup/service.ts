@@ -43,6 +43,17 @@ import {
   type BackupServiceOptions,
   type RestoreResult,
 } from "./service-contracts.js";
+import {
+  acquireLock,
+  ensureDirectory,
+  jsonBytes,
+  now,
+  readJson,
+  releaseLock,
+  safeDirectory,
+  sha256,
+  writeAtomic,
+} from "./operations.js";
 
 export type {
   BackupArtifact,
@@ -51,7 +62,6 @@ export type {
   RestoreResult,
 } from "./service-contracts.js";
 
-const LOCK_FILE = "publication.lock";
 const STAGING_DIRECTORY = ".prg32-backup-staging";
 const RECOVERY_DIRECTORY = ".prg32-backup-recovery";
 const OPERATIONS_DIRECTORY = "backup-operations";
@@ -89,53 +99,6 @@ interface RecoveryPoint {
   readonly directory: string;
   readonly databasePath: string;
   readonly dataPath: string;
-}
-
-function now(): string {
-  return new Date().toISOString();
-}
-
-function sha256(value: Uint8Array): string {
-  return crypto.createHash("sha256").update(value).digest("hex");
-}
-
-function writeAtomic(filePath: string, value: Uint8Array): void {
-  const temporary = filePath + ".tmp-" + process.pid + "-" + crypto.randomUUID();
-  const fd = fs.openSync(temporary, "wx", 0o600);
-  try {
-    fs.writeSync(fd, value);
-    fs.fsyncSync(fd);
-  } finally {
-    fs.closeSync(fd);
-  }
-  fs.renameSync(temporary, filePath);
-}
-
-function jsonBytes(value: unknown): Buffer {
-  return Buffer.from(JSON.stringify(value, null, 2) + "\n", "utf8");
-}
-
-function readJson(filePath: string): unknown {
-  try {
-    return JSON.parse(fs.readFileSync(filePath, "utf8")) as unknown;
-  } catch (error) {
-    throw new BackupError("backup recovery journal is invalid", "backup_recovery_journal_invalid", 500, { cause: error });
-  }
-}
-
-function safeDirectory(root: string, relative: string): string {
-  return assertInside(root, path.join(root, relative));
-}
-
-function ensureDirectory(root: string, relative: string): string {
-  const candidate = safeDirectory(root, relative);
-  if (fs.existsSync(candidate)) {
-    const stats = fs.lstatSync(candidate);
-    if (stats.isSymbolicLink() || !stats.isDirectory()) throw new BackupError("backup directory is unsafe", "backup_unsafe_path", 500);
-  } else {
-    fs.mkdirSync(candidate, { recursive: true, mode: 0o700 });
-  }
-  return candidate;
 }
 
 function schemaFingerprint(snapshot: SchemaSnapshot): string {
@@ -210,27 +173,6 @@ function restoreDatabase(live: Database.Database, sourcePath: string, expectedSc
   } finally {
     source?.close();
   }
-}
-
-function acquireLock(root: string): { readonly token: string; readonly path: string } {
-  const lockPath = path.join(root, LOCK_FILE);
-  const token = crypto.randomUUID();
-  const record = { pid: process.pid, token, createdAt: now() };
-  try {
-    const fd = fs.openSync(lockPath, "wx", 0o600);
-    try { fs.writeSync(fd, JSON.stringify(record)); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
-    return { token, path: lockPath };
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw new BackupError("backup maintenance lock failed", "backup_lock_failed", 500, { cause: error });
-    throw new BackupError("backup operation is busy", "backup_busy", 409);
-  }
-}
-
-function releaseLock(lock: { readonly token: string; readonly path: string }): void {
-  try {
-    const current = JSON.parse(fs.readFileSync(lock.path, "utf8")) as { token?: string };
-    if (current.token === lock.token) fs.unlinkSync(lock.path);
-  } catch { /* recovery remains visible through the journal */ }
 }
 
 export class BackupService {
