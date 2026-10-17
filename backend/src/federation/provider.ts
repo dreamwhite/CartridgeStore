@@ -14,8 +14,12 @@ import {
 } from "./provider-codecs.js";
 import {
   normalizeProvider,
-  normalizeProviderId,
 } from "./provider-validation.js";
+import {
+  getFederationProvider,
+  listFederationProviders,
+  listPublicFederationProviders,
+} from "./provider-records.js";
 
 export type {
   FederationProtocol,
@@ -219,24 +223,15 @@ export class FederationProviderService {
   }
 
   get(providerIdValue: string): FederationProviderConfig {
-    const id = normalizeProviderId(providerIdValue);
-    const row = this.database.prepare("SELECT * FROM federation_providers WHERE provider_id = ?").get(id) as Record<string, unknown> | undefined;
-    if (!row) throw new FederationProviderError("federation_provider_unknown", 404, "federation provider is unknown");
-    return rowToConfig(row);
+    return getFederationProvider(this.database, providerIdValue);
   }
 
   list(): readonly FederationProviderConfig[] {
-    return (this.database.prepare("SELECT * FROM federation_providers ORDER BY provider_id ASC").all() as Array<Record<string, unknown>>)
-      .map((row) => rowToConfig(row));
+    return listFederationProviders(this.database);
   }
 
   publicList(): readonly { provider_id: string; protocol: FederationProtocol; display_name: string; enabled: boolean }[] {
-    return (this.database.prepare("SELECT provider_id, protocol, display_name, enabled FROM federation_providers ORDER BY provider_id ASC").all() as Array<{ provider_id: string; protocol: FederationProtocol; display_name: string; enabled: number }>).map((row) => ({
-      provider_id: row.provider_id,
-      protocol: row.protocol,
-      display_name: row.display_name,
-      enabled: row.enabled === 1
-    }));
+    return listPublicFederationProviders(this.database);
   }
 
   enabled(providerIdValue: string, expectedProtocol?: FederationProtocol): FederationProviderConfig {
