@@ -7,6 +7,11 @@ import type {
   FederationProviderInput,
 } from "../../lib/api/federation-admin";
 import { publicApiPath } from "../../lib/api/origin";
+import {
+  buildProviderInput,
+  validateProviderForm,
+  type ProviderFormValues,
+} from "./provider-form-adapter";
 
 type ProviderFormOptions = {
   protocol: "oidc" | "saml";
@@ -73,95 +78,39 @@ export function useProviderForm({
   const submit = (event: FormEvent) => {
     event.preventDefault();
     setFormError("");
-    if (
-      !displayName.trim() ||
-      !issuer.trim() ||
-      (!provider && !providerId.trim())
-    ) {
-      setFormError("Complete the required fields.");
+    const values: ProviderFormValues = {
+      providerId,
+      displayName,
+      issuer,
+      clientId,
+      clientAuthMethod,
+      clientSecret,
+      discoveryIssuer,
+      redirectUri,
+      scopes,
+      idpEntityId,
+      spEntityId,
+      acsUrl,
+      entryPoint,
+      certificate,
+      trustedCertificates,
+      assertionsSigned,
+      responsesSigned,
+      signRequests,
+    };
+    const validationError = validateProviderForm(values, protocol, provider);
+    if (validationError) {
+      setFormError(validationError);
       return;
     }
-    if (
-      protocol === "oidc" &&
-      clientAuthMethod !== "none" &&
-      !provider &&
-      !clientSecret
-    ) {
-      setFormError(
-        "A client secret is required for this authentication method.",
-      );
-      return;
-    }
-    if (
-      protocol === "saml" &&
-      (!idpEntityId ||
-        !spEntityId ||
-        !entryPoint ||
-        !(certificate || trustedCertificates))
-    ) {
-      setFormError(
-        "SAML entity IDs, SSO URL, and a trusted certificate are required.",
-      );
-      return;
-    }
-
-    const trustSet = (trustedCertificates.trim() || certificate.trim())
-      .split(/\n\s*\n/)
-      .map((value) => value.trim())
-      .filter(Boolean);
-    const input: FederationProviderInput =
-      protocol === "oidc"
-        ? {
-            provider_id: provider?.provider_id ?? providerId.trim(),
-            protocol,
-            display_name: displayName.trim(),
-            issuer: issuer.trim(),
-            client_id: clientId.trim() || undefined,
-            client_auth_method: clientAuthMethod,
-            client_secret: clientSecret || undefined,
-            discovery_issuer: discoveryIssuer.trim() || undefined,
-            redirect_uri: redirectUri.trim() || canonicalRedirect,
-            scopes: scopes
-              .split(",")
-              .map((value) => value.trim())
-              .filter(Boolean),
-          }
-        : {
-            provider_id: provider?.provider_id ?? providerId.trim(),
-            protocol,
-            display_name: displayName.trim(),
-            issuer: issuer.trim() || idpEntityId.trim(),
-            idp_entity_id: idpEntityId.trim(),
-            sp_entity_id: spEntityId.trim(),
-            acs_url: acsUrl.trim() || canonicalAcs,
-            saml_entry_point: entryPoint.trim(),
-            saml_name_id_format:
-              "urn:oasis:names:tc:SAML:2.0:nameid-format:persistent",
-            ...(trustSet.length
-              ? {
-                  saml_idp_certificate_pem: trustSet[0],
-                  saml_trusted_certificates_pem: trustSet,
-                }
-              : {}),
-            saml_want_assertions_signed: assertionsSigned,
-            saml_want_authn_response_signed: responsesSigned,
-            saml_sign_authn_requests: signRequests,
-          };
-
     onSubmit(
-      provider
-        ? (Object.fromEntries(
-            Object.entries(input).filter(
-              ([key]) =>
-                !["provider_id", "protocol", "issuer", "client_secret"].includes(
-                  key,
-                ),
-            ),
-          ) as Omit<
-            FederationProviderInput,
-            "provider_id" | "protocol" | "issuer"
-          >)
-        : input,
+      buildProviderInput(
+        values,
+        protocol,
+        canonicalRedirect,
+        canonicalAcs,
+        provider,
+      ),
     );
   };
 
