@@ -15,6 +15,7 @@ import type { BackendConfig } from "./env-contracts.js";
 import { resolveAuthLimitsConfig } from "./env-auth-limits.js";
 import { resolveEmailConfig } from "./env-email.js";
 import { resolveHttpLimitsConfig } from "./env-http-limits.js";
+import { resolveMetricsLimitsConfig } from "./env-metrics-limits.js";
 import { resolveMultiplayerConfig } from "./env-multiplayer.js";
 import {
   resolvePublicOriginConfig,
@@ -372,26 +373,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
     metricsWriteEnabled,
     metricsWriteMode,
     metricsDisposableRoot: metricsWriteEnabled ? path.resolve(metricsDisposableRoot as string) : undefined,
-    metricsMaxContentBytes: positiveInteger(
-      "PRG32_BACKEND_METRICS_MAX_CONTENT_BYTES",
-      environment.PRG32_BACKEND_METRICS_MAX_CONTENT_BYTES,
-      2 * 1024 * 1024
-    ),
-    metricsMaxSamplesPerRequest: positiveInteger(
-      "PRG32_BACKEND_METRICS_MAX_SAMPLES",
-      environment.PRG32_BACKEND_METRICS_MAX_SAMPLES,
-      1024
-    ),
-    metricsMaxDbWork: positiveInteger(
-      "PRG32_BACKEND_METRICS_MAX_DB_WORK",
-      environment.PRG32_BACKEND_METRICS_MAX_DB_WORK,
-      2048
-    ),
-    metricsMaxExportSamples: positiveInteger(
-      "PRG32_BACKEND_METRICS_MAX_EXPORT_SAMPLES",
-      environment.PRG32_BACKEND_METRICS_MAX_EXPORT_SAMPLES,
-      100000
-    ),
+    ...resolveMetricsLimitsConfig(environment),
     scoresWriteEnabled,
     scoresWriteMode,
     scoresDisposableRoot: scoresWriteEnabled ? path.resolve(scoresDisposableRoot as string) : undefined,
