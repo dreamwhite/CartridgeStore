@@ -18,8 +18,10 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("../../lib/api/catalog", () => ({
   getGame: vi.fn(),
-  catalogMediaPath: (id: string, kind: string, version: string) => `/api/games/${id}/${kind}?version=${version}`,
-  catalogDownloadPath: (id: string, version: string, architecture: string) => `/api/games/${id}/download?version=${version}&architecture=${architecture}`,
+  catalogMediaPath: (id: string, kind: string, version: string) =>
+    `/api/games/${id}/${kind}?version=${version}`,
+  catalogDownloadPath: (id: string, version: string, architecture: string) =>
+    `/api/games/${id}/download?version=${version}&architecture=${architecture}`,
 }));
 
 const detail: Game = {
@@ -33,8 +35,18 @@ const detail: Game = {
   versions: ["1.0.0", "0.9.0"],
   architectures: ["qemu", "esp32c6"],
   metadata: { abi: "prg32-metadata-1.0", genre: "arcade" },
-  colophon: null,
-  variants: { qemu: { size: 2048, has_screenshot: false }, esp32c6: { size: 3072, has_screenshot: false } },
+  colophon: {
+    abi: "prg32-colophon-1.0",
+    controls: [
+      { input: "D-Pad", action: "Move" },
+      { input: "A", action: "Add score / beep" },
+    ],
+    developer: { name: "PRG32 Lab" },
+  },
+  variants: {
+    qemu: { size: 2048, has_screenshot: false },
+    esp32c6: { size: 3072, has_screenshot: false },
+  },
   publisher: "PRG32 Lab",
   updated_at: "2026-10-13T00:00:00Z",
 };
@@ -56,14 +68,25 @@ describe("GameDetail", () => {
     vi.mocked(getGame).mockResolvedValue({ ok: true, game: detail });
     renderDetail();
 
-    expect(await screen.findByRole("heading", { name: "PRG32 Pong" })).toBeInTheDocument();
+    expect(
+      await screen.findByRole("heading", { name: "PRG32 Pong" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("arcade")).toBeInTheDocument();
     expect(screen.getByText("genre")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Download qemu" })).toHaveAttribute("href", "/api/games/org.example.pong/download?version=1.0.0&architecture=qemu");
+    expect(screen.getByRole("heading", { name: "Controls" })).toBeInTheDocument();
+    expect(screen.getByText("D-Pad")).toBeInTheDocument();
+    expect(screen.getByText("Add score / beep")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Download qemu" })).toHaveAttribute(
+      "href",
+      "/api/games/org.example.pong/download?version=1.0.0&architecture=qemu",
+    );
 
     await user.click(screen.getByRole("combobox", { name: "Architecture" }));
     await user.click(await screen.findByRole("option", { name: "esp32c6" }));
-    expect(screen.getByRole("link", { name: "Download esp32c6" })).toHaveAttribute("href", "/api/games/org.example.pong/download?version=1.0.0&architecture=esp32c6");
+    expect(screen.getByRole("link", { name: "Download esp32c6" })).toHaveAttribute(
+      "href",
+      "/api/games/org.example.pong/download?version=1.0.0&architecture=esp32c6",
+    );
     await user.click(screen.getByRole("combobox", { name: "Version" }));
     await user.click(await screen.findByRole("option", { name: "0.9.0" }));
     expect(navigation.push).toHaveBeenCalledWith("/games/org.example.pong?version=0.9.0");
