@@ -34,6 +34,25 @@ put operational secrets in Compose YAML or source control.
 
 The frontend has no API rewrite target or second backend origin.
 
+## Production host variables
+
+The `dream.test` values in the root development Compose file are local-only
+dnsmasq names. A production server must provide its own registered domains and
+HTTPS endpoints to the operational template:
+
+| Variable | Meaning |
+| --- | --- |
+| `PRG32_STORE_DOMAIN` | Production storefront hostname |
+| `PRG32_API_DOMAIN` | Production API hostname |
+| `PRG32_FRONTEND_PUBLIC_ORIGIN` | Production storefront origin |
+| `PRG32_API_PUBLIC_ORIGIN` | Production API origin |
+| `PRG32_API_WS_URL` | Production WebSocket origin and path |
+| `PRG32_COOKIE_DOMAIN` | Production session-cookie domain |
+
+The operational template intentionally fails Compose interpolation when these
+values are missing; it must never silently deploy the local `.dream.test`
+names.
+
 ## Compatibility fallbacks
 
 `PRG32_STORE_DATA` and `PRG32_STORE_DB` remain accepted for existing

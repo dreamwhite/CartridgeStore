@@ -3,7 +3,7 @@
 ## Runtime topology
 
 ```text
-                         Dream / Traefik edge
+                  Local Dream / Traefik edge
                               │
                  ┌────────────┴────────────┐
                  │                         │
@@ -14,7 +14,9 @@
                  └────── browser API ────┘
 ```
 
-The edge owns TLS and host routing. The browser calls the API origin directly;
+The diagram shows the local dnsmasq-backed `.dream.test` environment only.
+Production uses the same service topology with operator-provided domains and
+origins. The edge owns TLS and host routing. The browser calls the API origin directly;
 Next does not proxy application routes. Fastify owns HTTP, WebSocket,
 authentication, catalog, publication, telemetry, statistics and discovery.
 

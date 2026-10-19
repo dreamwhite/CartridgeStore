@@ -12,10 +12,12 @@ pnpm --version
 The repository uses pnpm and Node 24. Install dependencies once with
 `pnpm install` at the root and in each workspace when needed.
 
-## Dream development stack
+## Local Dream development stack
 
-The shared platform provides the external `dream_edge` network. Start the
-application from the repository root:
+The author's local infrastructure provides the external `dream_edge` network,
+and dnsmasq resolves the `.dream.test` hosts. These are local development
+names only, not production domains. Start the application from the repository
+root:
 
 ```bash
 docker compose --profile dev up -d --build

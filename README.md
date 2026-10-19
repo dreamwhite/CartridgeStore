@@ -5,10 +5,15 @@ runtime is a Fastify/TypeScript API paired with a Next.js frontend.
 
 ## Development
 
-The shared Dream Platform edge exposes the two services at:
+The author's local Dream Platform edge, with dnsmasq-managed `.dream.test`
+records, exposes the two development services at:
 
 - <https://store.prg32.dream.test> — Next.js frontend;
 - <https://api.prg32.dream.test> — Fastify API and WebSocket relay.
+
+These are local-only development hosts. Production runs on another server and
+must configure its own registered storefront/API domains, HTTPS origins,
+cookie domain, and WebSocket URL through the operational Compose template.
 
 Start the development topology with Node.js 24 and Docker Desktop:
 

@@ -5,9 +5,13 @@ Guidance for coding agents working in this repository.
 ## Project context
 
 PRG32 Cartridge Store is the classroom service for PRG32 cartridges. The
-repository contains one Fastify/TypeScript API and one Next.js frontend. The
-external Dream/Traefik edge publishes `store.prg32.dream.test` for the
-frontend and `api.prg32.dream.test` for the API and WebSocket endpoint.
+repository contains one Fastify/TypeScript API and one Next.js frontend behind
+an external reverse-proxy edge. In the author's local environment,
+Dream/Traefik and dnsmasq publish the development-only hosts
+`store.prg32.dream.test` and `api.prg32.dream.test`. These names are not
+production domains; production must provide its own registered DNS names, TLS
+certificates, public origins, cookie domain, and WebSocket URL through the
+operational Compose variables.
 
 Keep the educational character of the project: prefer readable, explicit code,
 keep API contracts easy to explain in class, and keep setup instructions

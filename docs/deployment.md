@@ -3,12 +3,28 @@
 Deployment templates use the Fastify API and Next.js frontend as two services
 behind an operator-controlled reverse proxy.
 
-## Public hosts
+## Local and production hosts
 
-| Host | Service |
+The author's local Dream integration uses dnsmasq and Traefik to resolve these
+development-only hosts:
+
+| Local host | Service |
 | --- | --- |
 | `store.prg32.dream.test` | Next.js storefront |
 | `api.prg32.dream.test` | Fastify API and WebSocket relay |
+
+Do not publish those names as production URLs. Production runs on a different
+server and must set its own registered hostnames and HTTPS origins before
+starting `deploy/operational/compose.yaml`:
+
+| Variable | Production value |
+| --- | --- |
+| `PRG32_STORE_DOMAIN` | Store hostname used by the Traefik router |
+| `PRG32_API_DOMAIN` | API hostname used by the Traefik router |
+| `PRG32_FRONTEND_PUBLIC_ORIGIN` | Full HTTPS storefront origin |
+| `PRG32_API_PUBLIC_ORIGIN` | Full HTTPS API origin |
+| `PRG32_API_WS_URL` | Full `wss://` multiplayer endpoint |
+| `PRG32_COOKIE_DOMAIN` | Cookie domain matching the production host policy |
 
 TLS terminates at the reverse proxy. The API validates the configured public
 origins and trusts forwarded headers only when `PRG32_BACKEND_TRUST_PROXY` is

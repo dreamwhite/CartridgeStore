@@ -17,14 +17,19 @@ No operational or demonstration data was migrated, deleted, or rewritten.
 ## Final topology
 
 ```text
-store.prg32.dream.test  -> Next.js
-api.prg32.dream.test    -> Fastify
+local store.prg32.dream.test  -> Next.js
+local api.prg32.dream.test    -> Fastify
+production configured store host -> Next.js
+production configured api host   -> Fastify
 ```
 
-The external Dream/Traefik edge owns TLS and host routing. The browser calls
-the API origin directly. The root development Compose profile contains only
-`backend` and `next`, with the canonical local data root mounted at
-`.local/candidate/canonical` by default.
+The first two hosts are local-only names resolved by the author's dnsmasq and
+Dream/Traefik setup. They are not production domains. A production server
+must provide its own registered DNS names, TLS certificates, public origins,
+cookie domain, and WebSocket URL. The external edge owns TLS and host routing;
+the browser calls the API origin directly. The root development Compose
+profile contains only `backend` and `next`, with the canonical local data root
+mounted at `.local/candidate/canonical` by default.
 
 ## Route and contract audit
 

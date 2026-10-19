@@ -29,12 +29,12 @@ services:
       PRG32_BACKEND_BOOTSTRAP_TOKEN_FILE: /run/secrets/prg32-operational-bootstrap-token
       PRG32_BACKEND_SESSION_SECURE: "true"
       PRG32_BACKEND_SESSION_SAMESITE: lax
-      PRG32_BACKEND_SESSION_COOKIE_DOMAIN: .prg32.dream.test
+      PRG32_BACKEND_SESSION_COOKIE_DOMAIN: ${PRG32_COOKIE_DOMAIN:?set the production cookie domain}
       PRG32_BACKEND_TRUST_PROXY: "true"
-      PRG32_BACKEND_FRONTEND_PUBLIC_ORIGIN: https://store.prg32.dream.test
-      PRG32_BACKEND_FEDERATION_PUBLIC_ORIGIN: https://api.prg32.dream.test
-      PRG32_BACKEND_OIDC_PUBLIC_ORIGIN: https://api.prg32.dream.test
-      PRG32_BACKEND_CORS_ORIGINS: https://store.prg32.dream.test
+      PRG32_BACKEND_FRONTEND_PUBLIC_ORIGIN: ${PRG32_FRONTEND_PUBLIC_ORIGIN:?set the production storefront origin}
+      PRG32_BACKEND_FEDERATION_PUBLIC_ORIGIN: ${PRG32_API_PUBLIC_ORIGIN:?set the production API origin}
+      PRG32_BACKEND_OIDC_PUBLIC_ORIGIN: ${PRG32_API_PUBLIC_ORIGIN:?set the production API origin}
+      PRG32_BACKEND_CORS_ORIGINS: ${PRG32_FRONTEND_PUBLIC_ORIGIN:?set the production storefront origin}
       PRG32_BACKEND_EMAIL_TRANSPORT: smtp
       PRG32_BACKEND_EMAIL_SMTP_HOST: mailpit
       PRG32_BACKEND_EMAIL_SMTP_PORT: "1025"
@@ -85,7 +85,7 @@ services:
     labels:
       traefik.enable: "true"
       traefik.docker.network: ${DREAM_EDGE_NETWORK:-dream_edge}
-      traefik.http.routers.prg32-api-template.rule: Host(`api.prg32.dream.test`)
+      traefik.http.routers.prg32-api-template.rule: Host(`${PRG32_API_DOMAIN:?set the production API hostname}`)
       traefik.http.routers.prg32-api-template.entrypoints: websecure
       traefik.http.routers.prg32-api-template.tls: "true"
       traefik.http.services.prg32-api-template.loadbalancer.server.port: "5080"
@@ -95,14 +95,14 @@ services:
       context: ../../frontend
       dockerfile: Dockerfile.operational
       args:
-        NEXT_PUBLIC_PRG32_API_ORIGIN: https://api.prg32.dream.test
+        NEXT_PUBLIC_PRG32_API_ORIGIN: ${PRG32_API_PUBLIC_ORIGIN:?set the production API origin}
     image: ${PRG32_NEXT_IMAGE:-prg32-cartridge-store-next:operational-template}
     environment:
       NODE_ENV: production
       HOSTNAME: 0.0.0.0
       NEXT_TELEMETRY_DISABLED: "1"
-      NEXT_PUBLIC_PRG32_API_ORIGIN: https://api.prg32.dream.test
-      NEXT_PUBLIC_PRG32_WS_URL: wss://api.prg32.dream.test/api/multiplayer
+      NEXT_PUBLIC_PRG32_API_ORIGIN: ${PRG32_API_PUBLIC_ORIGIN:?set the production API origin}
+      NEXT_PUBLIC_PRG32_WS_URL: ${PRG32_API_WS_URL:?set the production WebSocket URL}
     depends_on:
       fastify:
         condition: service_healthy
@@ -128,7 +128,7 @@ services:
     labels:
       traefik.enable: "true"
       traefik.docker.network: ${DREAM_EDGE_NETWORK:-dream_edge}
-      traefik.http.routers.prg32-store-template.rule: Host(`store.prg32.dream.test`)
+      traefik.http.routers.prg32-store-template.rule: Host(`${PRG32_STORE_DOMAIN:?set the production storefront hostname}`)
       traefik.http.routers.prg32-store-template.entrypoints: websecure
       traefik.http.routers.prg32-store-template.tls: "true"
       traefik.http.services.prg32-store-template.loadbalancer.server.port: "3000"

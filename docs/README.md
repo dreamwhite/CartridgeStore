@@ -1,8 +1,10 @@
 # PRG32 Cartridge Store documentation
 
 The repository has one application runtime: a Fastify API and a Next.js
-frontend. Dream/Traefik publishes them at `api.prg32.dream.test` and
-`store.prg32.dream.test`.
+frontend. The author's local Dream/Traefik and dnsmasq setup publishes the
+development-only hosts `api.prg32.dream.test` and `store.prg32.dream.test`.
+Production uses separately configured registered domains; see
+[Deployment](deployment.md).
 
 ## Start here
 
