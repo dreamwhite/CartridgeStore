@@ -78,13 +78,14 @@ services:
     build:
       context: ../../frontend
       dockerfile: Dockerfile.operational
+      args:
+        NEXT_PUBLIC_PRG32_API_ORIGIN: ${PRG32_API_PUBLIC_ORIGIN:?set the HTTPS API origin}
     image: ${PRG32_NEXT_IMAGE:-prg32-cartridge-store-next:standalone}
     environment:
       NODE_ENV: production
       HOSTNAME: 0.0.0.0
       NEXT_TELEMETRY_DISABLED: "1"
-      PRG32_API_UPSTREAM: http://fastify:5080
-      PRG32_NEXT_RUNTIME_MODE: operational
+      NEXT_PUBLIC_PRG32_API_ORIGIN: ${PRG32_API_PUBLIC_ORIGIN:?set the HTTPS API origin}
       NEXT_PUBLIC_PRG32_WS_URL: ${PRG32_WS_PUBLIC_URL:?set the public WebSocket URL}
     depends_on:
       fastify:

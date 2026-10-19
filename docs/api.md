@@ -1,12 +1,8 @@
 # Unified Service API
 
-This is the public compatibility contract, not a list of whichever process is
-currently serving each route. During the migration, Flask remains authoritative
-for the legacy catalog, firmware, score, metrics, publishing, and multiplayer
-paths, while the isolated Fastify backend provides the new auth and generic
-OIDC/SAML/federation boundaries. See [Current architecture](architecture.md)
-for route ownership and the compatibility evidence in the repository test
-suites.
+This is the public compatibility contract served by the Fastify API. See
+[Architecture](architecture.md) for route ownership and the compatibility
+evidence in the repository test suites.
 
 PRG32 Cartridge Store combines cartridge catalog, score, metrics, multiplayer,
 authentication, and statistics contracts on one host.
@@ -24,8 +20,8 @@ with TXT record `abi=prg32-store-discovery-1.0`.
 
 ## Authentication
 
-The server requires `SECRET_KEY` and uses Flask signed-cookie sessions for
-browser login. Fresh installations require an operator-supplied,
+The server uses signed-cookie sessions for browser login. Fresh installations
+require an operator-supplied,
 one-time `PRG32_BOOTSTRAP_TOKEN`; no known administrator password is created.
 Existing administrator credentials, IDs, groups, and roles are preserved.
 New users start at `/auth/register` by entering only an email address. The

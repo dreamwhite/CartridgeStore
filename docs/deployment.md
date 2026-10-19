@@ -1,102 +1,49 @@
 # Deployment
 
-> This page documents the transitional Flask compatibility image and its
-> legacy environment contract. For the current Fastify + Next.js deployment,
-> use [Operations](operations.md), the
-> [standalone guide](../deploy/standalone/README.md), or the
-> [Docker overview](docker.md).
+Deployment templates use the Fastify API and Next.js frontend as two services
+behind an operator-controlled reverse proxy.
 
-PRG32 Cartridge Store should run behind HTTPS in production, with persistent
-storage mounted outside the container or process directory.
+## Public hosts
 
-## Environment Variables
+| Host | Service |
+| --- | --- |
+| `store.prg32.dream.test` | Next.js storefront |
+| `api.prg32.dream.test` | Fastify API and WebSocket relay |
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `SECRET_KEY` | required | Flask session signing key |
-| `PRG32_BOOTSTRAP_TOKEN` | fresh install only | One-time first-admin setup secret; never log or commit it |
-| `PRG32_ENV` | unset | Set to `production` for the production session policy |
-| `PRG32_SESSION_COOKIE_SECURE` | `0` outside production | Require HTTPS for browser session cookies |
-| `PRG32_SESSION_COOKIE_SAMESITE` | `Lax` | Cookie cross-site policy; `None` requires deliberate HTTPS configuration |
-| `PRG32_SESSION_LIFETIME_HOURS` | `8` | Permanent browser-session lifetime |
-| `PRG32_STORE_DATA` | `data` or `/data` in Docker | Cartridge files, custom static assets, and default DB location |
-| `PRG32_STORE_DB` | `<data>/cartridge_store.sqlite` | Unified SQLite database |
-| `PRG32_SCORE_DB` | unset | Legacy score DB fallback |
-| `PRG32_METRICS_DB` | unset | Legacy metrics DB fallback |
-| `PRG32_BUNDLE_MAX_MB` | `64` | Zip bundle upload limit |
-| `PRG32_MP_MAX_PEERS` | `8` | WebSocket peers per multiplayer room |
-| `PRG32_USERS` | unset | Legacy `name:role:token` compatibility tokens |
-| `PRG32_SMTP_HOST` | unset | SMTP host for registration emails |
-| `PRG32_SMTP_PORT` | `587` | SMTP port |
-| `PRG32_SMTP_FROM` | `noreply@localhost` | Registration email sender |
-| `PRG32_SMTP_USER` | unset | SMTP username |
-| `PRG32_SMTP_PASSWORD` | unset | SMTP password |
-| `PRG32_SMTP_TLS` | `true` | Enable STARTTLS for SMTP |
-| `PRG32_MDNS_DISABLED` | unset | Set to `1` to disable mDNS advertisement |
-| `PRG32_MDNS_NAME` | `PRG32 Cartridge Store` | mDNS instance name |
-| `PRG32_MDNS_TYPE` | `_prg32store._tcp.local.` | mDNS service type |
-| `PRG32_MDNS_PORT` | `5080` | mDNS advertised HTTP port |
-| `PRG32_LDAP_URL` | unset | LDAP activation URL |
-| `PRG32_LDAP_BASE_DN` | unset | LDAP search base |
-| `PRG32_LDAP_BIND_DN` | unset | LDAP service account DN |
-| `PRG32_LDAP_BIND_PW` | unset | LDAP service account password |
-| `PRG32_LDAP_USER_ATTR` | `uid` | LDAP username attribute |
-| `PRG32_LDAP_ADMIN_GROUP` | unset | LDAP admin group DN |
-| `PRG32_OIDC_ENABLED` | unset | Set to `true` to enable OIDC |
-| `PRG32_OIDC_ISSUER` | unset | OIDC issuer discovery URL |
-| `PRG32_OIDC_CLIENT_ID` | unset | OIDC client id |
-| `PRG32_OIDC_CLIENT_SECRET` | unset | OIDC client secret |
-| `PRG32_OIDC_SCOPE` | `openid email profile` | OIDC scopes |
-| `PRG32_SAML_ENABLED` | unset | Set to `true` to enable SAML2 |
-| `PRG32_SAML_ENTITY_ID` | unset | SAML service-provider entity id |
-| `PRG32_SAML_ACS_URL` | unset | SAML assertion consumer URL |
-| `PRG32_SAML_SLS_URL` | unset | SAML single logout URL |
-| `PRG32_SAML_IDP_ENTITY_ID` | unset | SAML identity-provider entity id |
-| `PRG32_SAML_IDP_SSO_URL` | unset | SAML identity-provider SSO URL |
-| `PRG32_SAML_IDP_SLO_URL` | unset | SAML identity-provider logout URL |
-| `PRG32_SAML_IDP_X509CERT` | unset | SAML identity-provider signing certificate |
+TLS terminates at the reverse proxy. The API validates the configured public
+origins and trusts forwarded headers only when `PRG32_BACKEND_TRUST_PROXY` is
+explicitly enabled.
 
-## Production Checklist
+## Persistent data and secrets
 
-- Set a high-entropy `SECRET_KEY`.
-- On a fresh data directory, set a high-entropy `PRG32_BOOTSTRAP_TOKEN` and
-  call the one-time `/auth/bootstrap` endpoint. Existing admin credentials,
-  IDs, groups, and roles are preserved.
-- Set `PRG32_ENV=production` and `PRG32_SESSION_COOKIE_SECURE=1` when HTTPS
-  is terminated at the reverse proxy. Flask does not blindly trust forwarded
-  headers.
-- Configure SMTP so user registration links are delivered by email.
-- Configure mDNS, SMTP, OIDC, and SAML2 from `/setup` or environment variables.
-- Disable Flask debug mode; use Gunicorn or the Docker image.
-- Put the service behind HTTPS termination.
-- Preserve `PRG32_STORE_DATA` on durable storage.
-- Use `/admin/backup` for full backups, or back up `cartridge_store.sqlite`,
-  `index.json`, `cartridges/`, custom static assets, and pending submissions
-  under `pending/`.
-- Configure reverse-proxy request size limits above `PRG32_BUNDLE_MAX_MB`.
-- Proxy WebSocket upgrades for `/api/multiplayer`.
-- Keep `zeroconf` installed if you want mDNS advertisement in production.
+Mount the canonical data directory at `/data/canonical`. It contains SQLite,
+cartridge objects, publication state and managed assets. Do not mount a host
+path from the repository for a production deployment.
 
-Example Nginx WebSocket location:
+Use Docker secrets for the session secret, bootstrap token, canonical read/write
+authorizations and encrypted secret key registry.
 
-```nginx
-location /api/multiplayer {
-    proxy_pass http://127.0.0.1:5080;
-    proxy_http_version 1.1;
-    proxy_set_header Upgrade $http_upgrade;
-    proxy_set_header Connection "upgrade";
-    proxy_set_header Host $host;
-}
+Keep the container filesystem read-only, drop capabilities, and provide a
+small writable `/tmp` tmpfs as shown in the deployment templates.
+
+## Health checks
+
+Route traffic only after:
+
+```text
+GET http://backend:5080/health -> 200
+GET http://backend:5080/ready  -> 200
+GET http://next:3000/health    -> 200
 ```
 
-## Docker
+The public reverse proxy must preserve WebSocket upgrades for
+`/api/multiplayer`.
 
-Compose uses the single `prod` profile and requires `SECRET_KEY`:
+## Verification
 
 ```bash
-export SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
-docker compose --profile prod up --build
+docker compose -f deploy/operational/compose.yaml config
+docker compose -f deploy/standalone/compose.yaml config
+docker build -f backend/Dockerfile.operational -t prg32-cartridge-store-backend:local backend
+docker build -f frontend/Dockerfile.operational -t prg32-cartridge-store-frontend:local frontend
 ```
-
-The image continues if `zeroconf` is absent, but mDNS advertisement is disabled
-with a startup warning.

@@ -58,10 +58,12 @@ services:
     build:
       context: ../../frontend
       dockerfile: Dockerfile.candidate
+      args:
+        NEXT_PUBLIC_PRG32_API_ORIGIN: http://fastify:5090
     image: prg32-cartridge-store-next:candidate
     environment:
       NODE_ENV: production
-      PRG32_API_UPSTREAM: http://fastify:5090
+      NEXT_PUBLIC_PRG32_API_ORIGIN: http://fastify:5090
       NEXT_PUBLIC_PRG32_WS_URL: ws://127.0.0.1:${PRG32_CANDIDATE_FASTIFY_PORT:-5092}/api/multiplayer
     depends_on:
       fastify:

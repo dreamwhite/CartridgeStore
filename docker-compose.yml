@@ -1,238 +1,45 @@
 name: prg32-cartridge-store
 
 services:
-  cartridge-store:
-    profiles: ["prod"]
-    build: .
-    image: riscv-prg32/cartridge-store:local
-    container_name: prg32-cartridge-store
-    ports:
-      - "5080:5080"
-    environment:
-      # Compose interpolates all services before applying profiles. The
-      # application still rejects an empty production secret at startup.
-      SECRET_KEY: ${SECRET_KEY:-}
-      PRG32_BOOTSTRAP_TOKEN: ${PRG32_BOOTSTRAP_TOKEN:-}
-      PRG32_ENV: production
-      PRG32_SESSION_COOKIE_SECURE: "1"
-      PRG32_STORE_DATA: /data
-      PRG32_STORE_DB: /data/cartridge_store.sqlite
-      PRG32_MP_MAX_PEERS: "8"
-    volumes:
-      - ${PRG32_PROD_DATA_DIR:-./data}:/data
-    restart: unless-stopped
-
   backend:
-    profiles: ["backend"]
+    profiles: ["dev"]
     build:
       context: ./backend
       dockerfile: Dockerfile.dev
     image: riscv-prg32/cartridge-store-backend:dev-hot
-    command: ["pnpm", "dev"]
+    command: ["sh", "-c", "pnpm install --frozen-lockfile && exec pnpm dev"]
     environment:
       NODE_ENV: development
       PRG32_BACKEND_HOST: 0.0.0.0
       PRG32_BACKEND_PORT: "5090"
-      PRG32_BACKEND_DB: /fixtures/cartridge_store.sqlite
-      PRG32_BACKEND_STORE_DATA: /fixtures
+      PRG32_BACKEND_DB: /canonical/store.sqlite
+      PRG32_BACKEND_STORE_DATA: /canonical
+      PRG32_BACKEND_CATALOG_READ_MODE: canonical-disposable
+      PRG32_BACKEND_CANONICAL_STORAGE_ROOT: /canonical
+      PRG32_BACKEND_CANONICAL_READ_AUTHORIZATION: M5.2G1-DISPOSABLE-CANONICAL-READ
+      PRG32_BACKEND_CANONICAL_WORKFLOW_MODE: disposable
+      PRG32_BACKEND_CANONICAL_WRITE_AUTHORIZATION: M5.2G2-DISPOSABLE-CANONICAL-WRITE
+      PRG32_BACKEND_AUTH_WRITE_ENABLED: "true"
+      PRG32_BACKEND_AUTH_WRITE_MODE: test
+      PRG32_BACKEND_AUTH_WRITE_DB: /canonical/store.sqlite
+      PRG32_BACKEND_AUTH_DISPOSABLE_ROOT: /canonical
+      PRG32_BACKEND_SESSION_SECRET: ${PRG32_BACKEND_SESSION_SECRET:-local-disposable-session-secret-change-me-123456}
+      PRG32_BACKEND_BOOTSTRAP_TOKEN: ${PRG32_BACKEND_BOOTSTRAP_TOKEN:-local-disposable-bootstrap-token-change-me-123456}
+      PRG32_BACKEND_SESSION_SECURE: "true"
+      PRG32_BACKEND_SESSION_SAMESITE: none
+      PRG32_BACKEND_FRONTEND_PUBLIC_ORIGIN: https://store.prg32.dream.test/
+      PRG32_BACKEND_OIDC_PUBLIC_ORIGIN: https://api.prg32.dream.test/
+      PRG32_BACKEND_FEDERATION_PUBLIC_ORIGIN: https://api.prg32.dream.test/
+      PRG32_BACKEND_CORS_ORIGINS: https://store.prg32.dream.test
+      PRG32_BACKEND_BACKUP_ENABLED: "false"
+      PRG32_BACKEND_MDNS_ENABLED: "false"
       PRG32_BACKEND_LOG_LEVEL: ${PRG32_BACKEND_LOG_LEVEL:-info}
     ports:
       - "127.0.0.1:5090:5090"
     volumes:
       - ./backend:/app
       - ${PRG32_BACKEND_NODE_MODULES_DIR:-./.local/backend/node_modules}:/app/node_modules
-      - ${PRG32_BACKEND_FIXTURE_DIR:-./backend/tests/fixtures}:/fixtures:ro
-    healthcheck:
-      test:
-        - CMD
-        - node
-        - -e
-        - >-
-          fetch('http://127.0.0.1:5090/health').then(response => {
-          if (!response.ok) process.exit(1); })
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 5s
-
-  auth-writer-init:
-    profiles: ["writer-init", "writer", "dev"]
-    build:
-      context: ./backend
-      dockerfile: Dockerfile
-    image: riscv-prg32/cartridge-store-backend:dev
-    # Pre-create SQLite files on bind mounts. Docker Desktop/macOS can report
-    # SQLITE_READONLY_DBMOVED on the first journaled write when SQLite creates
-    # the database file itself inside a shared host directory.
-    command: ["sh", "-c", "touch \"$$PRG32_WRITER_AUTH_DB\" \"$$PRG32_WRITER_SHADOW_DB\" && node dist/disposable-fixture.js && if [ ! -f \"$$PRG32_WRITER_KEY_REGISTRY\" ]; then node dist/secrets/keygen.js --output \"$$PRG32_WRITER_KEY_REGISTRY\" --id prg32-dev-key-1; fi"]
-    user: "${PRG32_WRITER_UID:-0}:${PRG32_WRITER_GID:-0}"
-    read_only: true
-    tmpfs:
-      - /tmp:size=64m,mode=1777
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    environment:
-      PRG32_WRITER_AUTH_DB: /writer-data/auth.sqlite
-      PRG32_WRITER_SHADOW_DB: /writer-shadow/shadow.sqlite
-      PRG32_WRITER_STORE_DATA: /writer-store
-      PRG32_WRITER_KEY_REGISTRY: /writer-data/key-registry.json
-    volumes:
-      - ${PRG32_WRITER_DATA_DIR:-./.local/writer/auth-data}:/writer-data
-      - ${PRG32_WRITER_SHADOW_DIR:-./.local/writer/shadow}:/writer-shadow
-      - ${PRG32_WRITER_STORE_DIR:-./.local/writer/store}:/writer-store
-
-  auth-writer:
-    profiles: ["writer", "dev"]
-    build:
-      context: ./backend
-      dockerfile: Dockerfile.dev
-    image: riscv-prg32/cartridge-store-backend:dev-hot
-    # The bind-mounted node_modules directory is disposable host state. Seed
-    # it from the lockfile on every writer start so dependency additions such
-    # as @fastify/websocket cannot be masked by an older cache or image layer.
-    command: ["sh", "-c", "pnpm install --frozen-lockfile && exec pnpm dev"]
-    user: "${PRG32_WRITER_UID:-0}:${PRG32_WRITER_GID:-0}"
-    depends_on:
-      auth-writer-init:
-        condition: service_completed_successfully
-    read_only: true
-    tmpfs:
-      - /tmp:size=64m,mode=1777
-    security_opt:
-      - no-new-privileges:true
-    cap_drop:
-      - ALL
-    environment:
-      NODE_ENV: development
-      PRG32_BACKEND_HOST: 0.0.0.0
-      PRG32_BACKEND_PORT: "5090"
-      PRG32_BACKEND_DB: /writer-shadow/shadow.sqlite
-      PRG32_BACKEND_STORE_DATA: /writer-store
-      PRG32_BACKEND_LOG_LEVEL: ${PRG32_BACKEND_LOG_LEVEL:-info}
-      PRG32_BACKEND_AUTH_WRITE_ENABLED: "true"
-      PRG32_BACKEND_AUTH_WRITE_MODE: test
-      PRG32_BACKEND_AUTH_WRITE_DB: /writer-data/auth.sqlite
-      PRG32_BACKEND_AUTH_DISPOSABLE_ROOT: /writer-data
-      PRG32_BACKEND_OIDC_PUBLIC_ORIGIN: ${PRG32_AUTH_PUBLIC_ORIGIN:-https://api.prg32.dream.test/}
-      PRG32_BACKEND_FEDERATION_PUBLIC_ORIGIN: ${PRG32_AUTH_PUBLIC_ORIGIN:-https://api.prg32.dream.test/}
-      PRG32_BACKEND_FRONTEND_PUBLIC_ORIGIN: ${PRG32_FRONTEND_PUBLIC_ORIGIN:-https://store.prg32.dream.test/}
-      PRG32_BACKEND_CORS_ORIGINS: ${PRG32_BACKEND_CORS_ORIGINS:-https://store.prg32.dream.test}
-      PRG32_BACKEND_SUBMISSION_WRITE_ENABLED: "true"
-      PRG32_BACKEND_SUBMISSION_WRITE_MODE: test
-      PRG32_BACKEND_SUBMISSION_DISPOSABLE_ROOT: /writer-store
-      PRG32_BACKEND_METRICS_WRITE_ENABLED: ${PRG32_BACKEND_METRICS_WRITE_ENABLED:-false}
-      PRG32_BACKEND_METRICS_WRITE_MODE: ${PRG32_BACKEND_METRICS_WRITE_MODE:-test}
-      PRG32_BACKEND_METRICS_DISPOSABLE_ROOT: ${PRG32_BACKEND_METRICS_DISPOSABLE_ROOT:-/writer-data}
-      PRG32_BACKEND_METRICS_MAX_CONTENT_BYTES: ${PRG32_BACKEND_METRICS_MAX_CONTENT_BYTES:-2097152}
-      PRG32_BACKEND_METRICS_MAX_SAMPLES: ${PRG32_BACKEND_METRICS_MAX_SAMPLES:-1024}
-      PRG32_BACKEND_METRICS_MAX_DB_WORK: ${PRG32_BACKEND_METRICS_MAX_DB_WORK:-2048}
-      PRG32_BACKEND_METRICS_MAX_EXPORT_SAMPLES: ${PRG32_BACKEND_METRICS_MAX_EXPORT_SAMPLES:-100000}
-      PRG32_BACKEND_SCORES_WRITE_ENABLED: ${PRG32_BACKEND_SCORES_WRITE_ENABLED:-false}
-      PRG32_BACKEND_SCORES_WRITE_MODE: ${PRG32_BACKEND_SCORES_WRITE_MODE:-test}
-      PRG32_BACKEND_SCORES_DISPOSABLE_ROOT: ${PRG32_BACKEND_SCORES_DISPOSABLE_ROOT:-/writer-data}
-      PRG32_BACKEND_SCORES_MAX_CONTENT_BYTES: ${PRG32_BACKEND_SCORES_MAX_CONTENT_BYTES:-1024}
-      PRG32_BACKEND_SCORES_RATE_LIMIT_MAX: ${PRG32_BACKEND_SCORES_RATE_LIMIT_MAX:-120}
-      PRG32_BACKEND_SCORES_RATE_LIMIT_WINDOW_SECONDS: ${PRG32_BACKEND_SCORES_RATE_LIMIT_WINDOW_SECONDS:-60}
-      PRG32_BACKEND_SCORES_RATE_LIMIT_BURST: ${PRG32_BACKEND_SCORES_RATE_LIMIT_BURST:-16}
-      PRG32_BACKEND_SCORES_RATE_LIMIT_MAX_CLIENTS: ${PRG32_BACKEND_SCORES_RATE_LIMIT_MAX_CLIENTS:-4096}
-      PRG32_BACKEND_SCORES_MAX_ROWS: ${PRG32_BACKEND_SCORES_MAX_ROWS:-100000}
-      PRG32_BACKEND_BACKUP_ENABLED: ${PRG32_BACKEND_BACKUP_ENABLED:-false}
-      PRG32_BACKEND_BACKUP_MODE: ${PRG32_BACKEND_BACKUP_MODE:-test}
-      PRG32_BACKEND_BACKUP_MAX_ARCHIVE_BYTES: ${PRG32_BACKEND_BACKUP_MAX_ARCHIVE_BYTES:-1073741824}
-      PRG32_BACKEND_BACKUP_MAX_EXPANDED_BYTES: ${PRG32_BACKEND_BACKUP_MAX_EXPANDED_BYTES:-4294967296}
-      PRG32_BACKEND_BACKUP_MAX_ENTRY_BYTES: ${PRG32_BACKEND_BACKUP_MAX_ENTRY_BYTES:-2147483648}
-      PRG32_BACKEND_BACKUP_MAX_MANIFEST_BYTES: ${PRG32_BACKEND_BACKUP_MAX_MANIFEST_BYTES:-262144}
-      PRG32_BACKEND_BACKUP_MAX_ENTRIES: ${PRG32_BACKEND_BACKUP_MAX_ENTRIES:-50000}
-      PRG32_BACKEND_BACKUP_MAX_PATH_BYTES: ${PRG32_BACKEND_BACKUP_MAX_PATH_BYTES:-1024}
-      PRG32_BACKEND_BACKUP_MAX_PATH_DEPTH: ${PRG32_BACKEND_BACKUP_MAX_PATH_DEPTH:-32}
-      PRG32_BACKEND_BACKUP_MAX_COMPRESSION_RATIO: ${PRG32_BACKEND_BACKUP_MAX_COMPRESSION_RATIO:-200}
-      PRG32_BACKEND_REVIEW_MAX_SUBMISSIONS: ${PRG32_BACKEND_REVIEW_MAX_SUBMISSIONS:-1000}
-      PRG32_BACKEND_SESSION_SECRET: ${PRG32_WRITER_SESSION_SECRET:-local-disposable-session-secret-change-me-123456}
-      PRG32_BACKEND_BOOTSTRAP_TOKEN: ${PRG32_WRITER_BOOTSTRAP_TOKEN:-local-disposable-bootstrap-token-change-me-123456}
-      PRG32_BACKEND_SESSION_SECURE: ${PRG32_BACKEND_SESSION_SECURE:-true}
-      PRG32_BACKEND_SESSION_SAMESITE: ${PRG32_BACKEND_SESSION_SAMESITE:-none}
-      PRG32_BACKEND_SECRET_ENCRYPTION_ENABLED: ${PRG32_BACKEND_SECRET_ENCRYPTION_ENABLED:-false}
-      PRG32_BACKEND_SECRET_KEY_REGISTRY: ${PRG32_WRITER_KEY_REGISTRY:-/writer-data/key-registry.json}
-    ports:
-      - "127.0.0.1:5091:5090"
-    networks:
-      - app
-      - default
-    volumes:
-      - ./backend:/app
-      - ${PRG32_BACKEND_NODE_MODULES_DIR:-./.local/backend/node_modules}:/app/node_modules
-      - ${PRG32_WRITER_DATA_DIR:-./.local/writer/auth-data}:/writer-data
-      - ${PRG32_WRITER_SHADOW_DIR:-./.local/writer/shadow}:/writer-shadow:ro
-      - ${PRG32_WRITER_STORE_DIR:-./.local/writer/store}:/writer-store
-    healthcheck:
-      test:
-        - CMD
-        - node
-        - -e
-        - >-
-          fetch('http://127.0.0.1:5090/health').then(response => {
-          if (!response.ok) process.exit(1); })
-      interval: 10s
-      timeout: 5s
-      retries: 3
-      start_period: 5s
-
-  # Opt-in edge bridge for the dual-origin browser contract. It is a proxy
-  # rather than a second Fastify process, so the ordinary writer remains the
-  # only owner of the disposable auth database.
-  auth-writer-edge-proxy:
-    profiles: ["dual-origin", "dev"]
-    image: docker.io/library/nginx:1.29-alpine@sha256:5616878291a2eed594aee8db4dade5878cf7edcb475e59193904b198d9b830de
-    depends_on:
-      auth-writer:
-        condition: service_healthy
-    volumes:
-      - ./docker/auth-writer-edge-proxy.conf:/etc/nginx/nginx.conf:ro
-    networks:
-      - app
-      - edge
-    labels:
-      traefik.enable: "true"
-      traefik.docker.network: ${DREAM_EDGE_NETWORK:-dream_edge}
-      traefik.http.routers.prg32-auth-api-dual.rule: Host(`${PRG32_API_DOMAIN:-api.prg32.dream.test}`) && (PathPrefix(`/auth`) || PathPrefix(`/api/auth`) || PathPrefix(`/api/admin/federation`))
-      traefik.http.routers.prg32-auth-api-dual.priority: "100"
-      traefik.http.routers.prg32-auth-api-dual.entrypoints: websecure
-      traefik.http.routers.prg32-auth-api-dual.tls: "true"
-      traefik.http.routers.prg32-auth-api-dual.middlewares: dream-security-headers@file
-      traefik.http.services.prg32-auth-api-dual.loadbalancer.server.port: "5090"
-    healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:5090/health || exit 1"]
-      interval: 5s
-      timeout: 5s
-      retries: 12
-      start_period: 3s
-
-  flask:
-    profiles: ["dev"]
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: riscv-prg32/cartridge-store:dev
-    command: ["flask", "--app", "app:app", "run", "--host=0.0.0.0", "--port=5080", "--debug"]
-    environment:
-      # These stable values are local-development fallbacks only. Production
-      # uses a separate service and still requires an explicit SECRET_KEY.
-      SECRET_KEY: ${PRG32_DEV_SECRET_KEY:-prg32-local-development-secret-do-not-use-in-production-2026}
-      PRG32_BOOTSTRAP_TOKEN: ${PRG32_DEV_BOOTSTRAP_TOKEN:-prg32-local-development-bootstrap-token-2026}
-      PRG32_ENV: development
-      PRG32_SESSION_COOKIE_SECURE: "0"
-      PRG32_STORE_DATA: /data
-      PRG32_STORE_DB: /data/cartridge_store.sqlite
-      PRG32_MP_MAX_PEERS: ${PRG32_MP_MAX_PEERS:-8}
-      PRG32_MDNS_DISABLED: "${PRG32_MDNS_DISABLED:-1}"
-      FLASK_APP: app:app
-      FLASK_DEBUG: "1"
-      PYTHONDONTWRITEBYTECODE: "1"
-    volumes:
-      - .:/app
-      - ${PRG32_FLASK_DATA_DIR:-./.local/flask/data}:/data
+      - ${PRG32_CANONICAL_DATA_DIR:-./.local/candidate/canonical}:/canonical
     networks:
       - app
       - edge
@@ -243,20 +50,18 @@ services:
       traefik.http.routers.prg32-api-dev.entrypoints: websecure
       traefik.http.routers.prg32-api-dev.tls: "true"
       traefik.http.routers.prg32-api-dev.middlewares: dream-security-headers@file
-      traefik.http.services.prg32-api-dev.loadbalancer.server.port: "5080"
+      traefik.http.services.prg32-api-dev.loadbalancer.server.port: "5090"
     healthcheck:
       test:
         - CMD
-        - python
-        - -c
+        - node
+        - -e
         - >-
-          import urllib.request;
-          urllib.request.urlopen(
-          'http://127.0.0.1:5080/.well-known/prg32-store.json', timeout=3
-          ).read()
+          fetch('http://127.0.0.1:5090/ready').then(response => {
+          if (!response.ok) process.exit(1); })
       interval: 10s
       timeout: 5s
-      retries: 6
+      retries: 12
       start_period: 10s
 
   next:
@@ -267,28 +72,14 @@ services:
     image: riscv-prg32/cartridge-store-frontend:dev
     command: ["sh", "-c", "pnpm install --frozen-lockfile && exec pnpm exec next dev --webpack --hostname 0.0.0.0"]
     depends_on:
-      flask:
-        condition: service_healthy
-      auth-writer-edge-proxy:
+      backend:
         condition: service_healthy
     environment:
       NODE_ENV: development
       NEXT_TELEMETRY_DISABLED: "1"
       WATCHPACK_POLLING: "true"
       WATCHPACK_POLLING_INTERVAL: "1000"
-      FLASK_PROXY_TARGET: http://flask:5080
-      PRG32_ADMIN_FASTIFY_TARGET: ${PRG32_ADMIN_FASTIFY_TARGET:-}
-      # Optional M2 isolated publishing/review owner. Keep empty unless the
-      # disposable Fastify writer is intentionally enabled for this dev run.
-      PRG32_WORKFLOW_FASTIFY_TARGET: ${PRG32_WORKFLOW_FASTIFY_TARGET:-}
-      PRG32_FEDERATION_ADMIN_INTEGRATION_ENABLED: ${PRG32_FEDERATION_ADMIN_INTEGRATION_ENABLED:-false}
-      PRG32_FEDERATION_ADMIN_FASTIFY_TARGET: ${PRG32_FEDERATION_ADMIN_FASTIFY_TARGET:-}
-      PRG32_AUTH_INTEGRATION_ENABLED: ${PRG32_AUTH_INTEGRATION_ENABLED:-false}
-      PRG32_AUTH_FASTIFY_TARGET: ${PRG32_AUTH_FASTIFY_TARGET:-}
-      PRG32_DUAL_ORIGIN_INTEGRATION_ENABLED: ${PRG32_DUAL_ORIGIN_INTEGRATION_ENABLED:-true}
-      NEXT_PUBLIC_PRG32_DUAL_ORIGIN_ENABLED: ${PRG32_DUAL_ORIGIN_INTEGRATION_ENABLED:-true}
-      NEXT_PUBLIC_PRG32_API_ORIGIN: ${PRG32_DUAL_ORIGIN_API_ORIGIN:-https://api.prg32.dream.test}
-      NEXT_PUBLIC_FLASK_WS_URL: wss://${PRG32_API_DOMAIN:-api.prg32.dream.test}/api/multiplayer
+      NEXT_PUBLIC_PRG32_API_ORIGIN: ${PRG32_API_ORIGIN:-https://api.prg32.dream.test}
     volumes:
       - ./frontend:/app
       - ${PRG32_FRONTEND_NODE_MODULES_DIR:-./.local/frontend/node_modules}:/app/node_modules
@@ -307,7 +98,7 @@ services:
 
 networks:
   app:
-    name: prg32_cartridge_store_dev
+    name: prg32_store_dev
   edge:
     name: ${DREAM_EDGE_NETWORK:-dream_edge}
     external: true

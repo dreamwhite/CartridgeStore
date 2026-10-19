@@ -220,7 +220,7 @@ CREATE INDEX site_assets_state_idx
 `asset_key` is a bounded logical key such as `branding.logo`,
 `branding.favicon`, or an approved custom key. It is never concatenated into a
 filesystem path. The public legacy `/static/custom/<filename>` route may be a
-compatibility projection while Flask exists; the target API resolves a logical
+compatibility projection while the canonical API resolves a logical
 key to an object and applies the same MIME/size/path checks as cartridge media.
 `storage_objects` remains the sole authority for the asset's physical metadata;
 `site_assets` contains only the logical relationship and lifecycle state.
