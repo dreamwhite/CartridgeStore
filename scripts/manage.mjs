@@ -29,6 +29,12 @@ import {
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const VERSION = "m5.5.4";
+const STANDALONE_SECRET_FILES = Object.freeze([
+  "canonical-read-authorization",
+  "canonical-write-authorization",
+  "session-secret",
+  "bootstrap-token",
+]);
 
 function readEnvFile(filePath) {
   if (!filePath) return {};
@@ -122,6 +128,7 @@ function configValues(ctx) {
   if (ctx.profileName === "standalone") return {
     data: value(ctx, "PRG32_DATA_DIR"),
     keyRegistry: value(ctx, "PRG32_KEY_REGISTRY_FILE"),
+    secretDirectory: value(ctx, "PRG32_SECRET_DIR"),
     backupDestination: value(ctx, "PRG32_BACKUP_DESTINATION_DIR")
   };
   if (ctx.profileName === "candidate") return {
@@ -132,13 +139,27 @@ function configValues(ctx) {
   return {
     data: value(ctx, "PRG32_OPERATIONAL_DATA_DIR"),
     keyRegistry: value(ctx, "PRG32_OPERATIONAL_KEY_REGISTRY_FILE"),
+    secretDirectory: value(ctx, "PRG32_OPERATIONAL_SECRET_DIR"),
     backupDestination: value(ctx, "PRG32_OPERATIONAL_BACKUP_DESTINATION_DIR")
   };
 }
 
 function requiredConfigNames(ctx) {
-  if (ctx.profileName === "standalone") return ["PRG32_DATA_DIR", "PRG32_KEY_REGISTRY_FILE", "PRG32_CANONICAL_READ_AUTHORIZATION", "PRG32_CANONICAL_WRITE_AUTHORIZATION", "PRG32_SESSION_SECRET", "PRG32_BOOTSTRAP_TOKEN", "PRG32_TRUST_PROXY", "PRG32_FRONTEND_PUBLIC_ORIGIN", "PRG32_API_PUBLIC_ORIGIN", "PRG32_WS_PUBLIC_URL"];
-  if (ctx.profileName === "operational") return ["PRG32_OPERATIONAL_DATA_DIR", "PRG32_OPERATIONAL_KEY_REGISTRY_FILE", "PRG32_OPERATIONAL_CANONICAL_READ_AUTHORIZATION", "PRG32_OPERATIONAL_CANONICAL_WRITE_AUTHORIZATION", "PRG32_OPERATIONAL_SESSION_SECRET", "PRG32_OPERATIONAL_BOOTSTRAP_TOKEN", "PRG32_OPERATIONAL_EMAIL_FROM"];
+  if (ctx.profileName === "standalone") return [
+    "PRG32_DATA_DIR",
+    "PRG32_KEY_REGISTRY_FILE",
+    "PRG32_SECRET_DIR",
+    "PRG32_TRUST_PROXY",
+    "PRG32_FRONTEND_PUBLIC_ORIGIN",
+    "PRG32_API_PUBLIC_ORIGIN",
+    "PRG32_WS_PUBLIC_URL"
+  ];
+  if (ctx.profileName === "operational") return [
+    "PRG32_OPERATIONAL_DATA_DIR",
+    "PRG32_OPERATIONAL_KEY_REGISTRY_FILE",
+    "PRG32_OPERATIONAL_SECRET_DIR",
+    "PRG32_OPERATIONAL_EMAIL_FROM"
+  ];
   return [];
 }
 
@@ -156,6 +177,27 @@ function inspectConfig(ctx, { allowMissingData = false, requireBackup = false } 
       checks.push({ name: "key-registry", status: (stat.mode & 0o077) === 0 ? "PASS" : "FAIL", detail: (stat.mode & 0o077) === 0 ? "protected regular file" : "group/world-readable" });
     } catch (error) { checks.push({ name: "key-registry", status: "FAIL", detail: error.message }); }
   } else if (ctx.profileName !== "candidate") checks.push({ name: "key-registry", status: "FAIL", detail: "key registry is not configured" });
+  if (ctx.profileName === "standalone" || ctx.profileName === "operational") {
+    if (!configured.secretDirectory) {
+      checks.push({ name: "secret-directory", status: "FAIL", detail: "PRG32_SECRET_DIR is not configured" });
+    } else {
+      try {
+        directoryStat(configured.secretDirectory, "secret directory");
+        checks.push({ name: "secret-directory", status: "PASS", detail: "regular directory" });
+        for (const fileName of STANDALONE_SECRET_FILES) {
+          const filePath = path.join(configured.secretDirectory, fileName);
+          const stat = regularStat(filePath, `secret file ${fileName}`);
+          checks.push({
+            name: `secret:${fileName}`,
+            status: (stat.mode & 0o077) === 0 ? "PASS" : "FAIL",
+            detail: (stat.mode & 0o077) === 0 ? "protected regular file" : "group/world-readable",
+          });
+        }
+      } catch (error) {
+        checks.push({ name: "secret-files", status: "FAIL", detail: error.message });
+      }
+    }
+  }
   if (requireBackup) {
     if (!configured.backupDestination) checks.push({ name: "backup-destination", status: "FAIL", detail: "PRG32_BACKUP_DESTINATION_DIR is required for host backup commands" });
     else {
@@ -175,15 +217,35 @@ async function composeConfigCheck(ctx, { synthetic = false, scheduler = false } 
     if (synthetic) {
       keyFile = path.join(temp, "key-registry.json");
       fs.writeFileSync(keyFile, "{}\n", { mode: 0o600 });
-      const syntheticPaths = { data: path.join(temp, "data"), backup: path.join(temp, "backups") };
+      const syntheticPaths = {
+        data: path.join(temp, "data"),
+        backup: path.join(temp, "backups"),
+        secretDirectory: path.join(temp, "secrets"),
+      };
       fs.mkdirSync(syntheticPaths.data, { recursive: true, mode: 0o700 });
       fs.mkdirSync(syntheticPaths.backup, { recursive: true, mode: 0o700 });
+      fs.mkdirSync(syntheticPaths.secretDirectory, { recursive: true, mode: 0o700 });
+      for (const fileName of STANDALONE_SECRET_FILES) {
+        fs.writeFileSync(
+          path.join(syntheticPaths.secretDirectory, fileName),
+          "synthetic-secret-value-012345678901234567890123\n",
+          { mode: 0o600 },
+        );
+      }
       Object.assign(env, {
-        PRG32_DATA_DIR: syntheticPaths.data, PRG32_KEY_REGISTRY_FILE: keyFile, PRG32_BACKUP_DESTINATION_DIR: syntheticPaths.backup,
-        PRG32_CANONICAL_READ_AUTHORIZATION: "synthetic-read", PRG32_CANONICAL_WRITE_AUTHORIZATION: "synthetic-write", PRG32_SESSION_SECRET: "synthetic-session", PRG32_BOOTSTRAP_TOKEN: "synthetic-bootstrap",
-        PRG32_TRUST_PROXY: "false", PRG32_FRONTEND_PUBLIC_ORIGIN: "https://store.example.invalid", PRG32_API_PUBLIC_ORIGIN: "https://api.example.invalid", PRG32_WS_PUBLIC_URL: "wss://api.example.invalid/api/multiplayer",
-        PRG32_OPERATIONAL_DATA_DIR: syntheticPaths.data, PRG32_OPERATIONAL_KEY_REGISTRY_FILE: keyFile, PRG32_OPERATIONAL_CANONICAL_READ_AUTHORIZATION: "synthetic-read", PRG32_OPERATIONAL_CANONICAL_WRITE_AUTHORIZATION: "synthetic-write", PRG32_OPERATIONAL_SESSION_SECRET: "synthetic-session", PRG32_OPERATIONAL_BOOTSTRAP_TOKEN: "synthetic-bootstrap", PRG32_OPERATIONAL_EMAIL_FROM: "noreply@example.invalid",
-        PRG32_OPERATIONAL_BACKUP_DESTINATION_DIR: syntheticPaths.backup, PRG32_OPERATIONAL_KEY_REGISTRY_FILE: keyFile,
+        PRG32_DATA_DIR: syntheticPaths.data,
+        PRG32_KEY_REGISTRY_FILE: keyFile,
+        PRG32_SECRET_DIR: syntheticPaths.secretDirectory,
+        PRG32_BACKUP_DESTINATION_DIR: syntheticPaths.backup,
+        PRG32_TRUST_PROXY: "false",
+        PRG32_FRONTEND_PUBLIC_ORIGIN: "https://store.example.invalid",
+        PRG32_API_PUBLIC_ORIGIN: "https://api.example.invalid",
+        PRG32_WS_PUBLIC_URL: "wss://api.example.invalid/api/multiplayer",
+        PRG32_OPERATIONAL_DATA_DIR: syntheticPaths.data,
+        PRG32_OPERATIONAL_KEY_REGISTRY_FILE: keyFile,
+        PRG32_OPERATIONAL_SECRET_DIR: syntheticPaths.secretDirectory,
+        PRG32_OPERATIONAL_EMAIL_FROM: "noreply@example.invalid",
+        PRG32_OPERATIONAL_BACKUP_DESTINATION_DIR: syntheticPaths.backup,
         PRG32_CANDIDATE_DATA_DIR: syntheticPaths.data
       });
     }

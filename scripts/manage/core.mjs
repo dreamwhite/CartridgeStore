@@ -84,7 +84,7 @@ export function parseArgs(argv) {
     profile: "standalone",
     explicitProfile: false,
     envFile: undefined,
-    timeout: 120
+    timeout: 300
   };
   const positional = [];
   const commandArgs = [];
