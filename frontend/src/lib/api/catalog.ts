@@ -1,5 +1,6 @@
 import { requestSameOriginJson } from "./client";
 import type { Game, GamesResponse } from "./contracts";
+import { publicApiPath } from "./origin";
 import { gameResponseSchema, gamesResponseSchema } from "./schemas";
 
 export type CatalogQuery = {
@@ -34,12 +35,14 @@ export function catalogMediaPath(
 ): string {
   const query = new URLSearchParams({ version });
   if (architecture) query.set("architecture", architecture);
-  return catalogPath(`/${encodeURIComponent(gameId)}/${kind}`, query);
+  return publicApiPath(catalogPath(`/${encodeURIComponent(gameId)}/${kind}`, query));
 }
 
 export function catalogDownloadPath(gameId: string, version: string, architecture: string): string {
-  return catalogPath(
-    `/${encodeURIComponent(gameId)}/download`,
-    new URLSearchParams({ version, architecture }),
+  return publicApiPath(
+    catalogPath(
+      `/${encodeURIComponent(gameId)}/download`,
+      new URLSearchParams({ version, architecture }),
+    ),
   );
 }

@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { catalogDownloadPath, getCatalog } from "./catalog";
+import { catalogDownloadPath, catalogMediaPath, getCatalog } from "./catalog";
 
 describe("catalog compatibility routing", () => {
   beforeEach(() => vi.stubGlobal("fetch", vi.fn()));
@@ -21,5 +21,11 @@ describe("catalog compatibility routing", () => {
 
   test("keeps binary download URLs on the canonical API route", () => {
     expect(catalogDownloadPath("org.example.pong", "1.0.0", "qemu")).toBe("/api/games/org.example.pong/download?version=1.0.0&architecture=qemu");
+  });
+
+  test("keeps cartridge media URLs on the canonical API route", () => {
+    expect(catalogMediaPath("org.example.pong", "icon", "1.0.0")).toBe(
+      "/api/games/org.example.pong/icon?version=1.0.0",
+    );
   });
 });
