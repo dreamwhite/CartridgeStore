@@ -49,5 +49,5 @@ pytest -q
 git diff --check
 ```
 
-The cutover audit and remaining work are tracked in
-`docs/modernization/flask-retirement-audit.md`.
+The runtime cutover audit and remaining work are tracked in
+`docs/modernization/`.
