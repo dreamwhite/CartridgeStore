@@ -1,6 +1,7 @@
 import {
   nonEmpty,
   optionalNonEmpty,
+  optionalSecret,
   positiveInteger,
 } from "./env-values.js";
 
@@ -57,8 +58,9 @@ export function resolveEmailConfig(
   const emailSmtpUser = optionalNonEmpty(
     environment.PRG32_BACKEND_EMAIL_SMTP_USER,
   );
-  const emailSmtpPassword = optionalNonEmpty(
-    environment.PRG32_BACKEND_EMAIL_SMTP_PASSWORD,
+  const emailSmtpPassword = optionalSecret(
+    environment,
+    "PRG32_BACKEND_EMAIL_SMTP_PASSWORD",
   );
   if (emailTransport === "smtp" && (!emailSmtpHost || !emailPublicOrigin)) {
     throw new Error(

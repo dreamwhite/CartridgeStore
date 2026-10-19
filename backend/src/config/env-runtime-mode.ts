@@ -16,7 +16,7 @@ import {
   type CatalogReadMode,
   type CanonicalWorkflowMode,
 } from "../storage-v2/read-mode.js";
-import { optionalNonEmpty } from "./env-values.js";
+import { optionalNonEmpty, optionalSecret } from "./env-values.js";
 
 /** Resolved canonical and candidate runtime mode policy. */
 export interface RuntimeModeConfig {
@@ -49,8 +49,9 @@ export function resolveRuntimeMode(
   const canonicalStorageRoot = optionalNonEmpty(
     environment.PRG32_BACKEND_CANONICAL_STORAGE_ROOT,
   );
-  const canonicalReadAuthorization = optionalNonEmpty(
-    environment.PRG32_BACKEND_CANONICAL_READ_AUTHORIZATION,
+  const canonicalReadAuthorization = optionalSecret(
+    environment,
+    "PRG32_BACKEND_CANONICAL_READ_AUTHORIZATION",
   );
   if (catalogReadMode === CANONICAL_DISPOSABLE_READ_MODE) {
     if (!canonicalStorageRoot) {
@@ -73,8 +74,9 @@ export function resolveRuntimeMode(
   const canonicalWorkflowMode = optionalNonEmpty(
     environment.PRG32_BACKEND_CANONICAL_WORKFLOW_MODE,
   );
-  const canonicalWriteAuthorization = optionalNonEmpty(
-    environment.PRG32_BACKEND_CANONICAL_WRITE_AUTHORIZATION,
+  const canonicalWriteAuthorization = optionalSecret(
+    environment,
+    "PRG32_BACKEND_CANONICAL_WRITE_AUTHORIZATION",
   );
   const candidateRuntimeMode = optionalNonEmpty(
     environment.PRG32_BACKEND_CANDIDATE_MODE,

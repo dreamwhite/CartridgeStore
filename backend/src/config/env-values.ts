@@ -1,4 +1,8 @@
+import fs from "node:fs";
 import net from "node:net";
+import path from "node:path";
+
+const MAX_SECRET_FILE_BYTES = 64 * 1024;
 
 /** Parses a required positive integer environment value. */
 export function positiveInteger(
@@ -45,6 +49,45 @@ export function optionalNonEmpty(
 ): string | undefined {
   const candidate = value?.trim();
   return candidate ? candidate : undefined;
+}
+
+/**
+ * Resolves a secret from an inline value or a Docker-compatible secret file.
+ *
+ * The file form is intentionally opt-in through `${name}_FILE`, preserving
+ * existing environment-based deployments while keeping secret contents out of
+ * Compose interpolation and process arguments.
+ */
+export function optionalSecret(
+  environment: NodeJS.ProcessEnv,
+  name: string,
+): string | undefined {
+  const inlineValue = optionalNonEmpty(environment[name]);
+  const fileValue = optionalNonEmpty(environment[`${name}_FILE`]);
+  if (inlineValue && fileValue) {
+    throw new Error(`${name} and ${name}_FILE cannot both be set`);
+  }
+  if (!fileValue) return inlineValue;
+  if (!path.isAbsolute(fileValue) || fileValue.includes("\0")) {
+    throw new Error(`${name}_FILE must be an absolute path`);
+  }
+
+  let stats: fs.Stats;
+  try {
+    stats = fs.lstatSync(fileValue);
+  } catch {
+    throw new Error(`${name}_FILE is unavailable`);
+  }
+  if (stats.isSymbolicLink() || !stats.isFile()) {
+    throw new Error(`${name}_FILE must be a regular file`);
+  }
+  if (stats.size <= 0 || stats.size > MAX_SECRET_FILE_BYTES) {
+    throw new Error(`${name}_FILE has an invalid size`);
+  }
+
+  const secret = optionalNonEmpty(fs.readFileSync(fileValue, "utf8"));
+  if (!secret) throw new Error(`${name}_FILE must not be empty`);
+  return secret;
 }
 
 /** Parses and validates the trusted proxy CIDR allowlist. */

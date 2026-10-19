@@ -8,6 +8,7 @@ import {
   looksLikeSqliteUri,
   nonEmpty,
   optionalNonEmpty,
+  optionalSecret,
   positiveInteger,
   requiredSecret,
 } from "./env-values.js";
@@ -70,7 +71,10 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
   const authWriteMode = optionalNonEmpty(environment.PRG32_BACKEND_AUTH_WRITE_MODE);
   const authWriteDatabasePath = optionalNonEmpty(environment.PRG32_BACKEND_AUTH_WRITE_DB);
   const authDisposableRoot = optionalNonEmpty(environment.PRG32_BACKEND_AUTH_DISPOSABLE_ROOT);
-  const authSessionSecret = optionalNonEmpty(environment.PRG32_BACKEND_SESSION_SECRET);
+  const authSessionSecret = optionalSecret(
+    environment,
+    "PRG32_BACKEND_SESSION_SECRET",
+  );
   const federationAutoProvision = booleanValue(
     "PRG32_BACKEND_FEDERATION_AUTO_PROVISION",
     environment.PRG32_BACKEND_FEDERATION_AUTO_PROVISION,
@@ -79,8 +83,14 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
   if (federationAutoProvision && (!authWriteEnabled || authWriteMode !== "test" || (environment.NODE_ENV ?? "").trim().toLowerCase() === "production")) {
     throw new Error("federation auto-provisioning is restricted to the isolated non-production auth writer");
   }
-  const authBootstrapToken = optionalNonEmpty(environment.PRG32_BACKEND_BOOTSTRAP_TOKEN);
-  const federationLifecycleTestToken = optionalNonEmpty(environment.PRG32_BACKEND_FEDERATION_LIFECYCLE_TEST_TOKEN);
+  const authBootstrapToken = optionalSecret(
+    environment,
+    "PRG32_BACKEND_BOOTSTRAP_TOKEN",
+  );
+  const federationLifecycleTestToken = optionalSecret(
+    environment,
+    "PRG32_BACKEND_FEDERATION_LIFECYCLE_TEST_TOKEN",
+  );
   const federationLifecycleTestEnabled = booleanValue(
     "PRG32_BACKEND_FEDERATION_LIFECYCLE_TEST_ENABLED",
     environment.PRG32_BACKEND_FEDERATION_LIFECYCLE_TEST_ENABLED,

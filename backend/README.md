@@ -98,5 +98,6 @@ PRG32_BACKEND_SESSION_SECRET=local-only-secret
 The root and database must already exist, contain no symlink indirection, and
 must be outside the operational database path. Device/inode checks reject
 same-file hardlinks. SQLite URI syntax is rejected. The operational/shadow
-database path is always rejected as a writer target. See
-[`27-m4-5-trusted-write-boundary-report.md`](../docs/modernization/27-m4-5-trusted-write-boundary-report.md).
+database path is always rejected as a writer target. See the
+[security model](../docs/security.md) and the
+[configuration reference](../docs/configuration.md).
