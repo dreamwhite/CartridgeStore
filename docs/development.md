@@ -43,11 +43,29 @@ python -m pip install --upgrade pip
 python -m pip install -r requirements.txt
 ```
 
-## Recommended integrated development
+## Current Fastify + Next.js workflow
 
-The single Compose file starts Flask, Next, the isolated Fastify auth writer,
-the Nginx API bridge, and the initialization job. It expects the shared
-Traefik network to exist:
+The active application path is the two-service Fastify + Next.js deployment.
+For an infrastructure-independent checkout, follow the
+[standalone deployment guide](../deploy/standalone/README.md). It keeps
+Fastify as the API and WebSocket owner and Next.js as the storefront owner.
+
+For the shared Dream infrastructure, use the operational template after its
+external networks and secret directory are prepared. The expected public
+origins are:
+
+- `https://store.prg32.dream.test` for Next.js;
+- `https://api.prg32.dream.test` for Fastify, API calls and WebSockets.
+
+The repository's root Compose profile below remains available only when a
+compatibility route or migration boundary needs Flask.
+
+## Compatibility integrated development
+
+The root Compose file starts Flask, Next, the isolated Fastify auth writer, the
+API bridge, and the initialization job. Use it only for legacy route coverage
+or migration diagnostics; it is not the target two-service topology. It
+expects the shared Traefik network to exist:
 
 ```bash
 docker network inspect dream_edge >/dev/null
@@ -92,9 +110,34 @@ The first request after a source edit may wait for the relevant process to
 recompile. If a container is healthy but the store host returns 502, check
 the `next` log and retry after the `Ready` message.
 
-## Direct process workflow
+## Direct Fastify + Next.js workflow
 
-Use this when Docker/Traefik is not needed.
+Use this when Docker and Traefik are not needed:
+
+Terminal 1 — Fastify:
+
+```bash
+source "$HOME/.nvm/nvm.sh"
+nvm use 24
+pnpm --dir backend dev
+```
+
+Terminal 2 — Next.js:
+
+```bash
+source "$HOME/.nvm/nvm.sh"
+nvm use 24
+PRG32_API_UPSTREAM=http://127.0.0.1:5090 pnpm --dir frontend dev
+```
+
+Fastify listens on `http://127.0.0.1:5090` by default and Next.js on
+`http://127.0.0.1:3000`. The browser-facing Next.js requests use the
+backend-neutral `PRG32_API_UPSTREAM` setting; `FLASK_PROXY_TARGET` is only a
+legacy compatibility escape hatch.
+
+## Direct Flask compatibility workflow
+
+Use this only when working on the transitional Flask/PWA path.
 
 Terminal 1 — Flask compatibility service:
 
@@ -118,16 +161,7 @@ Next runs on `http://127.0.0.1:3000`. Its default compatibility rewrites target
 Flask; WebSocket clients must use the Flask WebSocket URL directly because
 Next rewrites do not proxy WebSocket upgrades.
 
-Terminal 3 — Fastify, when working on the isolated backend:
-
-```bash
-source "$HOME/.nvm/nvm.sh"
-nvm use 24
-pnpm --dir backend dev
-```
-
-The default Fastify process listens on `127.0.0.1:5090` and is read-oriented.
-Do not enable its writable test boundaries against production paths.
+Do not enable writable test boundaries against production paths.
 
 ## Verification commands
 
@@ -143,7 +177,7 @@ pnpm --dir backend run build
 pnpm --dir frontend run typecheck
 pnpm --dir frontend run lint
 pnpm --dir frontend run test
-FLASK_PROXY_TARGET=http://backend:5080 pnpm --dir frontend run build
+PRG32_API_UPSTREAM=http://127.0.0.1:5090 pnpm --dir frontend run build
 
 source .venv/bin/activate
 python -m py_compile app.py cartridge_store/*.py
@@ -153,9 +187,9 @@ docker compose --profile dev config --quiet
 git diff --check
 ```
 
-The frontend production build intentionally requires `FLASK_PROXY_TARGET` so
-the migration cannot silently produce an image with an accidental proxy
-target. Playwright and Authentik browser suites are not part of these checks.
+The frontend build accepts the backend-neutral `PRG32_API_UPSTREAM`; the
+legacy `FLASK_PROXY_TARGET` remains available only for compatibility. Browser
+E2E and Authentik suites are not part of these checks.
 
 ## Safe contribution rules
 

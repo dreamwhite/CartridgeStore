@@ -3,6 +3,11 @@
 This guide creates a consistent PRG32 Cartridge Store environment for local
 development, classroom demos, and quick service validation.
 
+> This page preserves the transitional Flask/PWA workflow for compatibility.
+> For the active Fastify + Next.js application, start with the
+> [development guide](development.md) and the
+> [standalone deployment guide](../deploy/standalone/README.md).
+
 ## Requirements
 
 - Python 3.13 is recommended. Python 3.11 or newer should also work.
