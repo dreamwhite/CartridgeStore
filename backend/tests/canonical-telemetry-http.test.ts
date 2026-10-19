@@ -18,7 +18,7 @@ const SESSION_SECRET = "m52g3-disposable-session-secret-1234567890";
 function environment(fixture: ReturnType<typeof createDisposableCanonicalReadFixture>, extra: NodeJS.ProcessEnv = {}): NodeJS.ProcessEnv {
   return {
     NODE_ENV: "test",
-    PRG32_BACKEND_DB: path.join(fixture.sourceRoot, "cartridge_store.sqlite"),
+    PRG32_BACKEND_DB: path.join(fixture.sourceRoot, "store.sqlite"),
     PRG32_BACKEND_STORE_DATA: fixture.sourceRoot,
     PRG32_BACKEND_CATALOG_READ_MODE: "canonical-disposable",
     PRG32_BACKEND_CANONICAL_STORAGE_ROOT: fixture.targetRoot,
@@ -61,7 +61,7 @@ function sample(frame: number): Record<string, unknown> {
 
 afterEach(() => disposeDifferentialFixtures());
 
-describe("M5.2g.3 canonical telemetry, scores, runs and metrics", () => {
+describe("canonical telemetry, scores, runs and metrics", () => {
   it("writes downloads, scores, runs and samples to the same canonical database and preserves historical data", async () => {
     const fixture = createDisposableCanonicalReadFixture();
     const manifest = inventoryLegacySnapshot(fixture.sourceConfig).manifest;
@@ -80,7 +80,7 @@ describe("M5.2g.3 canonical telemetry, scores, runs and metrics", () => {
     expect(before.prepare("SELECT run_id FROM runs WHERE run_id = 'run-m52d'").get()).toEqual({ run_id: "run-m52d" });
     const targetBefore = fs.readFileSync(path.join(fixture.targetRoot, "store.sqlite"));
     before.close();
-    const sourceBefore = fs.readFileSync(path.join(fixture.sourceRoot, "cartridge_store.sqlite"));
+  const sourceBefore = fs.readFileSync(path.join(fixture.sourceRoot, "store.sqlite"));
     const indexBefore = fs.readFileSync(path.join(fixture.sourceRoot, "index.json"));
 
     const app = buildApp({ config: loadConfig(environment(fixture)), logger: false });
@@ -139,7 +139,7 @@ describe("M5.2g.3 canonical telemetry, scores, runs and metrics", () => {
     expect(after.prepare("SELECT user_id, delivery_outcome FROM download_events ORDER BY id DESC LIMIT 1").get()).toEqual({ user_id: null, delivery_outcome: "started" });
     after.close();
     expect(crypto.createHash("sha256").update(fs.readFileSync(path.join(fixture.targetRoot, "store.sqlite"))).digest("hex")).not.toBe(crypto.createHash("sha256").update(targetBefore).digest("hex"));
-    expect(fs.readFileSync(path.join(fixture.sourceRoot, "cartridge_store.sqlite"))).toEqual(sourceBefore);
+  expect(fs.readFileSync(path.join(fixture.sourceRoot, "store.sqlite"))).toEqual(sourceBefore);
     expect(fs.readFileSync(path.join(fixture.sourceRoot, "index.json"))).toEqual(indexBefore);
     expect(fs.existsSync(path.join(fixture.targetRoot, "index.json"))).toBe(false);
   }, 60_000);

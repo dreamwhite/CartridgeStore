@@ -31,6 +31,7 @@ import {
 } from "./errors.js";
 import {
   authScalar,
+  normalizeDisplayName,
   validateAccountInput,
 } from "./validation.js";
 import { RegistrationWorkflow } from "./registration-workflow.js";
@@ -173,9 +174,9 @@ export class AuthService {
   login(username: string, password: string): Principal {
     const db = this.writableDatabase();
     const row = db.prepare(
-      "SELECT id, username, email, password_hash, role, external_provider, disabled_at, account_status FROM users WHERE username = ? OR email = ?"
+      "SELECT id, username, display_name, email, password_hash, role, external_provider, disabled_at, account_status FROM users WHERE username = ? OR email = ?"
     ).get(username.trim(), username.trim().toLowerCase()) as {
-      id: number; username: string; email: string; password_hash: string | null; role: string; external_provider: string | null; disabled_at: string | null; account_status?: string | null
+      id: number; username: string; display_name?: string | null; email: string; password_hash: string | null; role: string; external_provider: string | null; disabled_at: string | null; account_status?: string | null
     } | undefined;
     if (!row?.password_hash || !isAccountEnabled(db, row.id)) return ANONYMOUS;
     const result = verifyWerkzeugPasswordHash(row.password_hash, password);
@@ -262,6 +263,13 @@ export class AuthService {
 
   completePasswordReset(token: string, password: string, confirmation: string): void {
     this.passwordWorkflow.completePasswordReset(token, password, confirmation);
+  }
+
+  updateDisplayName(userId: number, displayName: string): Principal {
+    const normalized = normalizeDisplayName(displayName);
+    const database = this.writableDatabase();
+    database.prepare("UPDATE users SET display_name = ? WHERE id = ?").run(normalized, userId);
+    return loadPrincipalById(database, userId, "session");
   }
 
   listTokens(userId: number): Array<Record<string, unknown>> {

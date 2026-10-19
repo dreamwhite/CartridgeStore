@@ -75,7 +75,7 @@ afterEach(async () => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
-describe("M5.2g.27 canonical administration and runtime configuration", () => {
+describe("canonical administration and runtime configuration", () => {
   it("persists typed settings without exposing secret values and records SQLite audit evidence", async () => {
     const test = fixture();
     const admin = await adminSession(test.app);

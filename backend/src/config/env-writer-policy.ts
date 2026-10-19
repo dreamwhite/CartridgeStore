@@ -87,6 +87,7 @@ export function validateWriterConfiguration(
     }
     if (
       path.resolve(authWriteDatabasePath) === path.resolve(configuredDatabase) &&
+      canonicalWorkflowMode !== CANONICAL_WORKFLOW_MODE &&
       input.candidateRuntimeMode === undefined &&
       !operationalMode
     ) {

@@ -68,8 +68,8 @@ afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
-describe("M6.3a statistics API parity", () => {
-  it("matches deterministic Flask-generated fixtures for all four public endpoints", async () => {
+describe("statistics API parity", () => {
+  it("matches deterministic fixtures for all four public endpoints", async () => {
     const test = fixture();
     const cases: Array<[string, unknown]> = [
       ["/api/stats/downloads", {
@@ -123,7 +123,7 @@ describe("M6.3a statistics API parity", () => {
     await test.app.close();
   });
 
-  it("preserves Flask fallback semantics for invalid filters and bounds", async () => {
+  it("preserves compatibility fallback semantics for invalid filters and bounds", async () => {
     const test = fixture();
     const invalid = await test.app.inject({ method: "GET", url: "/api/stats/downloads?granularity=hour&since=bad&until=bad&limit=invalid" });
     expect(invalid.statusCode).toBe(200);
@@ -141,7 +141,7 @@ describe("M6.3a statistics API parity", () => {
     await test.app.close();
   });
 
-  it("returns Flask-compatible zero aggregates for an empty database", async () => {
+  it("returns compatibility zero aggregates for an empty database", async () => {
     const test = fixture();
     const database = new Database(test.databasePath);
     database.exec("DELETE FROM download_events; DELETE FROM scores; DELETE FROM runs;");

@@ -108,7 +108,9 @@ function createCatalogReadSource(options: CatalogRouteOptions): CatalogReadSourc
     if (!options.config.canonicalStorageRoot || (options.config.catalogReadMode === CANONICAL_DISPOSABLE_READ_MODE && options.config.canonicalReadAuthorization !== CANONICAL_READ_AUTHORIZATION) || (options.config.catalogReadMode === CANONICAL_OPERATIONAL_READ_MODE && (!options.config.canonicalReadAuthorization || options.config.canonicalReadAuthorization.length < 32))) throw new Error("canonical catalog mode is not authorized");
     return new CanonicalCatalogReadSource(new CanonicalCatalog(options.config.canonicalStorageRoot, {
       operational: options.config.catalogReadMode === CANONICAL_OPERATIONAL_READ_MODE,
-      legacyRoots: options.config.candidateRuntimeMode === undefined && options.config.catalogReadMode !== CANONICAL_OPERATIONAL_READ_MODE
+      legacyRoots: options.config.candidateRuntimeMode === undefined &&
+        options.config.canonicalWorkflowMode === undefined &&
+        options.config.catalogReadMode !== CANONICAL_OPERATIONAL_READ_MODE
         ? [options.config.storeDataDirectory, options.config.databasePath]
         : []
     }));

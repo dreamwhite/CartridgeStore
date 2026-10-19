@@ -83,19 +83,4 @@ export function registerSamlRoutes(app: FastifyInstance, options: SamlRouteOptio
   app.get<{ Params: ProviderParams }>("/api/auth/saml/:providerId/login", async (request, reply) => login(request, reply, request.params.providerId));
   app.post<{ Params: ProviderParams }>("/api/auth/saml/:providerId/acs", async (request, reply) => acs(request, reply, request.params.providerId));
   app.get<{ Params: ProviderParams }>("/api/auth/saml/:providerId/metadata", async (request, reply) => metadata(request, reply, request.params.providerId));
-
-  // Flask exposed providerless aliases. They remain compatibility-only and
-  // fail closed when configuration cannot identify exactly one provider.
-  app.get("/auth/saml/login", async (request, reply) => {
-    try { return login(request, reply, options.saml.providerlessProviderId()); }
-    catch (error) { return operationFailure(reply, request, error, options.config); }
-  });
-  app.post("/auth/saml/acs", async (request, reply) => {
-    try { return acs(request, reply, options.saml.providerlessProviderId()); }
-    catch (error) { return operationFailure(reply, request, error, options.config); }
-  });
-  app.get("/auth/saml/metadata", async (request, reply) => {
-    try { return metadata(request, reply, options.saml.providerlessProviderId()); }
-    catch (error) { return operationFailure(reply, request, error, options.config); }
-  });
 }

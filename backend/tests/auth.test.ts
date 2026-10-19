@@ -80,7 +80,7 @@ afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) fs.rmSync(directory, { recursive: true, force: true });
 });
 
-describe("M4.1 isolated authentication foundation", () => {
+describe("isolated authentication foundation", () => {
   it("completes username registration and password recovery through the in-memory mail transport", async () => {
     const databasePath = createAuthDatabase();
     const app = createApp(databasePath);
@@ -161,6 +161,23 @@ describe("M4.1 isolated authentication foundation", () => {
     expect(dualOriginMe.statusCode).toBe(200);
     expect(jsonBody(dualOriginMe).user).toMatchObject({ username: "admin", email: "admin@example.test" });
     const currentCsrf = await csrf(app, rotatedCookie);
+    const profile = await app.inject({
+      method: "PATCH",
+      url: "/auth/profile",
+      headers: { cookie: rotatedCookie, "x-csrftoken": currentCsrf.token },
+      payload: { display_name: "Ada Lovelace" },
+    });
+    expect(profile.statusCode).toBe(200);
+    expect(jsonBody(profile).user).toMatchObject({
+      name: "Ada Lovelace",
+      username: "admin",
+    });
+    const updatedMe = await app.inject({
+      method: "GET",
+      url: "/auth/me",
+      headers: { cookie: rotatedCookie },
+    });
+    expect(jsonBody(updatedMe).user).toMatchObject({ name: "Ada Lovelace" });
     expect((await app.inject({ method: "POST", url: "/auth/logout", headers: { cookie: rotatedCookie } })).statusCode).toBe(403);
     expect((await app.inject({ method: "POST", url: "/auth/logout", headers: { cookie: rotatedCookie, "x-csrftoken": currentCsrf.token } })).statusCode).toBe(200);
     expect((await app.inject({ method: "GET", url: "/auth/me", headers: { cookie: rotatedCookie } })).statusCode).toBe(401);

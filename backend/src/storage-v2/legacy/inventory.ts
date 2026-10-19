@@ -383,7 +383,7 @@ function readCatalogEntities(context: ScanContext, catalog: CatalogDocument): { 
         artifacts.push(artifact);
         releaseArtifacts.push(artifact);
       }
-      // Flask exposes the catalog's version metadata/colophon. Prefer those
+      // The catalog exposes version metadata and colophon. Prefer those
       // public values and only fall back to embedded blocks when the legacy
       // index has no value to expose.
       const metadata = object(versionRecord.metadata)

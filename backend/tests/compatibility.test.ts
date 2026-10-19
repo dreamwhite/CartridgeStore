@@ -39,7 +39,7 @@ function rows(table: string): JsonObject[] {
 function createFixtureDatabase(): { databasePath: string; sqlite: Database.Database } {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "prg32-m21-backend-"));
   temporaryDirectories.push(directory);
-  const databasePath = path.join(directory, "cartridge_store.sqlite");
+  const databasePath = path.join(directory, "store.sqlite");
   const sqlite = new Database(databasePath);
   sqlite.exec(`
     PRAGMA foreign_keys = ON;
@@ -87,8 +87,8 @@ afterEach(() => {
   }
 });
 
-describe("M2.1 data and serialization compatibility gate", () => {
-  it("matches the authoritative Flask SQLite schema snapshot", () => {
+describe("data and serialization compatibility gate", () => {
+  it("matches the authoritative SQLite schema snapshot", () => {
     const { sqlite } = createFixtureDatabase();
     const actual = inspectSchema(sqlite);
     expect(compareSchemaSnapshots(expectedSchema, actual)).toEqual([]);

@@ -74,7 +74,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
-describe("M6.3d.2h.8 native federation administration boundary", () => {
+describe("native federation administration boundary", () => {
   it("fails closed for lifecycle-test activation without isolated prerequisites", () => {
     expect(() => loadConfig({ PRG32_BACKEND_FEDERATION_LIFECYCLE_TEST_ENABLED: "true" })).toThrow(/lifecycle test routes require/);
     expect(() => loadConfig({ NODE_ENV: "production", PRG32_BACKEND_FEDERATION_LIFECYCLE_TEST_ENABLED: "true", PRG32_BACKEND_FEDERATION_LIFECYCLE_TEST_TOKEN: "x".repeat(40), PRG32_BACKEND_AUTH_WRITE_ENABLED: "true", PRG32_BACKEND_AUTH_WRITE_MODE: "test", PRG32_BACKEND_AUTH_WRITE_DB: "/tmp/auth.sqlite", PRG32_BACKEND_AUTH_DISPOSABLE_ROOT: "/tmp/auth-root", PRG32_BACKEND_SESSION_SECRET: "federation-admin-session-secret-123456789" })).toThrow(/cannot be enabled in production/);

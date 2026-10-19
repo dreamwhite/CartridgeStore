@@ -146,7 +146,7 @@ afterEach(async () => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
-describe("M6.3d.2e catalog administration", () => {
+describe("catalog administration", () => {
   it("lists and updates a cartridge through the durable publication pipeline", async () => {
     const test = fixture();
     const admin = await adminSession(test.app);

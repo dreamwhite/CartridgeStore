@@ -35,7 +35,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
-describe("M6.3d.2g.2 secret encryption", () => {
+describe("secret encryption", () => {
   it("uses authenticated, purpose-separated, nonce-unique envelopes", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "prg32-secrets-"));
     roots.push(root);

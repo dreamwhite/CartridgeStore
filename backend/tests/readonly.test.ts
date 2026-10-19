@@ -14,7 +14,7 @@ const temporaryDirectories: string[] = [];
 function createFixtureDatabase(): string {
   const directory = fs.mkdtempSync(path.join(os.tmpdir(), "prg32-backend-test-"));
   temporaryDirectories.push(directory);
-  const databasePath = path.join(directory, "cartridge_store.sqlite");
+    const databasePath = path.join(directory, "store.sqlite");
   const sqlite = new Database(databasePath);
   sqlite.exec(`
     PRAGMA foreign_keys = ON;
@@ -58,7 +58,7 @@ describe("read-only SQLite foundation", () => {
     resource.close();
   });
 
-  it("maps every current Flask table and preserves the representative columns", () => {
+  it("maps every current table and preserves the representative columns", () => {
     const databasePath = createFixtureDatabase();
     const resource = openReadonlyDatabase(loadConfig({ PRG32_BACKEND_DB: databasePath }));
     const snapshot = inspectSchema(resource.sqlite);

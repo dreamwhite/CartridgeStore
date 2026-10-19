@@ -50,7 +50,7 @@ function cartridge(id: string, version: string, architecture: "qemu" | "esp32c6"
 function configFor(root: string): LegacySnapshotConfig {
   return {
     root,
-    databasePath: "cartridge_store.sqlite",
+    databasePath: "store.sqlite",
     catalogPath: "index.json",
     dataRoot: ".",
     cartridgeRoot: "cartridges",
@@ -100,7 +100,7 @@ function createSnapshot(): { root: string; config: LegacySnapshotConfig; files: 
       }
     }
   }, null, 2));
-  const database = new Database(path.join(root, "cartridge_store.sqlite"));
+    const database = new Database(path.join(root, "store.sqlite"));
   database.pragma("foreign_keys = ON");
   database.exec(COMPATIBLE_SCHEMA_SQL);
   database.exec(`
@@ -118,7 +118,7 @@ function createSnapshot(): { root: string; config: LegacySnapshotConfig; files: 
   database.prepare("INSERT INTO cartridge_submissions(id, game_id, version, status, submitted_by_user_id, reviewed_by_user_id, metadata_json, architectures_json, created_at, reviewed_at) VALUES (8, 'org.example.fixture', '1.0.0', 'rejected', 1, 1, ?, '[]', '2026-01-01T00:00:00Z', '2026-01-02T00:00:00Z')").run(JSON.stringify({ id: "org.example.fixture", version: "1.0.0" }));
   database.prepare("INSERT INTO download_events(game_id, version, architecture, user_id, ip_hash, user_agent, downloaded_at) VALUES ('org.example.fixture', '1.0.0', 'qemu', 1, 'secret-ip-hash', 'secret-user-agent', '2026-01-03T00:00:00Z')").run();
   database.close();
-  fs.writeFileSync(path.join(root, ".snapshot.json"), JSON.stringify({ abi: "prg32-legacy-snapshot-1.0", state: "ready", database: "cartridge_store.sqlite", catalog: "index.json", dataRoot: ".", cartridgeRoot: "cartridges" }));
+    fs.writeFileSync(path.join(root, ".snapshot.json"), JSON.stringify({ abi: "prg32-legacy-snapshot-1.0", state: "ready", database: "store.sqlite", catalog: "index.json", dataRoot: ".", cartridgeRoot: "cartridges" }));
   return { root, config: configFor(root), files: { qemu, esp32c6 } };
 }
 
@@ -126,7 +126,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
-describe("M5.2b legacy inventory", () => {
+describe("legacy inventory", () => {
   it("produces deterministic, secret-free inventory with embedded media and mappings", () => {
     const fixture = createSnapshot();
     const first = inventoryLegacySnapshot(fixture.config);
@@ -156,7 +156,7 @@ describe("M5.2b legacy inventory", () => {
     const fixture = createSnapshot();
     fs.rmSync(path.join(fixture.root, "cartridges/org.example.fixture/1.0.0/qemu.prg32"));
     fs.writeFileSync(path.join(fixture.root, "index.json"), fs.readFileSync(path.join(fixture.root, "index.json"), "utf8").replace("cartridges/org.example.fixture/1.0.0/esp32c6.prg32", "../outside.prg32"));
-    const database = new Database(path.join(fixture.root, "cartridge_store.sqlite"));
+    const database = new Database(path.join(fixture.root, "store.sqlite"));
     database.prepare("INSERT INTO download_events(game_id, version, architecture, downloaded_at) VALUES ('missing-game', '9.0.0', 'qemu', '2026-01-04T00:00:00Z')").run();
     database.close();
     fs.symlinkSync(path.join(fixture.root, "custom/logo.bin"), path.join(fixture.root, "cartridges/symlink.prg32"));
@@ -177,7 +177,7 @@ describe("M5.2b legacy inventory", () => {
 
   it("fails closed for an unsupported legacy schema", () => {
     const fixture = createSnapshot();
-    const databasePath = path.join(fixture.root, "cartridge_store.sqlite");
+    const databasePath = path.join(fixture.root, "store.sqlite");
     fs.rmSync(databasePath);
     const database = new Database(databasePath);
     database.exec("CREATE TABLE users(id INTEGER PRIMARY KEY)");

@@ -226,14 +226,6 @@ export class SamlService {
     this.callbackLimiter = new BoundedRateLimiter(config.authRateLimitMax * 2, config.authRateLimitWindowSeconds, config.authRateLimitMaxClients);
   }
 
-  /** Resolve the legacy providerless alias only when it is unambiguous. */
-  providerlessProviderId(): string {
-    const enabled = this.providers.list().filter((provider) => provider.protocol === "saml" && provider.enabled);
-    if (enabled.length === 1 && enabled[0]) return enabled[0].providerId;
-    if (enabled.length === 0) throw new SamlError("saml_provider_alias_unavailable", 404, "SAML provider alias is unavailable");
-    throw new SamlError("saml_provider_alias_ambiguous", 409, "SAML provider alias is ambiguous");
-  }
-
   async start(providerId: string, returnTo: string | null, context: SamlRequestContext): Promise<SamlLoginResult> {
     if (!this.loginLimiter.allow(context.ip + ":" + providerId)) throw new SamlError("saml_rate_limited", 429, "too many SAML requests");
     const provider = this.requireProvider(providerId);

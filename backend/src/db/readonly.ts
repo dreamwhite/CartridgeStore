@@ -98,7 +98,12 @@ function validateAuthWriterTarget(config: BackendConfig): { writerStats: fs.Stat
   }
   const operationalReal = fs.realpathSync(config.databasePath);
   const operationalIdentity = identity(fs.statSync(config.databasePath), "operational database");
-  if (isContained(rootReal, operationalReal) && config.candidateRuntimeMode === undefined) {
+  const sharedCanonicalDatabase = config.canonicalWorkflowMode === "disposable";
+  if (
+    isContained(rootReal, operationalReal) &&
+    config.candidateRuntimeMode === undefined &&
+    !sharedCanonicalDatabase
+  ) {
     throw new ReadonlyDatabaseError("auth disposable root may not contain the operational database");
   }
 
@@ -112,7 +117,11 @@ function validateAuthWriterTarget(config: BackendConfig): { writerStats: fs.Stat
     throw new ReadonlyDatabaseError("auth write database must reside inside the auth disposable root");
   }
   const writerStats = fs.statSync(config.authWriteDatabasePath);
-  if (identity(writerStats, "auth write database") === operationalIdentity && config.candidateRuntimeMode === undefined) {
+  if (
+    identity(writerStats, "auth write database") === operationalIdentity &&
+    config.candidateRuntimeMode === undefined &&
+    !sharedCanonicalDatabase
+  ) {
     throw new ReadonlyDatabaseError("auth write database must not identify the operational database");
   }
 

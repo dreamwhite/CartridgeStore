@@ -122,7 +122,8 @@ function catalogLookup(catalog: StatsCatalogSource): Map<string, Record<string, 
   try {
     return new Map(catalog.listGames().map((game) => [String(game.id), game]));
   } catch {
-    // Flask keeps the aggregate row when a catalog entry is unavailable or malformed.
+    // Preserve the historical aggregate row when a catalog entry is unavailable
+    // or malformed.
     return new Map();
   }
 }

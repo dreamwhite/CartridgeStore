@@ -19,7 +19,7 @@ afterEach(async () => {
   for (const app of apps.splice(0)) await app.close();
 });
 
-describe("M5.5.3 adversarial regressions", () => {
+describe("adversarial regressions", () => {
   it("preserves the firmware-discoverable store API index on both root spellings", async () => {
     const app = await startApp({ PRG32_STORE_NAME: "Disposable Store", PRG32_STORE_VERSION: "2.4.0" });
     for (const url of ["/api", "/api/"]) {

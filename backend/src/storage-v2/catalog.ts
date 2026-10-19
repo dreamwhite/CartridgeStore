@@ -49,7 +49,13 @@ function insideOrContains(left: string, right: string): boolean {
 export function assertExplicitDisposableRoot(rootValue: string, legacyRoots: readonly string[] = []): string {
   if (!rootValue.trim() || rootValue.split(/[\\/]/u).includes("..")) throw new Error("canonical disposable storage root is invalid");
   const root = path.resolve(rootValue);
-  const forbidden = [process.cwd(), ...legacyRoots].filter(Boolean);
+  const workingDirectory = path.resolve(process.cwd());
+  const forbidden = [
+    ...(workingDirectory === path.parse(workingDirectory).root
+      ? []
+      : [workingDirectory]),
+    ...legacyRoots,
+  ].filter(Boolean);
   if (forbidden.some((candidate) => insideOrContains(root, candidate))) throw new Error("canonical disposable storage root overlaps an operational or repository root");
   if (!fs.existsSync(root) || fs.lstatSync(root).isSymbolicLink() || !fs.lstatSync(root).isDirectory()) throw new Error("canonical disposable storage root is unavailable");
   const marker = path.join(root, TARGET_ROOT_MARKER);

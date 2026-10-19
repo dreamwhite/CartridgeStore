@@ -102,7 +102,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
-describe("M5.2g.16 offline federation provisioning and identity continuity", () => {
+describe("offline federation provisioning and identity continuity", () => {
   it("provisions OIDC and SAML deterministically, migrates exact identities, preserves disabled state, and retries idempotently", () => {
     const fixture = database();
     try {

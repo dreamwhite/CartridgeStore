@@ -19,7 +19,7 @@ afterEach(async () => {
   for (const app of apps.splice(0)) await app.close();
 });
 
-describe("M5.5.1 bounded rate limiter", () => {
+describe("bounded rate limiter", () => {
   it("does not evict an active source when high-cardinality keys fill capacity", () => {
     const limiter = new BoundedRateLimiter(1, 10, 2);
     expect(limiter.allow("source-a", 0)).toBe(true);
@@ -31,7 +31,7 @@ describe("M5.5.1 bounded rate limiter", () => {
   });
 });
 
-describe("M5.5.1 WebSocket admission and abuse controls", () => {
+describe("WebSocket admission and abuse controls", () => {
   it("enforces global, source and anonymous admission caps with cleanup", async () => {
     const app = await startApp({
       PRG32_BACKEND_MP_MAX_CONNECTIONS: "2",
@@ -105,7 +105,7 @@ describe("M5.5.1 WebSocket admission and abuse controls", () => {
   });
 });
 
-describe("M5.5.1 HTTP limits and proxy attribution", () => {
+describe("HTTP limits and proxy attribution", () => {
   it("applies a bounded catalog quota and ignores forged forwarded headers without proxy trust", async () => {
     const app = await startApp({
       PRG32_BACKEND_HTTP_CATALOG_RATE_LIMIT_MAX: "1",

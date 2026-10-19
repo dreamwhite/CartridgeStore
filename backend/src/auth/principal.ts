@@ -70,7 +70,16 @@ function groupsForUser(sqlite: Database.Database, userId: number): string[] {
 
 export function principalFromUserRow(
   sqlite: Database.Database,
-  row: { id: number; username: string; email: string; role: string; external_provider?: string | null; disabled_at?: string | null; account_status?: string | null },
+  row: {
+    id: number;
+    username: string;
+    display_name?: string | null;
+    email: string;
+    role: string;
+    external_provider?: string | null;
+    disabled_at?: string | null;
+    account_status?: string | null;
+  },
   authMethod: Principal["authMethod"],
   tokenHash?: string
 ): Principal {
@@ -79,7 +88,7 @@ export function principalFromUserRow(
   return {
     authenticated: true,
     id: row.id,
-    name: row.username,
+    name: row.display_name?.trim() || row.username,
     username: row.username,
     email: row.email,
     role,
@@ -91,11 +100,26 @@ export function principalFromUserRow(
 
 export function loadPrincipalById(sqlite: Database.Database, userId: number, authMethod: Principal["authMethod"]): Principal {
   const columns = new Set((sqlite.prepare("PRAGMA table_info(users)").all() as Array<{ name: string }>).map((item) => item.name));
+  const displayName = columns.has("display_name") ? ", display_name" : "";
   const state = hasAccountStateColumn(sqlite) ? ", disabled_at" : "";
   const status = columns.has("account_status") ? ", account_status" : "";
   const row = sqlite.prepare(
-    "SELECT id, username, email, role, external_provider" + state + status + " FROM users WHERE id = ?"
-  ).get(userId) as { id: number; username: string; email: string; role: string; external_provider?: string | null; disabled_at?: string | null; account_status?: string | null } | undefined;
+    "SELECT id, username" +
+    displayName +
+    ", email, role, external_provider" +
+    state +
+    status +
+    " FROM users WHERE id = ?",
+  ).get(userId) as {
+    id: number;
+    username: string;
+    display_name?: string | null;
+    email: string;
+    role: string;
+    external_provider?: string | null;
+    disabled_at?: string | null;
+    account_status?: string | null;
+  } | undefined;
   return row ? principalFromUserRow(sqlite, row, authMethod) : ANONYMOUS;
 }
 
@@ -109,7 +133,7 @@ export function authenticateBearer(sqlite: Database.Database, token: string, wri
   return {
     ...lookup.owner,
     authenticated: true,
-    name: lookup.owner.username,
+    name: lookup.owner.displayName || lookup.owner.username,
     username: lookup.owner.username,
     role: normalizeRole(lookup.owner.role),
     groups: lookup.owner.groups,

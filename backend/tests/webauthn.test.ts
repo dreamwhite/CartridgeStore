@@ -36,7 +36,7 @@ async function csrf(app: ReturnType<typeof buildApp>, currentCookie = "") {
 
 afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
 
-describe("M5.3.8 WebAuthn containment", () => {
+describe("WebAuthn containment", () => {
   it("fails closed for missing RP/origin configuration", () => {
     expect(() => loadConfig({ PRG32_BACKEND_WEBAUTHN_ENABLED: "true", PRG32_BACKEND_AUTH_WRITE_ENABLED: "false" })).toThrow(/WebAuthn requires/iu);
     expect(() => loadConfig({ NODE_ENV: "test", PRG32_BACKEND_WEBAUTHN_ENABLED: "true", PRG32_BACKEND_AUTH_WRITE_ENABLED: "true", PRG32_BACKEND_WEBAUTHN_RP_ID: "api.example.test", PRG32_BACKEND_WEBAUTHN_ORIGINS: "https://store.example.test" })).toThrow(/compatible/iu);

@@ -32,7 +32,7 @@ function contract() {
   });
 }
 
-describe("M5.2g.4 mDNS discovery contract and lifecycle", () => {
+describe("mDNS discovery contract and lifecycle", () => {
   it("builds the exact source-backed service contract", () => {
     const value = contract();
     expect(value).toEqual({

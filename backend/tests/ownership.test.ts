@@ -89,7 +89,7 @@ async function submit(app: ReturnType<typeof buildApp>, token: string, gameId: s
 
 afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
 
-describe("M2.1 developer-owned submission API", () => {
+describe("developer-owned submission API", () => {
   it("denies anonymous and invalid sessions without scanning private data", async () => {
     const test = fixture();
     expect((await test.app.inject({ method: "GET", url: "/api/submissions/mine" })).statusCode).toBe(401);

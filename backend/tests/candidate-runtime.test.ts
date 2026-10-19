@@ -47,7 +47,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
-describe("M5.2g.9 disposable two-service candidate", () => {
+describe("disposable two-service candidate", () => {
   it("opens one canonical SQLite writer, reports canonical readiness, and releases its lease", async () => {
     const root = createRoot();
     const app = buildApp({ config: loadConfig(environment(root)), logger: false });

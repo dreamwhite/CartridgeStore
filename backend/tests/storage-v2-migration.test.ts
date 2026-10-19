@@ -81,7 +81,7 @@ function createSnapshot(): { root: string; config: LegacySnapshotConfig } {
       }
     }
   }, null, 2));
-  const database = new Database(path.join(root, "cartridge_store.sqlite"));
+  const database = new Database(path.join(root, "store.sqlite"));
   database.pragma("foreign_keys = ON");
   database.exec(COMPATIBLE_SCHEMA_SQL);
   database.exec(`
@@ -110,10 +110,10 @@ function createSnapshot(): { root: string; config: LegacySnapshotConfig } {
   }
   database.prepare("INSERT INTO download_events(game_id, version, architecture, user_id, ip_hash, user_agent, downloaded_at) VALUES ('org.example.m52c', '1.0.0', 'qemu', 4, 'sensitive-hash', 'sensitive-agent', '2026-01-02T00:00:00Z')").run();
   database.close();
-  fs.writeFileSync(path.join(root, ".snapshot.json"), JSON.stringify({ abi: "prg32-legacy-snapshot-1.0", state: "ready", database: "cartridge_store.sqlite", catalog: "index.json", dataRoot: ".", cartridgeRoot: "cartridges" }));
+  fs.writeFileSync(path.join(root, ".snapshot.json"), JSON.stringify({ abi: "prg32-legacy-snapshot-1.0", state: "ready", database: "store.sqlite", catalog: "index.json", dataRoot: ".", cartridgeRoot: "cartridges" }));
   return {
     root,
-    config: { root, databasePath: "cartridge_store.sqlite", catalogPath: "index.json", dataRoot: ".", cartridgeRoot: "cartridges", preparedMarkerPath: ".snapshot.json", submissionRoot: "pending", mediaRoot: "site-assets" }
+    config: { root, databasePath: "store.sqlite", catalogPath: "index.json", dataRoot: ".", cartridgeRoot: "cartridges", preparedMarkerPath: ".snapshot.json", submissionRoot: "pending", mediaRoot: "site-assets" }
   };
 }
 
@@ -125,7 +125,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
-describe("M5.2c disposable legacy-to-canonical migration", () => {
+describe("disposable legacy-to-canonical migration", () => {
   it("migrates a verified snapshot, preserves compatible data, and is idempotent", () => {
     const source = createSnapshot();
     const target = fs.mkdtempSync(path.join(os.tmpdir(), "prg32-m52c-target-parent-"));
@@ -180,7 +180,7 @@ describe("M5.2c disposable legacy-to-canonical migration", () => {
 
   it("retains an unmappable historical download as an explicit exception", () => {
     const source = createSnapshot();
-    const database = new Database(path.join(source.root, "cartridge_store.sqlite"));
+    const database = new Database(path.join(source.root, "store.sqlite"));
     database.prepare("INSERT INTO download_events(game_id, version, architecture, user_id, downloaded_at) VALUES ('legacy-only', '0.0.1', 'qemu', NULL, '2025-12-01T00:00:00Z')").run();
     database.close();
     const targetParent = fs.mkdtempSync(path.join(os.tmpdir(), "prg32-m52c-exception-parent-"));

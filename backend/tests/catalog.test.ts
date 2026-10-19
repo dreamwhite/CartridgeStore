@@ -59,8 +59,8 @@ afterEach(() => {
   }
 });
 
-describe("M3 read-only catalog and binary parity", () => {
-  it("matches Flask JSON, media, binary, error, range, and conditional responses", async () => {
+describe("read-only catalog and binary parity", () => {
+  it("matches JSON, media, binary, error, range, and conditional responses", async () => {
     const storeDirectory = createStore();
     const databasePath = path.join(storeDirectory, "missing.sqlite");
     const app = buildApp({

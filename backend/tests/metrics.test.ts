@@ -70,7 +70,7 @@ function sample(frame: number) {
 
 afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
 
-describe("M6.1 metrics, runs, and samples", () => {
+describe("metrics, runs, and samples", () => {
   it("accepts firmware-shaped anonymous ingestion without auth or CSRF and preserves NULL ownership", async () => {
     const test = fixture();
     const run = await test.app.inject({ method: "POST", url: "/api/runs", payload: { run_id: "firmware-run", board_id: "prg32-board", target: "qemu", display_backend: "headless", firmware_version: "dev", firmware_git_sha: "unknown", game_name: "metrics-game", sample_period_frames: 1, started_ms: 1000 } });

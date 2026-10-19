@@ -199,7 +199,9 @@ export function buildApp(options: AppOptions): FastifyInstance {
   const canonicalAdminCatalog = options.config.canonicalStorageRoot
     ? new CanonicalCatalog(options.config.canonicalStorageRoot, {
       operational: options.config.catalogReadMode === "canonical-operational",
-      legacyRoots: options.config.candidateRuntimeMode === undefined && options.config.catalogReadMode !== "canonical-operational"
+      legacyRoots: options.config.candidateRuntimeMode === undefined &&
+        options.config.canonicalWorkflowMode === undefined &&
+        options.config.catalogReadMode !== "canonical-operational"
         ? [options.config.storeDataDirectory, options.config.databasePath]
         : []
     })

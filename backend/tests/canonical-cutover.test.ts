@@ -89,7 +89,7 @@ function createLegacySnapshot(): { root: string; config: LegacySnapshotConfig; c
       }
     }
   }, null, 2));
-  const database = new Database(path.join(root, "cartridge_store.sqlite"));
+  const database = new Database(path.join(root, "store.sqlite"));
   database.pragma("foreign_keys = ON");
   database.exec(COMPATIBLE_SCHEMA_SQL);
   database.exec(`
@@ -98,11 +98,11 @@ function createLegacySnapshot(): { root: string; config: LegacySnapshotConfig; c
   `);
   database.prepare("INSERT INTO users(id, username, email, role) VALUES (1, 'fixture-user', 'fixture@example.test', 'publisher')").run();
   database.close();
-  fs.writeFileSync(path.join(root, ".snapshot.json"), JSON.stringify({ abi: "prg32-legacy-snapshot-1.0", state: "ready", database: "cartridge_store.sqlite", catalog: "index.json", dataRoot: ".", cartridgeRoot: "cartridges" }));
+  fs.writeFileSync(path.join(root, ".snapshot.json"), JSON.stringify({ abi: "prg32-legacy-snapshot-1.0", state: "ready", database: "store.sqlite", catalog: "index.json", dataRoot: ".", cartridgeRoot: "cartridges" }));
   return {
     root,
     cartridge: bytes,
-    config: { root, databasePath: "cartridge_store.sqlite", catalogPath: "index.json", dataRoot: ".", cartridgeRoot: "cartridges", preparedMarkerPath: ".snapshot.json", submissionRoot: null, mediaRoot: null }
+    config: { root, databasePath: "store.sqlite", catalogPath: "index.json", dataRoot: ".", cartridgeRoot: "cartridges", preparedMarkerPath: ".snapshot.json", submissionRoot: null, mediaRoot: null }
   };
 }
 
@@ -143,7 +143,7 @@ function candidateEnvironment(root: string): NodeJS.ProcessEnv {
 
 afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
 
-describe("M5.2g.14 disposable cutover dry-run", () => {
+describe("disposable cutover dry-run", () => {
   it("runs legacy inventory, migration, canonical ownership, backup-v4, restore and rollback rehearsal", async () => {
     const fixture = createLegacySnapshot();
     const sourceFingerprint = treeFingerprint(fixture.root);

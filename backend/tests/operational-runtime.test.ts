@@ -49,7 +49,7 @@ function environment(input: ReturnType<typeof fixture>): NodeJS.ProcessEnv {
   };
 }
 
-describe("M5.3.4 canonical operational runtime", () => {
+describe("canonical operational runtime", () => {
   it("boots only from an explicit canonical root and holds the writer lease", async () => {
     const input = fixture();
     const config = loadConfig(environment(input));

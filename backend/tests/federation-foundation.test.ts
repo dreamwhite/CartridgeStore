@@ -33,7 +33,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
-describe("M6.3d.2h.2 federated identity foundation", () => {
+describe("federated identity foundation", () => {
   it("applies an additive, idempotent writer-only migration and binds providers exactly", () => {
     const db = database();
     try {
@@ -91,7 +91,7 @@ describe("M6.3d.2h.2 federated identity foundation", () => {
       providers.create({ providerId: "school", protocol: "oidc", displayName: "School IdP", issuer: "https://id.example.test" });
       providers.setEnabled("school", true);
       const store = new FederationTransactionStore(db, "transaction-secret-that-is-at-least-32-bytes", providers);
-      const created = store.create({ protocol: "oidc", providerId: "school", callbackBinding: "https://store.example.test/callback", state: "state-value-with-at-least-thirty-two-bytes", nonce: "nonce-value", pkceVerifier: "pkce-verifier-value", requestId: "request-1", returnPath: "/account" });
+      const created = store.create({ protocol: "oidc", providerId: "school", callbackBinding: "https://store.example.test/callback", state: "state-value-with-at-least-thirty-two-bytes", nonce: "nonce-value", pkceVerifier: "pkce-verifier-value", requestId: "request-1", returnPath: "/dashboard/account" });
       const consumed = store.consume({ transactionId: created.transactionId, protocol: "oidc", providerId: "school", callbackBinding: "https://store.example.test/callback", state: created.state });
       expect(consumed.pkceVerifier).toBe("pkce-verifier-value");
       expect(() => store.consume({ transactionId: created.transactionId, protocol: "oidc", providerId: "school", callbackBinding: "https://store.example.test/callback", state: created.state })).toThrowError(FederationTransactionError);
@@ -116,7 +116,7 @@ describe("M6.3d.2h.2 federated identity foundation", () => {
       providers.setEnabled("school", true);
       const first = new FederationTransactionStore(db, "transaction-secret-that-is-at-least-32-bytes", providers);
       const duplicate = new FederationTransactionStore(second, "transaction-secret-that-is-at-least-32-bytes", secondProviders);
-      const pending = first.create({ protocol: "saml", providerId: "school", callbackBinding: "acs-binding", state: "state-value-with-at-least-thirty-two-bytes", requestId: "saml-request-1", returnPath: "/account" });
+      const pending = first.create({ protocol: "saml", providerId: "school", callbackBinding: "acs-binding", state: "state-value-with-at-least-thirty-two-bytes", requestId: "saml-request-1", returnPath: "/dashboard/account" });
       const results = await Promise.allSettled([
         Promise.resolve().then(() => first.consume({ transactionId: pending.transactionId, protocol: "saml", providerId: "school", callbackBinding: "acs-binding", state: pending.state })),
         Promise.resolve().then(() => duplicate.consume({ transactionId: pending.transactionId, protocol: "saml", providerId: "school", callbackBinding: "acs-binding", state: pending.state }))

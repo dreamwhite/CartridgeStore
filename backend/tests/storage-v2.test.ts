@@ -40,7 +40,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
-describe("M5.2a canonical SQLite schema", () => {
+describe("canonical SQLite schema", () => {
   it("initializes a complete target schema and version tuple from an empty disposable root", () => {
     const resource = initializeDisposableStorage(temporaryRoot());
     const tables = new Set(
@@ -148,7 +148,7 @@ describe("M5.2a canonical SQLite schema", () => {
   });
 });
 
-describe("M5.2a immutable object storage", () => {
+describe("immutable object storage", () => {
   it("stores, resolves, verifies, and never overwrites an immutable object", () => {
     const resource = initializeDisposableStorage(temporaryRoot());
     const store = new ObjectStore(resource.sqlite, resource.paths);
@@ -190,7 +190,7 @@ describe("M5.2a immutable object storage", () => {
   });
 });
 
-describe("M5.2a read-only integrity audit", () => {
+describe("read-only integrity audit", () => {
   it("detects missing files, hash mismatches, orphan files, and invalid relationships without mutation", () => {
     const resource = initializeDisposableStorage(temporaryRoot());
     seedRelease(resource.sqlite);
@@ -226,7 +226,7 @@ describe("M5.2a read-only integrity audit", () => {
   });
 });
 
-describe("M5.2a disposable-root and failure safeguards", () => {
+describe("disposable-root and failure safeguards", () => {
   it("refuses repository roots, symlink roots, and non-empty roots", () => {
     expect(() => initializeDisposableStorage(process.cwd())).toThrow(StorageDatabaseError);
     const nonEmpty = temporaryRoot();

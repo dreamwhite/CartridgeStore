@@ -127,7 +127,7 @@ afterEach(async () => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
-describe("M6.3d.2b settings API", () => {
+describe("settings API", () => {
   it("requires an administrator and redacts excluded legacy settings", async () => {
     const test = fixture();
     expect((await test.app.inject({ method: "GET", url: "/api/admin/settings" })).statusCode).toBe(401);

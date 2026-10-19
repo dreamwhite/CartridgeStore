@@ -82,27 +82,6 @@ export class OidcService {
     return this.providers.publicList();
   }
 
-  /** Resolve the legacy providerless alias only when it is unambiguous. */
-  providerlessProviderId(): string {
-    const enabled = this.providers.list().filter((provider) => provider.protocol === "oidc" && provider.enabled);
-    if (enabled.length === 1 && enabled[0]) return enabled[0].providerId;
-    if (enabled.length === 0) throw new OidcError("oidc_provider_alias_unavailable", 404, "OIDC provider alias is unavailable");
-    throw new OidcError("oidc_provider_alias_ambiguous", 409, "OIDC provider alias is ambiguous");
-  }
-
-  /**
-   * The legacy callback path is not the registered redirect URI. Preserve the
-   * provider's exact origin/path and copy only callback query parameters so
-   * token exchange remains bound to the configured redirect URI.
-   */
-  providerlessCallbackUrl(providerId: string, requestUrl: string): string {
-    const provider = this.requireProvider(providerId);
-    const incoming = new URL(requestUrl, provider.redirectUri);
-    const canonical = new URL(provider.redirectUri);
-    canonical.search = incoming.search;
-    return canonical.toString();
-  }
-
   async start(providerId: string, returnTo: string | null, context: OidcRequestContext): Promise<OidcLoginResult> {
     if (!this.loginLimiter.allow(context.ip + ":" + providerId)) throw new OidcError("oidc_rate_limited", 429, "too many OIDC requests");
     const provider = this.requireProvider(providerId);

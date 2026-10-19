@@ -1,5 +1,4 @@
 import crypto from "node:crypto";
-import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -16,9 +15,6 @@ import {
   migrateLegacySnapshot,
   type MigrationConfig
 } from "../migration/index.js";
-import { CanonicalReadProjection } from "./projection.js";
-import { bodyEqual, headersEqual, jsonEqual, normalizeResponse } from "./normalize.js";
-import type { DifferentialReport, DifferentialRequest, DifferentialResult, NormalizedResponse } from "./types.js";
 
 const PNG = Buffer.from("89504e470d0a1a0a", "hex");
 const roots: string[] = [];
@@ -27,15 +23,12 @@ interface Fixture {
   readonly sourceRoot: string;
   readonly sourceConfig: LegacySnapshotConfig;
   readonly manifest: ReturnType<typeof inventoryLegacySnapshot>["manifest"];
-  readonly requests: readonly DifferentialRequest[];
-  readonly repositoryRoot: string;
 }
 
 export interface DisposableCanonicalReadFixture {
   readonly sourceRoot: string;
   readonly targetRoot: string;
   readonly sourceConfig: LegacySnapshotConfig;
-  readonly requests: readonly DifferentialRequest[];
 }
 
 interface FixtureVariant {
@@ -162,7 +155,6 @@ function addVariant(
 }
 
 function createFixture(): Fixture {
-  const repositoryRoot = fs.existsSync(path.join(process.cwd(), "backend")) ? process.cwd() : path.resolve(process.cwd(), "..");
   const sourceRoot = fs.mkdtempSync(path.join(os.tmpdir(), "prg32-m52d-source-"));
   roots.push(sourceRoot);
   const games: Record<string, FixtureGame> = {};
@@ -187,7 +179,7 @@ function createFixture(): Fixture {
   }
   fs.writeFileSync(path.join(sourceRoot, "index.json"), JSON.stringify({ abi: "prg32-cartridge-store-index-1.0", games }, null, 2));
 
-  const databasePath = path.join(sourceRoot, "cartridge_store.sqlite");
+  const databasePath = path.join(sourceRoot, "store.sqlite");
   const database = new Database(databasePath);
   database.pragma("foreign_keys = ON");
   database.exec(COMPATIBLE_SCHEMA_SQL);
@@ -209,39 +201,10 @@ function createFixture(): Fixture {
     database.prepare("INSERT INTO download_events(game_id, version, architecture, user_id, downloaded_at) VALUES (?, ?, ?, ?, ?)").run(gameId, version, architecture, userId, downloadedAt);
   }
   database.close();
-  fs.writeFileSync(path.join(sourceRoot, ".snapshot.json"), JSON.stringify({ abi: "prg32-legacy-snapshot-1.0", state: "ready", database: "cartridge_store.sqlite", catalog: "index.json", dataRoot: ".", cartridgeRoot: "cartridges", submissionRoot: "pending" }));
-  const sourceConfig: LegacySnapshotConfig = { root: sourceRoot, databasePath: "cartridge_store.sqlite", catalogPath: "index.json", dataRoot: ".", cartridgeRoot: "cartridges", preparedMarkerPath: ".snapshot.json", submissionRoot: "pending" };
+  fs.writeFileSync(path.join(sourceRoot, ".snapshot.json"), JSON.stringify({ abi: "prg32-legacy-snapshot-1.0", state: "ready", database: "store.sqlite", catalog: "index.json", dataRoot: ".", cartridgeRoot: "cartridges", submissionRoot: "pending" }));
+  const sourceConfig: LegacySnapshotConfig = { root: sourceRoot, databasePath: "store.sqlite", catalogPath: "index.json", dataRoot: ".", cartridgeRoot: "cartridges", preparedMarkerPath: ".snapshot.json", submissionRoot: "pending" };
   const manifest = inventoryLegacySnapshot(sourceConfig).manifest;
-  return {
-    sourceRoot,
-    sourceConfig,
-    manifest,
-    repositoryRoot,
-    requests: [
-      { method: "GET", path: "/api/games" },
-      { method: "GET", path: "/api/games?q=alpha" },
-      { method: "GET", path: "/api/games?search=org.example.beta" },
-      { method: "GET", path: "/api/games?q=does-not-exist" },
-      { method: "GET", path: "/api/games?page=1&per_page=1" },
-      { method: "GET", path: "/api/games?page=2&per_page=1" },
-      { method: "GET", path: "/api/games?page=999&per_page=1" },
-      { method: "GET", path: "/api/games?per_page=invalid" },
-      { method: "GET", path: "/api/games/org.example.alpha" },
-      { method: "GET", path: "/api/games/org.example.alpha?version=1.0.0" },
-      { method: "GET", path: "/api/games/org.example.alpha?version=2.0.0&architecture=qemu" },
-      { method: "GET", path: "/api/games/org.example.alpha/icon?version=2.0.0&architecture=qemu" },
-      { method: "GET", path: "/api/games/org.example.alpha/screenshot?version=2.0.0&architecture=qemu" },
-      { method: "GET", path: "/api/games/org.example.alpha/screenshot?version=2.0.0&architecture=esp32c6" },
-      { method: "GET", path: "/api/games/org.example.alpha/colophon?version=2.0.0" },
-      { method: "GET", path: "/api/games/org.example.alpha/download?version=1.0.0&architecture=esp32c6" },
-      { method: "GET", path: "/api/games/org.example.alpha/download?version=2.0.0&architecture=qemu" },
-      { method: "GET", path: "/api/games/org.example.beta/download" },
-      { method: "GET", path: "/api/games/org.example.alpha/download?architecture=unsupported" },
-      { method: "GET", path: "/api/games/unknown" },
-      { method: "GET", path: "/api/games/org.example.alpha?version=9.9.9" },
-      { method: "GET", path: "/api/games/org.example.alpha/download?architecture=qemu&version=9.9.9" }
-    ].map((item, index) => ({ ...item, path: item.path, method: "GET", case: `case-${index + 1}` } as DifferentialRequest))
-  };
+  return { sourceRoot, sourceConfig, manifest };
 }
 
 function migrationConfig(fixture: Fixture, targetRoot: string, extra: Partial<MigrationConfig> = {}): MigrationConfig {
@@ -259,115 +222,7 @@ export function createDisposableCanonicalReadFixture(): DisposableCanonicalReadF
   const targetRoot = path.join(parent, "canonical");
   const migrated = migrateLegacySnapshot(migrationConfig(fixture, targetRoot));
   if (!migrated.ok || !migrated.verification?.ok) throw new Error("disposable canonical read fixture migration failed");
-  return { sourceRoot: fixture.sourceRoot, targetRoot, sourceConfig: fixture.sourceConfig, requests: fixture.requests };
-}
-
-function legacyResponses(fixture: Fixture): Map<string, NormalizedResponse> {
-  const flaskRoot = fs.mkdtempSync(path.join(os.tmpdir(), "prg32-m52d-flask-"));
-  roots.push(flaskRoot);
-  fs.cpSync(fixture.sourceRoot, flaskRoot, { recursive: true });
-  const requestFile = path.join(flaskRoot, "requests.json");
-  fs.writeFileSync(requestFile, JSON.stringify({ repositoryRoot: fixture.repositoryRoot, dataRoot: flaskRoot, databasePath: path.join(flaskRoot, "cartridge_store.sqlite"), requests: fixture.requests.map((request, index) => ({ case: `case-${index + 1}`, path: request.path })) }));
-  const python = path.join(fixture.repositoryRoot, ".venv313/bin/python");
-  const executable = fs.existsSync(python) ? python : "python3";
-  const helper = path.join(fixture.repositoryRoot, "backend/tests/fixtures/flask-differential-helper.py");
-  const output = execFileSync(executable, [helper, requestFile], { cwd: fixture.repositoryRoot, encoding: "utf8", env: { ...process.env, SECRET_KEY: "m52d-test-only-secret" } });
-  const parsed = JSON.parse(output) as { requests: Array<{ case: string; response: Record<string, unknown> }> };
-  return new Map(parsed.requests.map((item) => {
-    const response = item.response;
-    const headers = response.headers as Record<string, string>;
-    const body = Buffer.from(String(response.bodyBase64), "base64");
-    return [item.case, normalizeResponse(Number(response.status), headers, body)];
-  }));
-}
-
-function resultFor(request: DifferentialRequest & { case: string }, legacy: NormalizedResponse, target: NormalizedResponse): DifferentialResult {
-  const json = jsonEqual(legacy, target);
-  const headers = headersEqual(legacy, target);
-  const binary = bodyEqual(legacy, target);
-  const isDownload = request.path.includes("/download");
-  const isMedia = /\/(icon|screenshot)(?:\?|$)/u.test(request.path);
-  const binaryComparison = isDownload || isMedia ? (legacy.status === 200 && target.status === 200 ? binary : true) : true;
-  const equal = legacy.status === target.status && json && headers && binaryComparison;
-  return {
-    contractId: isDownload ? "catalog.binary-download" : isMedia ? "catalog.media" : request.path.includes("/colophon") ? "catalog.colophon" : request.path.includes("/api/games/") ? "catalog.detail" : "catalog.list",
-    legacyEndpoint: request.path,
-    targetProjection: "storage-v2.read-only-projection",
-    fixtureCase: request.case,
-    evidenceSource: "flask-test-client",
-    expectedStatus: legacy.status,
-    actualStatus: target.status,
-    jsonEqual: json,
-    headersEqual: headers,
-    binaryEqual: binaryComparison,
-    firmwareRelevant: isDownload || request.path === "/api/games" || request.path.includes("/colophon"),
-    classification: equal ? "PARITY" : "TARGET_DEFECT",
-    blocking: !equal,
-    legacy,
-    target
-  };
-}
-
-function runRecoveryRegression(fixture: Fixture): number {
-  const points: Array<NonNullable<MigrationConfig["faultAt"]>> = ["after-initialize", "after-compatible-table", "after-artifact", "after-media", "after-submission", "after-telemetry", "before-finalization", "after-finalization", "before-verification"];
-  let passed = 0;
-  for (const point of points) {
-    const parent = fs.mkdtempSync(path.join(os.tmpdir(), `prg32-m52d-recovery-${point}-`));
-    roots.push(parent);
-    const target = path.join(parent, "canonical");
-    try { migrateLegacySnapshot(migrationConfig(fixture, target, { faultAt: point })); } catch { /* deterministic crash boundary */ }
-    const resumed = migrateLegacySnapshot(migrationConfig(fixture, target));
-    if (!resumed.ok || !resumed.verification?.ok) throw new Error(`recovery regression failed at ${point}`);
-    passed += 1;
-  }
-  return passed;
-}
-
-export function runDifferentialGate(): DifferentialReport {
-  const fixture = createFixture();
-  const inventory = inventoryLegacySnapshot(fixture.sourceConfig);
-  if (!inventory.manifest.readiness.migrationReady || !verifyLegacyManifest(fixture.sourceConfig, fixture.manifest).ok) throw new Error("M5.2d synthetic source verification failed");
-  const parent = fs.mkdtempSync(path.join(os.tmpdir(), "prg32-m52d-target-"));
-  roots.push(parent);
-  const targetRoot = path.join(parent, "canonical");
-  const migrated = migrateLegacySnapshot(migrationConfig(fixture, targetRoot));
-  if (!migrated.ok || !migrated.verification?.ok) throw new Error("M5.2c migration prerequisite failed");
-  const legacy = legacyResponses(fixture);
-  const projection = new CanonicalReadProjection(targetRoot);
-  const results: DifferentialResult[] = [];
-  for (const [index, request] of fixture.requests.entries()) {
-    const typed = { ...request, case: `case-${index + 1}` };
-    const old = legacy.get(typed.case);
-    if (!old) throw new Error(`missing Flask response for ${typed.case}`);
-    results.push(resultFor(typed, old, projection.request(request.path)));
-  }
-  projection.close();
-  const targetResource = new Database(path.join(targetRoot, "store.sqlite"), { readonly: true });
-  const objectRow = targetResource.prepare("SELECT o.storage_key, r.cartridge_id, r.version, a.architecture FROM storage_objects o JOIN artifacts a ON a.object_id = o.object_id JOIN releases r ON r.release_id = a.release_id WHERE o.object_kind = 'artifact' ORDER BY o.object_id LIMIT 1").get() as { storage_key: string; cartridge_id: string; version: string; architecture: string };
-  targetResource.close();
-  const corruptedPath = path.join(targetRoot, objectRow.storage_key);
-  const originalBytes = fs.readFileSync(corruptedPath);
-  fs.writeFileSync(corruptedPath, Buffer.concat([originalBytes, Buffer.from("corrupt")]))
-  const corruptedProjection = new CanonicalReadProjection(targetRoot);
-  const corruptRefusal = corruptedProjection.request(`/api/games/${objectRow.cartridge_id}/download?version=${objectRow.version}&architecture=${objectRow.architecture}`).status === 400;
-  corruptedProjection.close();
-  fs.writeFileSync(corruptedPath, originalBytes);
-  if (!corruptRefusal) throw new Error("corrupt canonical object was not refused");
-  const recoveryCount = runRecoveryRegression(fixture);
-  const sourceAfter = inventoryLegacySnapshot(fixture.sourceConfig).manifest.source;
-  const sourceUnchanged = sourceAfter.databaseFingerprint === fixture.manifest.source.databaseFingerprint && sourceAfter.storageInventoryFingerprint === fixture.manifest.source.storageInventoryFingerprint;
-  const summary: Record<string, number> = { cases: results.length, parity: results.filter((item) => item.classification === "PARITY").length, targetDefects: results.filter((item) => item.classification === "TARGET_DEFECT").length, recoveryBoundaries: recoveryCount, corruptObjectRefusal: 1, historicalTelemetry: migrated.verification?.exceptionCount === 0 ? 3 : 0, operationalTelemetryParity: 0 };
-  const report: DifferentialReport = { abi: "prg32-storage-api-differential-1.0", generatedAt: new Date().toISOString(), results, summary, sourceUnchanged, targetReadOnly: true };
-  if (!sourceUnchanged) throw new Error("legacy source snapshot changed during differential verification");
-  if (results.some((item) => item.blocking)) {
-    const details = results.filter((item) => item.blocking).map((item) => `${item.fixtureCase}[${item.expectedStatus}/${item.actualStatus},json=${item.jsonEqual},headers=${item.headersEqual},bytes=${item.binaryEqual}]`).join(", ");
-    const sample = results.find((item) => item.blocking);
-    const sampleDiff = sample ? ` sample=${JSON.stringify({ case: sample.fixtureCase, legacy: sample.legacy.json, target: sample.target.json, legacyHeaders: sample.legacy.headers, targetHeaders: sample.target.headers }).slice(0, 4_000)}` : "";
-    const headerSample = results.find((item) => item.blocking && !item.headersEqual);
-    const headerDiff = headerSample && headerSample !== sample ? ` headerSample=${JSON.stringify({ case: headerSample.fixtureCase, legacy: headerSample.legacy.headers, target: headerSample.target.headers }).slice(0, 1_000)}` : "";
-    throw new Error(`M5.2d differential parity failed: ${details}${sampleDiff}${headerDiff}`);
-  }
-  return report;
+  return { sourceRoot: fixture.sourceRoot, targetRoot, sourceConfig: fixture.sourceConfig };
 }
 
 export function disposeDifferentialFixtures(): void {

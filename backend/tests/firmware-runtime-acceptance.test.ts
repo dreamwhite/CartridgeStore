@@ -22,7 +22,7 @@ function pythonExecutable(): string | undefined {
 function canonicalEnvironment(fixture: ReturnType<typeof createDisposableCanonicalReadFixture>): NodeJS.ProcessEnv {
   return {
     NODE_ENV: "test",
-    PRG32_BACKEND_DB: path.join(fixture.sourceRoot, "cartridge_store.sqlite"),
+    PRG32_BACKEND_DB: path.join(fixture.sourceRoot, "store.sqlite"),
     PRG32_BACKEND_STORE_DATA: fixture.sourceRoot,
     PRG32_BACKEND_CATALOG_READ_MODE: "canonical-disposable",
     PRG32_BACKEND_CANONICAL_STORAGE_ROOT: fixture.targetRoot,
@@ -52,7 +52,7 @@ async function runFirmwareHostCommand(python: string, code: string, args: readon
 
 afterEach(() => disposeDifferentialFixtures());
 
-describe("M5.5.2 actual PRG32 host-client runtime acceptance", () => {
+describe("actual PRG32 host-client runtime acceptance", () => {
   it("uses ../PRG32 store_api.py against disposable Fastify discovery, catalog and download routes", async () => {
     const python = pythonExecutable();
     expect(python, "python3 or the repository test virtualenv is required for host-client acceptance").toBeDefined();

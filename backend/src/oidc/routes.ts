@@ -58,11 +58,10 @@ export function registerOidcRoutes(app: FastifyInstance, options: OidcRouteOptio
     } catch (error) { return operationFailure(reply, request, error, options.config); }
   };
 
-  const callback = async (request: FastifyRequest, reply: FastifyReply, providerId: string, providerless: boolean): Promise<FastifyReply> => {
+  const callback = async (request: FastifyRequest, reply: FastifyReply, providerId: string): Promise<FastifyReply> => {
     try {
       const cookies = parseCookies(request.headers.cookie);
-      const callbackUrl = providerless ? options.oidc.providerlessCallbackUrl(providerId, request.url) : request.url;
-      const result = await options.oidc.complete(providerId, callbackUrl, cookies.get(OIDC_CORRELATION_COOKIE), cookies.get(SESSION_COOKIE), { requestId: request.id, ip: requestIp(request) });
+      const result = await options.oidc.complete(providerId, request.url, cookies.get(OIDC_CORRELATION_COOKIE), cookies.get(SESSION_COOKIE), { requestId: request.id, ip: requestIp(request) });
       const sessionCookie = serializeSessionCookie({ name: SESSION_COOKIE, secure: options.config.authCookieSecure, sameSite: options.config.authCookieSameSite, domain: options.config.authCookieDomain, maxAgeSeconds: options.sessionLifetimeSeconds() }, result.sessionCookie);
       setCookies(reply, [sessionCookie, clearCorrelationCookie(options.config)]);
       reply.header("cache-control", "no-store");
@@ -74,18 +73,5 @@ export function registerOidcRoutes(app: FastifyInstance, options: OidcRouteOptio
   };
 
   app.get<{ Params: ProviderParams }>("/api/auth/oidc/:providerId/login", async (request, reply) => login(request, reply, request.params.providerId));
-  app.get<{ Params: ProviderParams }>("/api/auth/oidc/:providerId/callback", async (request, reply) => callback(request, reply, request.params.providerId, false));
-
-  // Flask exposed providerless aliases. They remain compatibility-only and
-  // fail closed when configuration cannot identify exactly one provider.
-  app.get("/auth/oidc/login", async (request, reply) => {
-    try { return login(request, reply, options.oidc.providerlessProviderId()); }
-    catch (error) { return operationFailure(reply, request, error, options.config); }
-  });
-  app.get("/auth/oidc/callback", async (request, reply) => {
-    try {
-      const providerId = options.oidc.providerlessProviderId();
-      return callback(request, reply, providerId, true);
-    } catch (error) { return operationFailure(reply, request, error, options.config, true); }
-  });
+  app.get<{ Params: ProviderParams }>("/api/auth/oidc/:providerId/callback", async (request, reply) => callback(request, reply, request.params.providerId));
 }

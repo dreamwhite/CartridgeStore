@@ -48,7 +48,7 @@ function bundle(id = "org.example.canonical", version = "1.0.0"): Buffer {
 function environment(fixture: ReturnType<typeof createDisposableCanonicalReadFixture>): NodeJS.ProcessEnv {
   return {
     NODE_ENV: "test",
-    PRG32_BACKEND_DB: path.join(fixture.sourceRoot, "cartridge_store.sqlite"),
+    PRG32_BACKEND_DB: path.join(fixture.sourceRoot, "store.sqlite"),
     PRG32_BACKEND_STORE_DATA: fixture.sourceRoot,
     PRG32_BACKEND_CATALOG_READ_MODE: "canonical-disposable",
     PRG32_BACKEND_CANONICAL_STORAGE_ROOT: fixture.targetRoot,
@@ -102,7 +102,7 @@ function multipart(bytes: Uint8Array, csrf?: string): { body: Buffer; contentTyp
 
 afterEach(() => disposeDifferentialFixtures());
 
-describe("M5.2g.2 canonical disposable submission, review, and publication", () => {
+describe("canonical disposable submission, review, and publication", () => {
   it("runs the actual HTTP submission/review/publication workflow and exposes the result through canonical reads", async () => {
     const fixture = createDisposableCanonicalReadFixture();
     const app = buildApp({ config: loadConfig(environment(fixture)), logger: false });
@@ -248,7 +248,7 @@ describe("M5.2g.2 canonical disposable submission, review, and publication", () 
 
   it("keeps canonical authentication and readiness independent from the legacy shadow database", async () => {
     const fixture = createDisposableCanonicalReadFixture();
-    const sourceDatabase = path.join(fixture.sourceRoot, "cartridge_store.sqlite");
+  const sourceDatabase = path.join(fixture.sourceRoot, "store.sqlite");
     const unavailableSource = sourceDatabase + ".temporarily-unavailable";
     const app = buildApp({ config: loadConfig(environment(fixture)), logger: false });
     fs.renameSync(sourceDatabase, unavailableSource);
@@ -269,7 +269,7 @@ describe("M5.2g.2 canonical disposable submission, review, and publication", () 
     const fixture = createDisposableCanonicalReadFixture();
     const app = buildApp({ config: loadConfig(environment(fixture)), logger: false });
     const auth = await authenticate(app);
-    const sourceDatabase = path.join(fixture.sourceRoot, "cartridge_store.sqlite");
+  const sourceDatabase = path.join(fixture.sourceRoot, "store.sqlite");
     const unavailableSource = `${sourceDatabase}.temporarily-unavailable`;
     fs.renameSync(sourceDatabase, unavailableSource);
     try {

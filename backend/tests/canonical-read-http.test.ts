@@ -14,7 +14,7 @@ afterEach(() => disposeDifferentialFixtures());
 function canonicalEnvironment(fixture: ReturnType<typeof createDisposableCanonicalReadFixture>): NodeJS.ProcessEnv {
   return {
     NODE_ENV: "test",
-    PRG32_BACKEND_DB: `${fixture.sourceRoot}/cartridge_store.sqlite`,
+    PRG32_BACKEND_DB: `${fixture.sourceRoot}/store.sqlite`,
     PRG32_BACKEND_STORE_DATA: fixture.sourceRoot,
     PRG32_BACKEND_CATALOG_READ_MODE: "canonical-disposable",
     PRG32_BACKEND_CANONICAL_STORAGE_ROOT: fixture.targetRoot,
@@ -22,7 +22,7 @@ function canonicalEnvironment(fixture: ReturnType<typeof createDisposableCanonic
   };
 }
 
-describe("M5.2g.1 Fastify canonical disposable read integration", () => {
+describe("Fastify canonical disposable read integration", () => {
   it("serves catalog, detail, media, colophon, architecture, and download through the actual routes", async () => {
     const fixture = createDisposableCanonicalReadFixture();
     const app = buildApp({ config: loadConfig(canonicalEnvironment(fixture)), logger: false });
@@ -82,7 +82,7 @@ describe("M5.2g.1 Fastify canonical disposable read integration", () => {
     expect(response.statusCode).toBe(200);
     await app.close();
     expect(fs.readFileSync(databasePath)).toEqual(beforeDatabase);
-    const catalog = new CanonicalCatalog(fixture.targetRoot, { legacyRoots: [fixture.sourceRoot, `${fixture.sourceRoot}/cartridge_store.sqlite`] });
+  const catalog = new CanonicalCatalog(fixture.targetRoot, { legacyRoots: [fixture.sourceRoot, `${fixture.sourceRoot}/store.sqlite`] });
     expect(catalog.isReadOnly()).toBe(true);
     catalog.close();
 
@@ -108,7 +108,7 @@ describe("M5.2g.1 Fastify canonical disposable read integration", () => {
     const canonicalDatabase = new Database(`${fixture.targetRoot}/store.sqlite`);
     canonicalDatabase.prepare("INSERT INTO store_settings(key, value) VALUES ('store_name', ?)").run("Canonical Disposable Store");
     canonicalDatabase.close();
-    const sourceDatabase = `${fixture.sourceRoot}/cartridge_store.sqlite`;
+  const sourceDatabase = `${fixture.sourceRoot}/store.sqlite`;
     const unavailableSource = `${sourceDatabase}.temporarily-unavailable`;
     const app = buildApp({ config: loadConfig(canonicalEnvironment(fixture)), logger: false });
     fs.renameSync(sourceDatabase, unavailableSource);

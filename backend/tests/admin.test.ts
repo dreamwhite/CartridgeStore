@@ -87,7 +87,7 @@ afterEach(async () => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
-describe("M6.3d.2c user, role, and group administration", () => {
+describe("user, role, and group administration", () => {
   it("enforces the admin API matrix and strict JSON fields", async () => {
     const test = fixture();
     expect((await test.app.inject({ method: "GET", url: "/api/admin/users" })).statusCode).toBe(401);

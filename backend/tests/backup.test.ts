@@ -147,7 +147,7 @@ afterEach(async () => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
-describe("M6.3c.2 application backup", () => {
+describe("application backup", () => {
   it("is disabled by default", async () => {
     const paths = createDatabase();
     const shadow = path.join(paths.root, "shadow.sqlite");

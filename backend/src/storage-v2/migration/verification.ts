@@ -29,8 +29,15 @@ function tableFingerprint(source: Database.Database, target: Database.Database, 
   const targetColumns = new Set(tableColumns(target, table));
   // Administrative status columns are additive to the Fastify target and are
   // intentionally excluded from the legacy compatibility fingerprint. Their
-  // defaults must not make an otherwise identical Flask snapshot fail parity.
-  const compatibilityOnly = new Set(["account_status", "status_reason", "status_actor_user_id", "status_changed_at", "status_expires_at"]);
+  // Defaults must not make an otherwise identical storage snapshot fail parity.
+  const compatibilityOnly = new Set([
+    "account_status",
+    "display_name",
+    "status_reason",
+    "status_actor_user_id",
+    "status_changed_at",
+    "status_expires_at",
+  ]);
   const columns = tableColumns(source, table).filter((column) => targetColumns.has(column) && !compatibilityOnly.has(column));
   if (columns.length === 0) return digest.digest("hex");
   const projection = columns.map((column) => `"${column.replaceAll('"', '""')}"`).join(", ");

@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 
 import { compareDocumentedTargetSchema } from "../src/storage-v2/schema-contract.js";
 
-describe("M5.2b documented target schema contract", () => {
+describe("documented target schema contract", () => {
   it("executes documented DDL and matches the executable target schema", () => {
     const markdown = fs.readFileSync(
       path.resolve(process.cwd(), "../docs/storage-schema.md"),

@@ -4,7 +4,8 @@ import type Database from "better-sqlite3";
  * Additive application tables shared by the disposable canonical writer and
  * the isolated authentication writer.  This deliberately lives outside the
  * compatibility Drizzle snapshot: the legacy snapshot is an API/schema ABI
- * and must remain byte-for-byte compatible with the Flask database contract.
+ * and must remain byte-for-byte compatible with the established database
+ * contract.
  */
 export function applyApplicationMigrations(database: Database.Database): void {
   // Runtime administration is intentionally additive.  The legacy
@@ -12,6 +13,7 @@ export function applyApplicationMigrations(database: Database.Database): void {
   // typed settings and audit history live in their own tables so a future
   // Fastify deployment does not have to infer types from legacy strings.
   if (hasTable(database, "users") && hasTable(database, "store_settings")) {
+    addColumn(database, "users", "display_name", "TEXT NOT NULL DEFAULT ''");
     addColumn(database, "users", "account_status", "TEXT NOT NULL DEFAULT 'active'");
     addColumn(database, "users", "status_reason", "TEXT");
     addColumn(database, "users", "status_actor_user_id", "INTEGER");

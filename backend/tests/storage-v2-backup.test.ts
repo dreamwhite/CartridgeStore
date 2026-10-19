@@ -58,7 +58,7 @@ afterEach(() => {
   for (const value of roots.splice(0)) fs.rmSync(value, { recursive: true, force: true });
 });
 
-describe("M5.2e canonical storage-v2 backup and restore", () => {
+describe("canonical storage-v2 backup and restore", () => {
   it("creates a streaming v3 backup, independently verifies it, and restores exact objects and staging", async () => {
     const workspace = root("prg32-backup-test-");
     const source = path.join(workspace, "source");

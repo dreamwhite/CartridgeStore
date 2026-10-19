@@ -62,7 +62,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
-describe("M5.3.7 first installation setup", () => {
+describe("first installation setup", () => {
   it("authorizes a fresh installation, persists every step, completes once, and survives restart", async () => {
     const test = fixture();
     const status = await test.app.inject({ method: "GET", url: "/api/setup/status" });

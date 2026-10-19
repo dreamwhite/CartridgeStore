@@ -7,6 +7,7 @@ import { hasAccountStateColumn, hasAccountStatusColumn } from "./account-state.j
 export interface TokenOwner {
   readonly id: number;
   readonly username: string;
+  readonly displayName: string;
   readonly email: string;
   readonly role: string;
   readonly groups: readonly string[];
@@ -32,11 +33,13 @@ export function hashApiToken(token: string): string {
 
 export function lookupApiToken(sqlite: Database.Database, token: string): ApiTokenLookup | null {
   const tokenHash = hashApiToken(token);
+  const columns = new Set((sqlite.prepare("PRAGMA table_info(users)").all() as Array<{ name: string }>).map((item) => item.name));
+  const displayName = columns.has("display_name") ? ", users.display_name" : "";
   const disabledColumn = hasAccountStateColumn(sqlite) ? ", users.disabled_at" : "";
   const statusColumn = hasAccountStatusColumn(sqlite) ? ", users.account_status" : "";
   const row = sqlite.prepare(
     "SELECT api_tokens.token_hash, api_tokens.label, api_tokens.created_at, api_tokens.last_used," +
-    " users.id, users.username, users.email, users.role" + disabledColumn + statusColumn +
+    " users.id, users.username" + displayName + ", users.email, users.role" + disabledColumn + statusColumn +
     " FROM api_tokens JOIN users ON users.id = api_tokens.user_id" +
     " WHERE api_tokens.token_hash = ?"
   ).get(tokenHash) as
@@ -47,6 +50,7 @@ export function lookupApiToken(sqlite: Database.Database, token: string): ApiTok
         last_used: string | null;
         id: number;
         username: string;
+        display_name?: string | null;
         email: string;
         role: string;
         disabled_at?: string | null;
@@ -66,6 +70,7 @@ export function lookupApiToken(sqlite: Database.Database, token: string): ApiTok
     owner: {
       id: row.id,
       username: row.username,
+      displayName: row.display_name?.trim() || row.username,
       email: row.email,
       role: row.role,
       groups: groups.map((group) => group.name)

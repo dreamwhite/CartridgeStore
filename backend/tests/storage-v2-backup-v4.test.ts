@@ -73,7 +73,7 @@ function copyBackup(source: string, destination: string): void {
 
 afterEach(() => { for (const value of roots.splice(0)) fs.rmSync(value, { recursive: true, force: true }); });
 
-describe("M5.2g.8 encrypted backup-v4", () => {
+describe("encrypted backup-v4", () => {
   it("rotates an external registry without overwriting the source or exposing key material", () => {
     const workspace = root("prg32-backup-v4-key-rotation-"); const input = path.join(workspace, "keys-a.json"); const output = path.join(workspace, "keys-b.json");
     fs.writeFileSync(input, generateRegistryDocument("backup-a", Buffer.alloc(32, 0x41)), { mode: 0o600 });

@@ -1,7 +1,7 @@
 # M6.3b SQLite capacity experiments
 
 The M6.3b harness creates all databases below the operating system temporary
-directory and deletes them after each run. It never reads the configured Flask
+directory and deletes them after each run. It never reads the configured
 database, the Docker volumes, or production data.
 
 Run it with Node 24 and pnpm:

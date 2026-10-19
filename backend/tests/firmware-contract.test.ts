@@ -10,7 +10,7 @@ function firmwareText(relativePath: string): string {
   return fs.readFileSync(path.join(firmwareRoot, relativePath), "utf8");
 }
 
-describe("M5.2g.6 companion firmware contract", () => {
+describe("companion firmware contract", () => {
   it("keeps discovery and architecture constants aligned with the read-only companion repository", () => {
     const config = firmwareText("main/prg32_config.h");
     const utils = firmwareText("prg32/store/utils.py");

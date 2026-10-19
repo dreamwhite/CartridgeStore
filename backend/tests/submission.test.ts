@@ -119,7 +119,7 @@ afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) fs.rmSync(directory, { recursive: true, force: true });
 });
 
-describe("M5.1 publishing foundation", () => {
+describe("publishing foundation", () => {
   it("creates a pending submission owned by the authenticated principal", async () => {
     const fixture = createAppFixture();
     const auth = await session(fixture.app);

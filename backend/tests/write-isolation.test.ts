@@ -57,7 +57,7 @@ afterEach(() => {
   for (const directory of temporaryDirectories.splice(0)) fs.rmSync(directory, { recursive: true, force: true });
 });
 
-describe("M4.4 authentication write isolation", () => {
+describe("authentication write isolation", () => {
   it.each([
     ["same path", (input: Fixture) => ({ PRG32_BACKEND_AUTH_WRITE_DB: input.operational })],
     ["relative path alias", (input: Fixture) => ({

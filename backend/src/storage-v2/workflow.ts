@@ -151,7 +151,8 @@ export class CanonicalWorkflowService implements ReviewWorkflowService {
     this.config = options.config;
     this.root = options.config.canonicalWorkflowMode === CANONICAL_OPERATIONAL_WORKFLOW_MODE
       ? assertExplicitOperationalRoot(options.root)
-      : assertExplicitDisposableRoot(options.root, options.config.candidateRuntimeMode === undefined
+      : assertExplicitDisposableRoot(options.root, options.config.candidateRuntimeMode === undefined &&
+        options.config.canonicalWorkflowMode !== CANONICAL_WORKFLOW_MODE
         ? [options.config.storeDataDirectory, options.config.databasePath]
         : []);
     if (path.resolve(this.root) !== path.resolve(options.config.canonicalStorageRoot ?? "")) throw new Error("canonical workflow root does not match canonical read root");

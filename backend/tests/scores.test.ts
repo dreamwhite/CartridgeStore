@@ -75,7 +75,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
-describe("M6.2b anonymous scores and leaderboard", () => {
+describe("anonymous scores and leaderboard", () => {
   it("accepts firmware-shaped anonymous requests without credentials or CSRF", async () => {
     const test = fixture();
     const response = await test.app.inject({ method: "POST", url: "/api/scores", payload: score("breakout", "PLAYER", 4294967295) });

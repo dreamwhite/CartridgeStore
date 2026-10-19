@@ -32,7 +32,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
-describe("M6.3d.2h.5b federation lifecycle", () => {
+describe("federation lifecycle", () => {
   it("invalidates pending transactions across disable and re-enable", () => {
     const db = database();
     try {

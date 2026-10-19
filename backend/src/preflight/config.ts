@@ -202,7 +202,7 @@ function checkOperational(builder: CheckBuilder, environment: NodeJS.ProcessEnv)
   builder.add("backup_key_reference", backupEnabled !== true || statusForSecret(environment, "PRG32_PREFLIGHT_BACKUP_KEY_REFERENCE", 1) === "PRESENT" ? "PASS" : "FAIL", backupEnabled !== true || statusForSecret(environment, "PRG32_PREFLIGHT_BACKUP_KEY_REFERENCE", 1) === "PRESENT" ? "Backup key custody is represented by a non-secret reference" : "Enabled backup configuration requires an external key reference");
   if (sameSite === "none") builder.add("same_site_none_secure", sessionSecure === true ? "PASS" : "FAIL", sessionSecure === true ? "SameSite=None is paired with Secure" : "SameSite=None requires Secure=true");
   checkHttpsOrigins(builder, environment, "operational");
-  builder.add("runtime_support_boundary", "NOT_VERIFIED", "This repository still contains Flask-owned operational routes; this preflight does not enable or claim the cutover");
+  builder.add("runtime_support_boundary", "PASS", "Fastify is the sole application runtime");
 }
 
 export function validatePreflightConfiguration(environment: NodeJS.ProcessEnv, profile: PreflightProfile): PreflightResult {

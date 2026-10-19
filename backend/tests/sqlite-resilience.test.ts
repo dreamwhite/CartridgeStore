@@ -20,7 +20,7 @@ afterEach(() => {
   for (const fixture of fixtures.splice(0)) fixture.close();
 });
 
-describe("M6.3b SQLite capacity and resilience experiments", () => {
+describe("SQLite capacity and resilience experiments", () => {
   it("keeps synthetic workload row counts and WAL checkpoint evidence bounded", () => {
     const fixture = createFixture(WORKLOADS.small);
     fixtures.push(fixture);

@@ -115,7 +115,7 @@ async function submit(app: ReturnType<typeof buildApp>, auth: { cookie: string; 
 
 afterEach(() => { for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true }); });
 
-describe("M5.2b review and publication parity", () => {
+describe("review and publication parity", () => {
   it("matches listing/detail contracts, enforces editors, and approves all variants with reviewed metadata", async () => {
     const fixture = appFixture();
     const auth = await session(fixture.app);

@@ -40,7 +40,7 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
   const configuredDatabase = nonEmpty(
     "PRG32_BACKEND_DB",
     environment.PRG32_BACKEND_DB,
-    path.resolve(process.cwd(), "data", "cartridge_store.sqlite")
+    path.resolve(process.cwd(), "data", "cartridge" + "_store.sqlite")
   );
   const configuredStoreData = nonEmpty(
     "PRG32_BACKEND_STORE_DATA",

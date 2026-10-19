@@ -438,7 +438,7 @@ afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
 });
 
-describe("M5.2g.11 isolated edge and federation integration", () => {
+describe("isolated edge and federation integration", () => {
   it("terminates TLS, overwrites forwarded headers, and emits public discovery URLs", async () => {
     const test = await fixture();
     const discovery = await requestHttps(`${test.origin}/.well-known/prg32-store.json`, {
@@ -460,7 +460,7 @@ describe("M5.2g.11 isolated edge and federation integration", () => {
 
   it("completes a synthetic OIDC callback through the TLS edge and rotates the session", async () => {
     const test = await fixture();
-    const login = await requestHttps(`${test.origin}/api/auth/oidc/school/login?return_to=/account`, { headers: { host: "evil.example.test" } });
+    const login = await requestHttps(`${test.origin}/api/auth/oidc/school/login?return_to=/dashboard/account`, { headers: { host: "evil.example.test" } });
     expect(login.status).toBe(302);
     const correlation = cookie(login, "prg32_oidc_correlation");
     const authorization = await fetch(login.headers.location as string, { redirect: "manual" });
@@ -468,7 +468,7 @@ describe("M5.2g.11 isolated edge and federation integration", () => {
     const callback = new URL(authorization.headers.get("location") as string);
     const completed = await requestHttps(callback.toString(), { headers: { cookie: correlation, host: "evil.example.test" } });
     expect(completed.status).toBe(302);
-    expect(completed.headers.location).toBe(`${test.origin}/account`);
+    expect(completed.headers.location).toBe(`${test.origin}/dashboard/account`);
     const session = cookie(completed, "prg32_ts_session");
     expect(setCookieHeader(completed, "prg32_ts_session")).toContain("Secure");
     expect(setCookieHeader(completed, "prg32_ts_session")).toContain("HttpOnly");
@@ -479,7 +479,7 @@ describe("M5.2g.11 isolated edge and federation integration", () => {
     const logout = await requestHttps(`${test.origin}/auth/logout`, { method: "POST", headers: { cookie: session, "x-csrftoken": csrfToken } });
     expect(logout.status).toBe(200);
     expect((await requestHttps(`${test.origin}/auth/me`, { headers: { cookie: session } })).status).toBe(401);
-    expect((await requestHttps(`${test.origin}/auth/me`, { headers: { cookie: "session=legacy-flask-cookie" } })).status).toBe(401);
+    expect((await requestHttps(`${test.origin}/auth/me`, { headers: { cookie: "session=invalid-test-cookie" } })).status).toBe(401);
     await test.close();
   });
 

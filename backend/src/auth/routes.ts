@@ -284,6 +284,29 @@ export function registerAuthRoutes(app: FastifyInstance, options: AuthRouteOptio
   for (const path of localAuthPaths("/auth/me")) app.get(path, currentUser);
   app.get("/api/me", currentUser);
 
+  for (const path of localAuthPaths("/auth/profile")) {
+    app.patch<{ Body: Body }>(path, async (request, reply) => {
+      if (!ensureWrite(auth, reply)) return reply;
+      const current = context(request, auth);
+      if (!current.principal.authenticated || current.principal.id === null) {
+        return authFailure(reply, current.principal);
+      }
+      if (!requireCsrf(request, reply, current)) return reply;
+      try {
+        const principal = auth.updateDisplayName(
+          current.principal.id,
+          value(body(request).display_name),
+        );
+        return json(reply, {
+          ok: true,
+          user: principalJson(authorization, principal),
+        });
+      } catch (error) {
+        return authError(reply, error);
+      }
+    });
+  }
+
   for (const path of localAuthPaths("/auth/tokens")) app.get(path, async (request, reply) => {
     const current = context(request, auth);
     if (!current.principal.authenticated || current.principal.id === null) return authFailure(reply, current.principal);
