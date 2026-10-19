@@ -52,7 +52,7 @@ async function logoutLocal(page) {
   await expect(page).toHaveURL(/\/login(?:\?|$)/);
 }
 
-test("covers public statistics, scores, documentation, PWA assets and legacy deep links", async ({ page }) => {
+test("covers public statistics, scores, documentation and PWA assets", async ({ page }) => {
   await page.goto(`${storeOrigin()}/stats`);
   await expect(page.getByRole("heading", { name: "Statistics" })).toBeVisible();
   await expect(page.getByText("Recorded downloads")).toBeVisible();
@@ -78,7 +78,7 @@ test("covers public statistics, scores, documentation, PWA assets and legacy dee
   expect(pwaAssets.manifest.body.name).toContain("PRG32");
   expect(pwaAssets.serviceWorker).toBe(200);
 
-  await page.goto(`${storeOrigin()}/auth/login?return_to=%2Fstats`);
+  await page.goto(`${storeOrigin()}/login?return_to=%2Fstats`);
   await expect(page).toHaveURL(/\/login\?return_to=%2Fstats/);
   const deepLinkPage = await page.context().newPage();
   await deepLinkPage.goto(`${storeOrigin()}/games/browser-fixture`);
@@ -104,7 +104,7 @@ test("covers catalog search, architecture filtering and protected-route denial",
 
 test("covers account token lifecycle and owner-scoped metrics detail", async ({ page }) => {
   await loginLocal(page);
-  await page.goto(`${storeOrigin()}/account`);
+  await page.goto(`${storeOrigin()}/dashboard/account`);
   await expect(page.getByRole("heading", { name: "Your account" })).toBeVisible();
   await page.getByPlaceholder("Firmware client").fill("parity-token");
   await page.getByRole("button", { name: "Create token" }).click();
@@ -137,7 +137,7 @@ test("covers the publisher submission journey and reviewer publication decision"
   await page.getByLabel("Cartridge bundle").setInputFiles({ name: "browser-submission.zip", mimeType: "application/zip", buffer: submissionBundle() });
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: "Continue" }).click();
-  const workflowResponse = page.waitForResponse((candidate) => candidate.url().includes("/__workflow-fastify/api/publish/bundle"));
+  const workflowResponse = page.waitForResponse((candidate) => candidate.url().includes("/api/publish/bundle"));
   await Promise.all([workflowResponse, page.getByRole("button", { name: "Submit for review" }).click()]);
   expect((await workflowResponse).status()).toBe(200);
   await expect(page.getByRole("heading", { name: "Submission received" })).toBeVisible();
@@ -166,7 +166,7 @@ test("covers reviewer rejection and publisher-visible rejection state", async ({
   await page.getByLabel("Cartridge bundle").setInputFiles({ name: "browser-rejected.zip", mimeType: "application/zip", buffer: submissionBundle("browser-rejected", "Browser Rejected") });
   await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: "Continue" }).click();
-  const workflowResponse = page.waitForResponse((candidate) => candidate.url().includes("/__workflow-fastify/api/publish/bundle"));
+  const workflowResponse = page.waitForResponse((candidate) => candidate.url().includes("/api/publish/bundle"));
   await Promise.all([workflowResponse, page.getByRole("button", { name: "Submit for review" }).click()]);
   expect((await workflowResponse).status()).toBe(200);
   await page.goto(`${storeOrigin()}/review`);
@@ -192,7 +192,7 @@ test("covers canonical drafts, rejection notes and revision resubmission", async
   await expect(draftRow).toContainText("bundle missing");
   await draftRow.locator('input[type="file"]').setInputFiles({ name: "browser-draft.zip", mimeType: "application/zip", buffer: submissionBundle("browser-draft", "Browser Draft Workflow") });
   await expect(draftRow).toContainText("bundle attached");
-  const firstSubmit = page.waitForResponse((candidate) => candidate.url().includes("/__workflow-fastify/api/drafts/") && candidate.url().endsWith("/submit"));
+  const firstSubmit = page.waitForResponse((candidate) => candidate.url().includes("/api/drafts/") && candidate.url().endsWith("/submit"));
   await Promise.all([firstSubmit, draftRow.getByRole("button", { name: "Submit" }).click()]);
   expect((await firstSubmit).status()).toBe(200);
 
@@ -213,7 +213,7 @@ test("covers canonical drafts, rejection notes and revision resubmission", async
   const revisionRow = drafts.locator("li").filter({ hasText: "Revision of #" }).last();
   await revisionRow.locator('input[type="file"]').setInputFiles({ name: "browser-draft-revision.zip", mimeType: "application/zip", buffer: submissionBundle("browser-draft", "Browser Draft Workflow") });
   await expect(revisionRow).toContainText("bundle attached");
-  const revisionSubmit = page.waitForResponse((candidate) => candidate.url().includes("/__workflow-fastify/api/drafts/") && candidate.url().endsWith("/submit"));
+  const revisionSubmit = page.waitForResponse((candidate) => candidate.url().includes("/api/drafts/") && candidate.url().endsWith("/submit"));
   await Promise.all([revisionSubmit, revisionRow.getByRole("button", { name: "Submit" }).click()]);
   expect((await revisionSubmit).status()).toBe(200);
 

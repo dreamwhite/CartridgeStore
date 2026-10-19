@@ -1,29 +1,30 @@
 import type { z } from "zod";
 
-import { ApiRequestError, requestJson, withCsrfToken } from "../client";
+import {
+  ApiRequestError,
+  requestApiJson,
+  withCsrfToken,
+} from "../client";
 import {
   adminResponseSchema,
   csrfResponseSchema,
 } from "../schemas";
 
-/** Browser-visible prefix for the isolated Fastify administrative surface. */
-export const ADMIN_PROXY_PREFIX = "/__admin-fastify";
-
-/** Signals that the optional isolated administrative backend is unavailable. */
+/** Signals that the Fastify administrative backend is unavailable. */
 export class AdminIntegrationUnavailableError extends Error {
   constructor() {
-    super("The isolated Fastify administrative integration is not enabled.");
+    super("The Fastify administrative integration is unavailable.");
     this.name = "AdminIntegrationUnavailableError";
   }
 }
 let csrfToken: string | null = null;
 
-/** Builds a validated path below the administrative proxy. */
+/** Builds a validated path below the public API origin. */
 export function adminPath(path: string): string {
   if (!path.startsWith("/") || path.includes("//") || path.includes("..")) {
     throw new Error("Invalid administrative API path");
   }
-  return `${ADMIN_PROXY_PREFIX}${path}`;
+  return path;
 }
 
 function unavailable(error: unknown): never {
@@ -44,7 +45,7 @@ export async function adminRequest<T>(
   schema?: z.ZodType<T>,
 ): Promise<T> {
   try {
-    return await requestJson(
+    return await requestApiJson(
       adminPath(path),
       init,
       schema ?? (adminResponseSchema as z.ZodType<T>),
@@ -101,7 +102,7 @@ export async function backupRequest(
   try {
     const response = await fetch(adminPath(path), {
       ...init,
-      credentials: "same-origin",
+      credentials: "include",
     });
     if (!response.ok) {
       const body = await response.json().catch(() => null);

@@ -38,7 +38,7 @@ describe("workflow API integration", () => {
     vi.restoreAllMocks();
   });
 
-  it("uses the isolated proxy and preserves the submission contract", async () => {
+  it("uses the Fastify API and preserves the submission contract", async () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(jsonResponse({ ok: true, user: { id: 7, name: "Developer", username: "developer", email: "developer@example.test", role: "publisher", groups: [], authenticated: true, permissions: ["catalog:submit"] } }))
       .mockResolvedValueOnce(jsonResponse({ ok: true, submissions: [submission] }));
@@ -46,8 +46,8 @@ describe("workflow API integration", () => {
 
     await expect(getWorkflowPrincipal()).resolves.toMatchObject({ ok: true });
     await expect(listSubmissions("pending")).resolves.toEqual({ ok: true, submissions: [submission] });
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/__workflow-fastify/auth/me");
-    expect(fetchMock.mock.calls[1]?.[0]).toBe("/__workflow-fastify/api/submissions?status=pending");
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/auth/me");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/submissions?status=pending");
   });
 
   it("fetches CSRF once for a bundle upload and sends multipart bytes", async () => {
@@ -59,7 +59,7 @@ describe("workflow API integration", () => {
 
     await expect(submitBundle(file)).resolves.toMatchObject({ status: "pending", submission_id: 4 });
     const init = fetchMock.mock.calls[1]?.[1];
-    expect(fetchMock.mock.calls[1]?.[0]).toBe("/__workflow-fastify/api/publish/bundle");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/publish/bundle");
     expect(init?.method).toBe("POST");
     expect(new Headers(init?.headers).get("X-CSRFToken")).toBe(csrf);
     expect(init?.body).toBeInstanceOf(FormData);
@@ -74,10 +74,10 @@ describe("workflow API integration", () => {
 
     await expect(approveSubmission(4, { title: "Demo" })).rejects.toMatchObject({ status: 403 });
     expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[1]?.[0]).toBe("/__workflow-fastify/api/submissions/4/verify");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/submissions/4/verify");
   });
 
-  it("fails closed when the isolated proxy is absent", async () => {
+  it("fails closed when the Fastify API is absent", async () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response("<!doctype html>", { status: 404 })));
     await expect(getWorkflowPrincipal()).rejects.toBeInstanceOf(WorkflowIntegrationUnavailableError);
   });

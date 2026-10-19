@@ -1,23 +1,20 @@
 import type { ZodType } from "zod";
 
-import { ApiRequestError, requestJson } from "../client";
+import { ApiRequestError, requestApiJson } from "../client";
 import { csrfResponseSchema } from "../schemas";
 
-/** Browser-visible prefix for the isolated Fastify workflow surface. */
-export const WORKFLOW_PROXY_PREFIX = "/__workflow-fastify";
-
-/** Signals that the optional isolated workflow backend is unavailable. */
+/** Signals that the Fastify workflow backend is unavailable. */
 export class WorkflowIntegrationUnavailableError extends Error {
   constructor(
     message =
-      "The isolated publishing and review integration is unavailable.",
+      "The Fastify publishing and review integration is unavailable.",
   ) {
     super(message);
     this.name = "WorkflowIntegrationUnavailableError";
   }
 }
 
-/** Builds a validated path below the workflow proxy. */
+/** Builds a validated path below the public API origin. */
 export function workflowPath(path: string): string {
   const pathname = path.split("?", 1)[0] ?? "";
   if (
@@ -27,7 +24,7 @@ export function workflowPath(path: string): string {
   ) {
     throw new Error("Invalid workflow API path");
   }
-  return `${WORKFLOW_PROXY_PREFIX}${path}`;
+  return path;
 }
 
 /** Executes a validated workflow request and maps missing proxy failures. */
@@ -37,7 +34,7 @@ export async function workflowRequest<T>(
   schema?: ZodType<T>,
 ): Promise<T> {
   try {
-    return await requestJson(workflowPath(path), init, schema);
+    return await requestApiJson(workflowPath(path), init, schema);
   } catch (error) {
     if (
       error instanceof ApiRequestError &&

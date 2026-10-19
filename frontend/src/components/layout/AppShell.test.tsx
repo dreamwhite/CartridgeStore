@@ -4,8 +4,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AppShell } from "./AppShell";
 
+const pathname = vi.hoisted(() => ({ value: "/explore" }));
+
 vi.mock("next/navigation", () => ({
-  usePathname: () => "/explore",
+  usePathname: () => pathname.value,
 }));
 
 vi.mock("../auth/AuthNavigation", () => ({
@@ -17,7 +19,10 @@ vi.mock("./ThemeToggle", () => ({
 }));
 
 describe("AppShell", () => {
-  beforeEach(() => vi.clearAllMocks());
+  beforeEach(() => {
+    pathname.value = "/explore";
+    vi.clearAllMocks();
+  });
 
   it("exposes the canonical public navigation and an accessible mobile menu", async () => {
     const user = userEvent.setup();
@@ -48,5 +53,13 @@ describe("AppShell", () => {
     await user.keyboard("{Escape}");
     expect(screen.queryByRole("navigation", { name: "Mobile primary navigation" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Open navigation" })).toHaveFocus();
+  });
+
+  it("keeps the dashboard focused on its application workspace", () => {
+    pathname.value = "/dashboard";
+
+    render(<AppShell><p>Dashboard content</p></AppShell>);
+
+    expect(screen.queryByRole("contentinfo")).not.toBeInTheDocument();
   });
 });

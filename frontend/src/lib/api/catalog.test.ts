@@ -19,7 +19,7 @@ describe("catalog compatibility routing", () => {
     expect(vi.mocked(fetch).mock.calls[0]?.[1]).toMatchObject({ credentials: "same-origin" });
   });
 
-  test("keeps binary download URLs on the existing Flask-owned route", () => {
+  test("keeps binary download URLs on the canonical API route", () => {
     expect(catalogDownloadPath("org.example.pong", "1.0.0", "qemu")).toBe("/api/games/org.example.pong/download?version=1.0.0&architecture=qemu");
   });
 });

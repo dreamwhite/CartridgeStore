@@ -117,7 +117,7 @@ export function useSetupWizard() {
       const reviewed = await saveSetupStep(progress.csrf_token, "review", {});
       setProgress(reviewed);
       await completeSetup(reviewed.csrf_token);
-      router.push("/auth/login");
+      router.push("/login");
     } catch (error) {
       setMessage(setupErrorMessage(error));
       setBusy(false);

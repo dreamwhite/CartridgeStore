@@ -5,7 +5,6 @@ import { BootSplash } from "./BootSplash";
 
 describe("BootSplash", () => {
   beforeEach(() => {
-    sessionStorage.clear();
     vi.useFakeTimers();
   });
 
@@ -15,6 +14,7 @@ describe("BootSplash", () => {
 
   it("shows the boot screen until it completes automatically", () => {
     render(<BootSplash />);
+    act(() => vi.advanceTimersByTime(0));
 
     expect(
       screen.getByRole("status", {
@@ -27,7 +27,7 @@ describe("BootSplash", () => {
       }),
     ).toBeInTheDocument();
 
-    act(() => vi.advanceTimersByTime(2500));
+    act(() => vi.advanceTimersByTime(1000));
     act(() => vi.advanceTimersByTime(260));
 
     expect(
@@ -37,16 +37,19 @@ describe("BootSplash", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("does not replay after the first visit in a session", () => {
-    sessionStorage.setItem("prg32-boot-splash-seen", "1");
+  it("replays when the document mounts again after a refresh", () => {
+    const firstMount = render(<BootSplash />);
+    act(() => vi.advanceTimersByTime(1));
+    expect(
+      screen.getByRole("status", {
+        name: "Starting PRG32 Cartridge Store",
+      }),
+    ).toBeInTheDocument();
 
+    firstMount.unmount();
     render(<BootSplash />);
     act(() => vi.advanceTimersByTime(1));
 
-    expect(
-      screen.queryByRole("status", {
-        name: "Starting PRG32 Cartridge Store",
-      }),
-    ).not.toBeInTheDocument();
+    expect(screen.getByRole("status")).toBeInTheDocument();
   });
 });

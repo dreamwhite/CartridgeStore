@@ -15,7 +15,7 @@ vi.mock("next/navigation", () => ({ useRouter: () => ({ replace }) }));
 
 function renderControl() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
-  return render(<QueryClientProvider client={queryClient}><PasskeyLogin returnTo="/account" username="ada" /></QueryClientProvider>);
+  return render(<QueryClientProvider client={queryClient}><PasskeyLogin returnTo="/dashboard/account" username="ada" /></QueryClientProvider>);
 }
 
 describe("PasskeyLogin", () => {
@@ -37,7 +37,7 @@ describe("PasskeyLogin", () => {
 
     await waitFor(() => expect(finish).toHaveBeenCalledWith({ id: "credential" }));
     expect(begin).toHaveBeenCalledWith("ada");
-    await waitFor(() => expect(replace).toHaveBeenCalledWith("/account"));
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/dashboard/account"));
   });
 
   test("reports browser cancellation without exposing exception details", async () => {

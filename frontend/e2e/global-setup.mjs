@@ -534,13 +534,8 @@ export default async function globalSetup() {
     nextProcess = startProcess("pnpm", ["exec", "next", "dev", "--webpack", "-p", String(nextPort)], frontend, {
       ...process.env,
       NODE_ENV: "development",
-      PRG32_API_UPSTREAM: `http://127.0.0.1:${backendPort}`,
-      PRG32_AUTH_INTEGRATION_ENABLED: "true",
-      PRG32_AUTH_FASTIFY_TARGET: `http://127.0.0.1:${backendPort}`,
-      PRG32_ADMIN_FASTIFY_TARGET: `http://127.0.0.1:${backendPort}`,
-      PRG32_WORKFLOW_FASTIFY_TARGET: `http://127.0.0.1:${backendPort}`,
-      PRG32_FEDERATION_ADMIN_INTEGRATION_ENABLED: "true",
-      PRG32_FEDERATION_ADMIN_FASTIFY_TARGET: `http://127.0.0.1:${backendPort}`,
+      NEXT_PUBLIC_PRG32_API_ORIGIN: `http://127.0.0.1:${backendPort}`,
+      NEXT_PUBLIC_AUTH_INTEGRATION_ENABLED: "true",
       PRG32_NEXT_DIST_DIR: nextDistDir,
       PRG32_STORE_DOMAIN: STORE_HOST,
       NEXT_TELEMETRY_DISABLED: "1"

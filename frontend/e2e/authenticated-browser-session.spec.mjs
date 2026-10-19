@@ -16,7 +16,7 @@ async function loginLocal(page) {
   await Promise.all([loginResponse, page.getByRole("button", { name: "Sign in", exact: true }).click()]);
   const loginResult = await loginResponse;
   expect(loginResult.status()).toBe(200);
-  await page.goto(`${storeOrigin()}/account`);
+  await page.goto(`${storeOrigin()}/dashboard/account`);
   await expect(page.getByRole("heading", { name: "Your account" })).toBeVisible();
 }
 
@@ -91,7 +91,7 @@ test("browses the canonical catalog, detail media, architecture and download jou
 
 test("authenticates locally, enforces CSRF, preserves cookie boundaries and logs out", async ({ browser, context, page }) => {
   await loginLocal(page);
-  await page.goto(`${storeOrigin()}/account`);
+  await page.goto(`${storeOrigin()}/dashboard/account`);
   await expect(page.getByRole("heading", { name: "Your account" })).toBeVisible();
   await page.getByLabel("Label").fill("browser-e2e-token");
   await page.getByRole("button", { name: "Create token" }).click();
@@ -163,14 +163,14 @@ test("completes synthetic OIDC and SAML browser callbacks", async ({ page }) => 
   await page.goto(`${storeOrigin()}/login`);
   await page.getByRole("link", { name: /Disposable OIDC/ }).click();
   await expect(page).toHaveURL(`${storeOrigin()}/`);
-  await page.goto(`${storeOrigin()}/account`);
+  await page.goto(`${storeOrigin()}/dashboard/account`);
   await expect(page.getByText("federated-browser")).toBeVisible();
   await logoutLocal(page);
 
   await page.goto(`${storeOrigin()}/login`);
   await page.getByRole("link", { name: /Disposable SAML/ }).click();
   await expect(page).toHaveURL(`${storeOrigin()}/`);
-  await page.goto(`${storeOrigin()}/account`);
+  await page.goto(`${storeOrigin()}/dashboard/account`);
   await expect(page.getByText("federated-saml-browser")).toBeVisible();
   await logoutLocal(page);
 });

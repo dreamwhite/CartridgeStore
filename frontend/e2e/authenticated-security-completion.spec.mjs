@@ -7,7 +7,7 @@ const adminPassword = "ui93-disposable-admin-password-2026";
 
 test.describe.configure({ mode: "serial" });
 
-async function login(page, username, password, returnTo = "/account") {
+async function login(page, username, password, returnTo = "/dashboard/account") {
   await page.goto(`/login?return_to=${encodeURIComponent(returnTo)}`);
   await page.getByLabel("Username or email").fill(username);
   await page.getByLabel("Password", { exact: true }).fill(password);
@@ -47,10 +47,10 @@ async function setTheme(page, theme) {
   await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
 }
 
-test.describe("UI.9.3.1 authenticated security completion", () => {
-  test.skip(!completionMode, "UI.9.3.1 requires the opt-in completion runtime");
+test.describe("authenticated security completion", () => {
+  test.skip(!completionMode, "requires the opt-in completion runtime");
 
-  test("UI931 real server session expiry clears private access and permits recovery", async ({ page }) => {
+  test("real server session expiry clears private access and permits recovery", async ({ page }) => {
     test.setTimeout(95_000);
     await login(page, "ui93-user-b", userPassword);
     await expect(page.getByRole("heading", { name: "Your account" })).toBeVisible();
@@ -59,7 +59,7 @@ test.describe("UI.9.3.1 authenticated security completion", () => {
     await waitForServerExpiry(page);
     expect(await authenticatedStatus(page)).toBe(401);
 
-    await page.goto("/account");
+  await page.goto("/dashboard/account");
     await expect(page).toHaveURL(/\/login\?reason=(required|expired)/);
     await expect(page.getByText(/session expired|sign in is required/i)).toBeVisible();
 
@@ -72,7 +72,7 @@ test.describe("UI.9.3.1 authenticated security completion", () => {
     await logout(page);
   });
 
-  test("UI931 token revocation and identity switching never expose private secrets", async ({ page }) => {
+  test("token revocation and identity switching never expose private secrets", async ({ page }) => {
     await login(page, "ui93-user-a", userPassword);
     const label = "ui931-revocation-token";
     await page.getByLabel("Token label").fill(label);
@@ -99,7 +99,7 @@ test.describe("UI.9.3.1 authenticated security completion", () => {
     await logout(page);
   });
 
-  test("UI931 rejects an incorrect password-change secret without losing the session", async ({ page }) => {
+  test("rejects an incorrect password-change secret without losing the session", async ({ page }) => {
     await login(page, "ui93-user-b", userPassword);
     await page.getByLabel("Current password").fill("ui931-incorrect-password");
     await page.getByLabel("New password").fill("ui931-new-password");
@@ -110,7 +110,7 @@ test.describe("UI.9.3.1 authenticated security completion", () => {
     await logout(page);
   });
 
-  test("UI931 authenticated controls expose labels and keyboard focus", async ({ page }) => {
+  test("authenticated controls expose labels and keyboard focus", async ({ page }) => {
     await login(page, "ui93-admin", adminPassword);
     await expect(page.getByLabel("Current password")).toBeVisible();
     await expect(page.getByLabel("Token label")).toBeVisible();
@@ -121,7 +121,7 @@ test.describe("UI.9.3.1 authenticated security completion", () => {
     await logout(page);
   });
 
-  test("UI931 performs real virtual-authenticator registration, login and management", async ({ page, context }) => {
+  test("performs real virtual-authenticator registration, login and management", async ({ page, context }) => {
     const cdp = await context.newCDPSession(page);
     await cdp.send("WebAuthn.enable");
     const { authenticatorId } = await cdp.send("WebAuthn.addVirtualAuthenticator", {
@@ -152,10 +152,10 @@ test.describe("UI.9.3.1 authenticated security completion", () => {
       await expect(page.getByText("UI931 virtual authenticator", { exact: true })).toBeVisible();
 
       await logout(page);
-      await page.goto("/login?return_to=%2Faccount");
+      await page.goto("/login?return_to=%2Fdashboard%2Faccount");
       await page.getByLabel("Username or email").fill("ui93-user-a");
       await page.getByRole("button", { name: "Sign in with a passkey", exact: true }).click();
-      await expect(page).toHaveURL(/\/account$/);
+      await expect(page).toHaveURL(/\/dashboard\/account$/);
       await expect(page.getByRole("heading", { name: "Your account" })).toBeVisible();
       await expect(page.getByText("UI931 virtual authenticator", { exact: true })).toBeVisible();
 
@@ -172,10 +172,10 @@ test.describe("UI.9.3.1 authenticated security completion", () => {
     }
   });
 
-  test("UI931 executes the authenticated workspace responsive matrix", async ({ page }) => {
+  test("executes the authenticated workspace responsive matrix", async ({ page }) => {
     const widths = [375, 768, 1024, 1440, 1920];
     const workspaces = [
-      { route: "/account", username: "ui93-admin", password: adminPassword, heading: "Your account" },
+      { route: "/dashboard/account", username: "ui93-admin", password: adminPassword, heading: "Your account" },
       { route: "/admin", username: "ui93-admin", password: adminPassword, heading: "Administration" },
       { route: "/workspace", username: "ui93-creator", password: userPassword, heading: "Creator Studio" },
       { route: "/publish", username: "ui93-creator", password: userPassword, heading: "Submit a cartridge" },

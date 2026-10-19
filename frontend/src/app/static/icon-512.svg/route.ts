@@ -1,4 +1,9 @@
-const icon = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512"><rect width="512" height="512" rx="64" fill="#18242f"/><rect x="112" y="88" width="288" height="336" rx="28" fill="#f7f8f5"/><rect x="148" y="132" width="216" height="144" fill="#1f7a5a"/><rect x="148" y="312" width="216" height="28" fill="#b85d21"/><rect x="148" y="360" width="112" height="22" fill="#18242f"/><circle cx="324" cy="371" r="20" fill="#18242f"/></svg>`;
+const icon = `
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+    <rect width="512" height="512" rx="118" fill="#7045dc"/>
+    <path fill="#fff" d="M173 128h93c53 0 85 29 85 77s-32 77-85 77h-48v102h-45V128Zm45 40v74h45c27 0 43-13 43-37s-16-37-43-37h-45Z"/>
+  </svg>
+`;
 
 export function GET() {
   return new Response(icon, { headers: { "content-type": "image/svg+xml", "cache-control": "public, max-age=86400" } });

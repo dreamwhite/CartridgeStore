@@ -11,11 +11,11 @@ describe("navigation model", () => {
   });
 
   it("exposes contextual destinations only for the principal capabilities", () => {
-    expect(accountNavigation([]).map((item) => item.href)).toEqual(["/account"]);
-    expect(accountNavigation(["catalog:submit"]).map((item) => item.href)).toEqual(["/account", "/workspace"]);
-    expect(accountNavigation(["submissions:review"]).map((item) => item.href)).toEqual(["/account", "/review"]);
-    expect(accountNavigation(["users:read"]).map((item) => item.href)).toEqual(["/account", "/admin"]);
-    expect(accountNavigation(["catalog:metadata:write", "submissions:review"]).map((item) => item.href)).toEqual(["/account", "/review"]);
+    expect(accountNavigation([]).map((item) => item.href)).toEqual(["/dashboard/account"]);
+    expect(accountNavigation(["catalog:submit"]).map((item) => item.href)).toEqual(["/dashboard/account", "/workspace"]);
+    expect(accountNavigation(["submissions:review"]).map((item) => item.href)).toEqual(["/dashboard/account", "/review"]);
+    expect(accountNavigation(["users:read"]).map((item) => item.href)).toEqual(["/dashboard/account", "/admin"]);
+    expect(accountNavigation(["catalog:metadata:write", "submissions:review"]).map((item) => item.href)).toEqual(["/dashboard/account", "/review"]);
   });
 
   it("matches nested routes without making the root active everywhere", () => {

@@ -7,17 +7,6 @@ export function authPath(path: string): string {
     throw new Error("Invalid authentication API path");
   }
 
-  // The isolated runtime has Next.js compatibility pages at /auth/login and
-  // /auth/register. Route browser API calls through the unambiguous
-  // /api/auth namespace whenever the Fastify auth integration is enabled.
-  if (
-    (process.env.NEXT_PUBLIC_PRG32_CANDIDATE_AUTH_PROXY === "true" ||
-      process.env.NEXT_PUBLIC_AUTH_INTEGRATION_ENABLED === "true") &&
-    path.startsWith("/auth/")
-  ) {
-    return `/api/auth${path.slice("/auth".length)}`;
-  }
-
   return path;
 }
 

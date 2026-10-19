@@ -57,6 +57,6 @@ describe("authentication API client", () => {
 
   test("builds provider-neutral browser navigation URLs and sanitizes return paths", () => {
     expect(federatedLoginUrl({ provider_id: "campus/main", protocol: "oidc", display_name: "Campus", enabled: true }, "//evil.example")).toBe("/api/auth/oidc/campus%2Fmain/login?return_to=%2F");
-    expect(federatedLoginUrl({ provider_id: "university", protocol: "saml", display_name: "University", enabled: true }, "/account")).toBe("/api/auth/saml/university/login?return_to=%2Faccount");
+    expect(federatedLoginUrl({ provider_id: "university", protocol: "saml", display_name: "University", enabled: true }, "/dashboard/account")).toBe("/api/auth/saml/university/login?return_to=%2Fdashboard%2Faccount");
   });
 });

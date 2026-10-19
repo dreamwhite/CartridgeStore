@@ -119,6 +119,10 @@ body {
   pointer-events: none;
 }
 
+.dashboard-sidebar {
+  background: var(--color-surface);
+}
+
 .homepage-introduction {
   background: var(--color-surface-muted);
 }
@@ -154,27 +158,27 @@ body {
   box-shadow: 0 18px 40px rgb(46 32 86 / 0.16);
 }
 
-.homepage-cta-button-primary {
-  border: 1px solid var(--color-primary);
-  background-color: var(--color-primary);
+.homepage-cta-panel .homepage-cta-button-primary {
+  border: 1px solid #a27bff;
+  background-color: #7045d8;
   color: var(--color-primary-foreground);
   box-shadow: var(--shadow-brand);
 }
 
-.homepage-cta-button-primary:hover {
-  border-color: var(--color-primary-strong);
-  background-color: var(--color-primary-strong);
+.homepage-cta-panel .homepage-cta-button-primary:hover {
+  border-color: #b79bff;
+  background-color: #8159e7;
 }
 
-.homepage-cta-button-secondary {
-  border: 1px solid rgb(255 255 255 / 0.45);
-  background-color: rgb(255 255 255 / 0.06);
-  color: #fff;
+.homepage-cta-panel .homepage-cta-button-secondary {
+  border: 1px solid #8b5cf6;
+  background-color: #37265f;
+  color: #f7f2ff;
 }
 
-.homepage-cta-button-secondary:hover {
-  border-color: rgb(255 255 255 / 0.7);
-  background-color: rgb(255 255 255 / 0.14);
+.homepage-cta-panel .homepage-cta-button-secondary:hover {
+  border-color: #b79bff;
+  background-color: #493376;
   color: #fff;
 }
 
@@ -190,7 +194,8 @@ body {
   display: grid;
   place-items: center;
   overflow: hidden;
-  background: #08070d;
+  background: color-mix(in srgb, var(--color-bg) 76%, transparent);
+  backdrop-filter: blur(8px);
   opacity: 1;
   transition: opacity 260ms ease, visibility 260ms ease;
 }
@@ -207,6 +212,7 @@ body {
   overflow: hidden;
   border: 1px solid rgb(174 113 255 / 0.36);
   border-radius: 0.9rem;
+  background: color-mix(in srgb, var(--color-surface) 72%, transparent);
   box-shadow:
     0 0 0 1px rgb(0 229 255 / 0.08),
     0 1.5rem 5rem rgb(86 23 131 / 0.34);
@@ -233,13 +239,13 @@ body {
 .boot-splash__art::before {
   filter: hue-rotate(145deg) saturate(2.4) brightness(1.2);
   mix-blend-mode: screen;
-  animation: boot-splash-glitch-cyan 2500ms steps(1, end) infinite;
+  animation: boot-splash-glitch-cyan 1000ms steps(1, end) infinite;
 }
 
 .boot-splash__art::after {
   filter: hue-rotate(285deg) saturate(2.8) brightness(1.16);
   mix-blend-mode: screen;
-  animation: boot-splash-glitch-pink 2500ms steps(1, end) infinite;
+  animation: boot-splash-glitch-pink 1000ms steps(1, end) infinite;
 }
 
 .boot-splash__bar-mask {
@@ -250,9 +256,9 @@ body {
   left: 25.6%;
   height: 1.25%;
   min-height: 0.35rem;
-  background: #08070d;
+  background: var(--color-surface);
   transform-origin: right center;
-  animation: boot-splash-bar-reveal 2400ms linear forwards;
+  animation: boot-splash-bar-reveal 900ms linear forwards;
 }
 
 @keyframes boot-splash-bar-reveal {

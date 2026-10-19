@@ -34,7 +34,7 @@ export function hasAnyPermission(permissions: readonly string[] | undefined, req
 
 export function accountNavigation(permissions?: readonly string[]): NavigationItem[] {
   const items: NavigationItem[] = [
-    { label: "Your account", href: "/account", description: "Profile and security" },
+    { label: "Your account", href: "/dashboard/account", description: "Profile and security" },
   ];
 
   if (hasPermission(permissions, "catalog:submit")) {
@@ -55,12 +55,12 @@ export const CONTEXTUAL_NAVIGATION: Record<"account" | "creator" | "review", Nav
   creator: [
     { label: "Studio overview", href: "/workspace" },
     { label: "Publish cartridge", href: "/publish" },
-    { label: "Your account", href: "/account" },
+    { label: "Your account", href: "/dashboard/account" },
   ],
   review: [
     { label: "Review queue", href: "/review" },
     { label: "Creator Studio", href: "/workspace", permission: "catalog:submit" },
-    { label: "Your account", href: "/account" },
+    { label: "Your account", href: "/dashboard/account" },
   ],
 };
 

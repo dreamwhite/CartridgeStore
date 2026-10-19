@@ -3,10 +3,12 @@
 import Image from "next/image";
 import { useCallback, useEffect, useState } from "react";
 
-const SPLASH_SESSION_KEY = "prg32-boot-splash-seen";
+const SPLASH_DURATION_MS = 1000;
 
 export function BootSplash() {
-  const [visible, setVisible] = useState(true);
+  // The root layout keeps this component mounted during client-side
+  // navigation. It therefore runs on document loads and refreshes only.
+  const [visible, setVisible] = useState(false);
   const [exiting, setExiting] = useState(false);
 
   const dismiss = useCallback(() => {
@@ -15,22 +17,19 @@ export function BootSplash() {
   }, []);
 
   useEffect(() => {
-    try {
-      if (window.sessionStorage.getItem(SPLASH_SESSION_KEY)) {
-        const timer = window.setTimeout(() => setVisible(false), 0);
-        return () => window.clearTimeout(timer);
-      }
-      window.sessionStorage.setItem(SPLASH_SESSION_KEY, "1");
-    } catch {
-      // Session storage may be unavailable; the splash can still be dismissed.
-    }
-
     const reducedMotion = window.matchMedia?.(
       "(prefers-reduced-motion: reduce)",
     ).matches;
-    const timer = window.setTimeout(dismiss, reducedMotion ? 400 : 2500);
+    const showTimer = window.setTimeout(() => setVisible(true), 0);
+    const timer = window.setTimeout(
+      dismiss,
+      reducedMotion ? 250 : SPLASH_DURATION_MS,
+    );
 
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(showTimer);
+      window.clearTimeout(timer);
+    };
   }, [dismiss]);
 
   if (!visible) return null;

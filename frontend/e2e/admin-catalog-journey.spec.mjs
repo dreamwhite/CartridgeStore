@@ -66,7 +66,7 @@ test("completes registration and password reset through the disposable SMTP capt
   await page.getByRole("textbox", { name: "Password", exact: true }).fill(userPassword);
   await page.getByLabel("Confirm password").fill(userPassword);
   await page.getByRole("button", { name: "Complete registration" }).click();
-  await expect(page).toHaveURL(/\/account$/);
+  await expect(page).toHaveURL(/\/dashboard\/account$/);
 
   await page.goto(registrationLink);
   await page.waitForLoadState("networkidle");

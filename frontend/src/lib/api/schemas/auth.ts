@@ -58,6 +58,13 @@ export const authUserResponseSchema = z
   })
   .passthrough();
 
+export const authProfileResponseSchema = z
+  .object({
+    ok: z.literal(true),
+    user: principalSchema,
+  })
+  .passthrough();
+
 export const authLogoutResponseSchema = z
   .object({ ok: z.literal(true) })
   .passthrough();

@@ -20,7 +20,7 @@ async function login(page, username, password) {
 
 async function adminCsrf(page) {
   const response = await page.evaluate(async () => {
-    const csrf = await fetch("/__admin-fastify/auth/csrf");
+    const csrf = await fetch("/auth/csrf");
     return { status: csrf.status, body: await csrf.json() };
   });
   expect(response.status).toBe(200);
@@ -37,7 +37,7 @@ test("closes disposable administrative acceptance for settings, users, moderatio
   if (await registration.isChecked()) await registration.uncheck();
   await page.getByRole("button", { name: "Save settings" }).click();
   await expect(page.getByRole("status")).toContainText("Settings salvate");
-  const persistedSettings = await page.evaluate(async () => (await fetch("/__admin-fastify/api/admin/settings")).json());
+  const persistedSettings = await page.evaluate(async () => (await fetch("/api/admin/settings")).json());
   expect(persistedSettings.application_settings["session.lifetime_seconds"].value).toBe(60);
   await page.reload();
   await expect(page.getByLabel("session.lifetime_seconds")).toHaveValue("60");
@@ -45,7 +45,19 @@ test("closes disposable administrative acceptance for settings, users, moderatio
 
   const registrationAttempt = await page.evaluate(async () => {
     const csrf = await fetch("/api/auth/csrf").then((response) => response.json());
-    const response = await fetch("/api/auth/register", { method: "POST", headers: { "content-type": "application/json", "x-csrftoken": csrf.csrf_token }, body: JSON.stringify({ username: "closed-browser-user", email: "closed-browser-user@example.test", password: "long-password-123", password_confirm: "long-password-123" }) });
+    const response = await fetch("/api/auth/register", {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-csrftoken": csrf.csrf_token,
+      },
+      body: JSON.stringify({
+        username: "closed-browser-user",
+        email: "closed-browser-user@example.test",
+        password: "long-password-123",
+        password_confirm: "long-password-123",
+      }),
+    });
     return response.status;
   });
   expect(registrationAttempt).toBe(400);
@@ -106,7 +118,20 @@ test("closes disposable administrative acceptance for settings, users, moderatio
 
   const csrf = await adminCsrf(page);
   const restore = await page.evaluate(async (token) => {
-    const response = await fetch("/__admin-fastify/api/admin/cartridges/browser-fixture/moderation?version=1.0.0", { method: "POST", headers: { "content-type": "application/json", "x-csrftoken": token }, body: JSON.stringify({ action: "restored", reason: "Disposable acceptance restore" }) });
+    const response = await fetch(
+      "/api/admin/cartridges/browser-fixture/moderation?version=1.0.0",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-csrftoken": token,
+        },
+        body: JSON.stringify({
+          action: "restored",
+          reason: "Disposable acceptance restore",
+        }),
+      },
+    );
     return response.status;
   }, csrf);
   expect(restore).toBe(200);

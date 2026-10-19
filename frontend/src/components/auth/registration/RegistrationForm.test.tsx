@@ -49,6 +49,6 @@ describe("RegistrationForm", () => {
     await user.click(screen.getByRole("button", { name: "Complete registration" }));
 
     await waitFor(() => expect(complete).toHaveBeenCalledWith("token-from-link", "secret", "secret"));
-    expect(replace).toHaveBeenCalledWith("/account");
+    expect(replace).toHaveBeenCalledWith("/dashboard/account");
   });
 });

@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { AuthNavigation } from "./AuthNavigation";
 
-const authState = vi.hoisted(() => ({ value: { isPending: false, error: null as Error | null, user: null as null | { username: string; permissions: string[] } } }));
+const authState = vi.hoisted(() => ({ value: { isPending: false, error: null as Error | null, user: null as null | { name?: string; username: string; permissions: string[] } } }));
 const routerState = vi.hoisted(() => ({ replace: vi.fn() }));
 const logoutState = vi.hoisted(() => ({ logout: vi.fn() }));
 
@@ -41,6 +41,14 @@ describe("AuthNavigation", () => {
     expect(screen.getByRole("link", { name: "Retry authentication" })).toHaveAttribute("href", "/login");
   });
 
+  test("keeps the initial session check visually compact", () => {
+    authState.value = { isPending: true, error: null, user: null };
+    render(<QueryClientProvider client={new QueryClient()}><AuthNavigation /></QueryClientProvider>);
+
+    expect(screen.getByRole("status", { name: "Loading account" })).toBeInTheDocument();
+    expect(screen.queryByText("Checking session…")).not.toBeInTheDocument();
+  });
+
   test("shows a prominent anonymous sign-in action", () => {
     authState.value = { isPending: false, error: null, user: null };
     render(<QueryClientProvider client={new QueryClient()}><AuthNavigation /></QueryClientProvider>);
@@ -51,10 +59,10 @@ describe("AuthNavigation", () => {
 
   test("exposes only permission-aware destinations and logout in the account menu", async () => {
     const user = userEvent.setup();
-    authState.value = { isPending: false, error: null, user: { username: "ada", permissions: ["catalog:submit"] } };
+    authState.value = { isPending: false, error: null, user: { name: "Ada", username: "ada", permissions: ["catalog:submit"] } };
     render(<QueryClientProvider client={new QueryClient()}><AuthNavigation /></QueryClientProvider>);
 
-    await user.click(screen.getByRole("button", { name: "Open account menu for ada" }));
+    await user.click(screen.getByRole("button", { name: "Open account menu for Ada" }));
     expect(screen.getByRole("menuitem", { name: "Your account" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Creator Studio" })).toBeInTheDocument();
     expect(screen.getByRole("menuitem", { name: "Sign out" })).toBeInTheDocument();

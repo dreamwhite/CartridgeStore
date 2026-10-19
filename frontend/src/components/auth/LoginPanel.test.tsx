@@ -6,10 +6,11 @@ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { LoginPanel } from "./LoginPanel";
 
 const replace = vi.fn();
+let searchParams = new URLSearchParams("return_to=%2Fdashboard%2Faccount");
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ replace }),
-  useSearchParams: () => new URLSearchParams("return_to=%2Faccount"),
+  useSearchParams: () => searchParams,
 }));
 
 function renderPanel(enabled = true) {
@@ -35,6 +36,7 @@ const anonymous = {
 describe("LoginPanel", () => {
   beforeEach(() => {
     replace.mockReset();
+    searchParams = new URLSearchParams("return_to=%2Fdashboard%2Faccount");
     vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
       const url = String(input);
       if (url.endsWith("/auth/me")) return Promise.resolve(response({ ok: false, error: "login required", user: anonymous }, 401));
@@ -66,8 +68,8 @@ describe("LoginPanel", () => {
 
     renderPanel();
 
-    expect(await screen.findByRole("link", { name: /Campus SSO/ })).toHaveAttribute("href", "/api/auth/oidc/campus/login?return_to=%2Faccount");
-    expect(screen.getByRole("link", { name: /Research SSO/ })).toHaveAttribute("href", "/api/auth/saml/research/login?return_to=%2Faccount");
+    expect(await screen.findByRole("link", { name: /Campus SSO/ })).toHaveAttribute("href", "/api/auth/oidc/campus/login?return_to=%2Fdashboard%2Faccount");
+    expect(screen.getByRole("link", { name: /Research SSO/ })).toHaveAttribute("href", "/api/auth/saml/research/login?return_to=%2Fdashboard%2Faccount");
     expect(screen.queryByRole("link", { name: /Legacy SSO/ })).not.toBeInTheDocument();
   });
 
@@ -102,8 +104,28 @@ describe("LoginPanel", () => {
     await user.type(screen.getByLabelText("Password"), "secret");
     await user.click(screen.getByRole("button", { name: "Sign in" }));
 
-    await waitFor(() => expect(replace).toHaveBeenCalledWith("/account"));
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/dashboard/account"));
     expect(fetchMock.mock.calls.some(([input]) => String(input).endsWith("/auth/csrf"))).toBe(true);
+  });
+
+  test("navigates to the dashboard when no return path is requested", async () => {
+    const user = userEvent.setup();
+    searchParams = new URLSearchParams();
+    vi.stubGlobal("fetch", vi.fn((input: RequestInfo | URL) => {
+      const url = String(input);
+      if (url.endsWith("/auth/me")) return Promise.resolve(response({ ok: false, error: "login required", user: anonymous }, 401));
+      if (url.endsWith("/api/auth/providers")) return Promise.resolve(response({ ok: true, providers: [] }));
+      if (url.endsWith("/auth/csrf")) return Promise.resolve(response({ ok: true, csrf_token: "csrf-token-that-is-long-enough-for-the-contract-123" }));
+      if (url.endsWith("/auth/login")) return Promise.resolve(response({ ok: true, user: { ...anonymous, id: 7, username: "ada", authenticated: true } }));
+      return Promise.resolve(response({ ok: false, error: "unexpected request" }, 500));
+    }));
+
+    renderPanel();
+    await user.type(await screen.findByLabelText("Username or email"), "ada");
+    await user.type(screen.getByLabelText("Password"), "secret");
+    await user.click(screen.getByRole("button", { name: "Sign in" }));
+
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/dashboard"));
   });
 
   test("shows invalid credentials without exposing backend details", async () => {

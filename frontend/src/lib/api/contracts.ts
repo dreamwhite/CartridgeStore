@@ -3,6 +3,7 @@ import type {
   apiErrorSchema,
   authLogoutResponseSchema,
   authOperationResponseSchema,
+  authProfileResponseSchema,
   authProvidersResponseSchema,
   authTokenCreatedResponseSchema,
   authTokenSchema,
@@ -46,6 +47,7 @@ export type CsrfResponse = z.infer<typeof csrfResponseSchema>;
 export type AuthProvider = z.infer<typeof authProvidersResponseSchema>["providers"][number];
 export type AuthProvidersResponse = z.infer<typeof authProvidersResponseSchema>;
 export type AuthUserResponse = z.infer<typeof authUserResponseSchema>;
+export type AuthProfileResponse = z.infer<typeof authProfileResponseSchema>;
 export type AuthLogoutResponse = z.infer<typeof authLogoutResponseSchema>;
 export type AuthOperationResponse = z.infer<typeof authOperationResponseSchema>;
 export type AuthToken = z.infer<typeof authTokenSchema>;

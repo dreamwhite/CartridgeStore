@@ -1,5 +1,5 @@
 const serviceWorker = `const CACHE_NAME = "prg32-cartridge-store-v2";
-const SHELL = ["/", "/publish", "/manifest.webmanifest"];
+const SHELL = ["/", "/dashboard/publish", "/manifest.webmanifest"];
 self.addEventListener("install", (event) => {
   event.waitUntil(caches.open(CACHE_NAME).then((cache) => cache.addAll(SHELL)));
   self.skipWaiting();

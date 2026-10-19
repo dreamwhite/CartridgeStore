@@ -59,7 +59,7 @@ export async function requestJson<T>(
   return parsed.data;
 }
 
-/** Call the explicit browser-facing API origin when dual-origin mode is enabled. */
+/** Call the explicit browser-facing Fastify API origin when configured. */
 export function requestApiJson<T>(
   input: RequestInfo | URL,
   init?: RequestInit,
@@ -72,21 +72,17 @@ export function requestApiJson<T>(
 }
 
 /**
- * Use the existing Next.js compatibility rewrite for operational public APIs.
+ * Call the public API origin for compatibility with older domain modules.
  *
- * Public catalog, score, metrics, and statistics routes remain Flask-owned
- * during migration. Keeping these requests same-origin avoids expanding the
- * browser CORS surface while preserving the original route and response.
+ * The name remains part of the frontend module API while all requests now
+ * share the same Fastify transport.
  */
 export function requestSameOriginJson<T>(
   input: RequestInfo | URL,
   init?: RequestInit,
   schema?: z.ZodType<T>,
 ): Promise<T> {
-  return requestJson(input, {
-    ...init,
-    credentials: init?.credentials ?? "same-origin",
-  }, schema);
+  return requestApiJson(input, init, schema);
 }
 
 /** Add a domain-acquired CSRF token to a JSON/form mutation request. */

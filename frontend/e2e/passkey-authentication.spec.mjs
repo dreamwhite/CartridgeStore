@@ -21,7 +21,7 @@ test("registers, lists, and uses a disposable resident passkey", async ({ contex
   await cdp.send("WebAuthn.addVirtualAuthenticator", { options: { protocol: "ctap2", transport: "internal", hasResidentKey: true, hasUserVerification: true, automaticPresenceSimulation: true, isUserVerified: true } });
 
   await login(page);
-  await page.goto(`${storeOrigin()}/account`);
+  await page.goto(`${storeOrigin()}/dashboard/account`);
   await expect(page.getByRole("heading", { name: "Passkeys" })).toBeVisible();
   let prompt = 0;
   page.on("dialog", async (dialog) => {
@@ -34,6 +34,6 @@ test("registers, lists, and uses a disposable resident passkey", async ({ contex
   await page.getByRole("button", { name: /Sign out/ }).click();
   await expect(page).toHaveURL(/\/login(?:\?|$)/);
   await page.getByRole("button", { name: "Use a discoverable passkey" }).click();
-  await expect(page).toHaveURL(/\/account$/);
+  await expect(page).toHaveURL(/\/dashboard\/account$/);
   expect(await page.evaluate(async () => (await fetch("/api/auth/me")).status)).toBe(200);
 });

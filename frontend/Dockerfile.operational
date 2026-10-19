@@ -4,20 +4,14 @@ COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 RUN corepack enable && pnpm install --frozen-lockfile
 
 FROM dependencies AS builder
-ENV NEXT_TELEMETRY_DISABLED=1 NODE_ENV=production \
-    PRG32_API_UPSTREAM=http://fastify:5080 \
-    PRG32_NEXT_RUNTIME_MODE=operational \
-    PRG32_ADMIN_FASTIFY_TARGET=http://fastify:5080 \
-    PRG32_WORKFLOW_FASTIFY_TARGET=http://fastify:5080 \
-    PRG32_FEDERATION_ADMIN_INTEGRATION_ENABLED=true \
-    PRG32_FEDERATION_ADMIN_FASTIFY_TARGET=http://fastify:5080 \
-    PRG32_AUTH_INTEGRATION_ENABLED=true \
-    PRG32_AUTH_FASTIFY_TARGET=http://fastify:5080
+ARG NEXT_PUBLIC_PRG32_API_ORIGIN
+ENV NEXT_TELEMETRY_DISABLED=1 NODE_ENV=production
+ENV NEXT_PUBLIC_PRG32_API_ORIGIN=${NEXT_PUBLIC_PRG32_API_ORIGIN}
 COPY . .
 RUN corepack enable && pnpm run build
 
 FROM node:24-bookworm-slim AS runtime
-ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1 PRG32_API_UPSTREAM=http://fastify:5080
+ENV NODE_ENV=production NEXT_TELEMETRY_DISABLED=1
 WORKDIR /app
 COPY --from=builder --chown=node:node /app/.next/standalone ./
 COPY --from=builder --chown=node:node /app/.next/static ./.next/static

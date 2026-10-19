@@ -21,7 +21,10 @@ type LoginPanelProps = {
 export function LoginPanel({ enabled = authIntegrationEnabled }: LoginPanelProps) {
   const searchParams = useSearchParams();
   const [passkeyUsername, setPasskeyUsername] = useState("");
-  const returnTo = useMemo(() => safeReturnPath(searchParams.get("return_to")), [searchParams]);
+  const returnTo = useMemo(() => {
+    const requestedReturnTo = searchParams.get("return_to");
+    return requestedReturnTo === null ? "/dashboard" : safeReturnPath(requestedReturnTo);
+  }, [searchParams]);
   const reason = searchParams.get("reason");
   const current = useCurrentUser(enabled);
 

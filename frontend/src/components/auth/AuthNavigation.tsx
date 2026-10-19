@@ -1,7 +1,21 @@
 "use client";
 
 import { useMutation, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, ChevronDown, LogOut, UserRound } from "lucide-react";
+import {
+  ArrowUpRight,
+  AlertTriangle,
+  ClipboardCheck,
+  CircleUserRound,
+  ChevronDown,
+  ExternalLink,
+  LayoutDashboard,
+  LogOut,
+  Network,
+  Rocket,
+  ShieldCheck,
+  UserRound,
+  type LucideIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
@@ -15,7 +29,14 @@ import { useCurrentUser } from "../../lib/auth/use-current-user";
 import { accountNavigation } from "../layout/navigation";
 import { Button } from "../ui/button";
 import { StatusMessage } from "../ui/status";
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "../ui/dropdown-menu";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "../ui/dropdown-menu";
 
 export function AuthNavigation() {
   const router = useRouter();
@@ -38,35 +59,114 @@ export function AuthNavigation() {
   });
 
   if (!authIntegrationEnabled) return null;
-  if (current.isPending) return <span className="text-sm text-[var(--color-text-muted)]" role="status">Checking session…</span>;
+  if (current.isPending) {
+    return (
+      <span
+        aria-label="Loading account"
+        className="inline-flex items-center"
+        role="status"
+      >
+        <span
+          aria-hidden="true"
+          className="size-8 animate-pulse rounded-full bg-[var(--color-surface-muted)]"
+        />
+        <span className="sr-only">Loading account…</span>
+      </span>
+    );
+  }
   if (current.error) {
     const message = authErrorMessage(current.error, "session");
     return <span className="inline-flex min-w-0 items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300" role="alert" title={message}><AlertTriangle aria-hidden="true" className="size-3.5 shrink-0" /><span aria-hidden="true" className="hidden sm:inline">Auth unavailable</span><span className="sr-only">{message}. </span><Link aria-label="Retry authentication" className="shrink-0 font-semibold underline underline-offset-2" href="/login">Retry</Link></span>;
   }
   if (!current.user) return <Button asChild size="sm" className="px-3"><Link href="/login">Sign in</Link></Button>;
 
-  const contextualLinks = accountNavigation(current.user.permissions).filter((item) => item.href !== "/account");
+  const displayName = current.user.name?.trim() || current.user.username;
+  const contextualLinks = accountNavigation(current.user.permissions).filter((item) => item.href !== "/dashboard/account");
+  const contextualIcons: Record<string, LucideIcon> = {
+    "/workspace": Rocket,
+    "/review": ClipboardCheck,
+    "/admin": ShieldCheck,
+    "/admin/federation": Network,
+  };
 
   return (
     <div className="flex items-center gap-2 text-sm">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button type="button" variant="ghost" size="sm" className="max-w-48 px-2" aria-label={`Open account menu for ${current.user.username}`}>
-            <UserRound aria-hidden="true" className="size-4" />
-            <span className="truncate">{current.user.username}</span>
-            <ChevronDown aria-hidden="true" className="size-3.5 text-[var(--color-text-muted)]" />
+          <Button type="button" variant="ghost" size="sm" className="max-w-48 gap-2 px-1.5 sm:px-2" aria-label={`Open account menu for ${displayName}`}>
+            <span className="grid size-7 shrink-0 place-items-center rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary-strong)]">
+              <UserRound aria-hidden="true" className="size-4" />
+            </span>
+            <span className="hidden truncate sm:inline">{displayName}</span>
+            <ChevronDown aria-hidden="true" className="hidden size-3.5 text-[var(--color-text-muted)] sm:inline" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
-          <DropdownMenuLabel>Account</DropdownMenuLabel>
-          <DropdownMenuItem asChild><Link href="/account">Your account</Link></DropdownMenuItem>
-          {contextualLinks.map((item) => <DropdownMenuItem key={item.href} asChild><Link href={item.href}>{item.label}</Link></DropdownMenuItem>)}
-          {current.user.permissions?.includes("federation:read") && <DropdownMenuItem asChild><Link href="/admin/federation">Federation</Link></DropdownMenuItem>}
+        <DropdownMenuContent
+          align="end"
+          sideOffset={10}
+          className="w-72 max-w-[calc(100vw-1rem)] rounded-2xl p-2"
+        >
+          <div className="flex items-center gap-3 rounded-xl bg-[var(--color-surface-muted)] p-3">
+            <span className="grid size-10 shrink-0 place-items-center rounded-full bg-[var(--color-primary)] text-base font-bold text-white shadow-[var(--shadow-brand)]">
+              {displayName.slice(0, 1).toUpperCase()}
+            </span>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold">{displayName}</p>
+              <p className="break-all text-[11px] leading-4 text-[var(--color-text-muted)]">{current.user.email}</p>
+            </div>
+          </div>
+
+          <DropdownMenuLabel className="px-3 pb-1 pt-3 text-[10px] uppercase tracking-[0.16em]">
+            Account
+          </DropdownMenuLabel>
+          <DropdownMenuItem asChild className="gap-3 px-3 py-2.5">
+            <Link href="/dashboard/account">
+              <CircleUserRound aria-hidden="true" className="size-4 text-[var(--color-primary)]" />
+              <span>Your account</span>
+            </Link>
+          </DropdownMenuItem>
+
+          <DropdownMenuLabel className="px-3 pb-1 pt-3 text-[10px] uppercase tracking-[0.16em]">
+            Workspace
+          </DropdownMenuLabel>
+          <DropdownMenuItem asChild className="gap-3 px-3 py-2.5">
+            <Link href="/dashboard">
+              <LayoutDashboard aria-hidden="true" className="size-4 text-[var(--color-primary)]" />
+              <span>Developer dashboard</span>
+            </Link>
+          </DropdownMenuItem>
+          {contextualLinks.map((item) => {
+            const Icon = contextualIcons[item.href] ?? ArrowUpRight;
+            return (
+              <DropdownMenuItem key={item.href} asChild className="gap-3 px-3 py-2.5">
+                <Link href={item.href}>
+                  <Icon aria-hidden="true" className="size-4 text-[var(--color-primary)]" />
+                  <span>{item.label}</span>
+                </Link>
+              </DropdownMenuItem>
+            );
+          })}
+          {current.user.permissions?.includes("federation:read") && (
+            <DropdownMenuItem asChild className="gap-3 px-3 py-2.5">
+              <Link href="/admin/federation">
+                <Network aria-hidden="true" className="size-4 text-[var(--color-primary)]" />
+                <span>Federation</span>
+              </Link>
+            </DropdownMenuItem>
+          )}
           <DropdownMenuSeparator />
-          <DropdownMenuItem asChild><Link href={`/users/${encodeURIComponent(current.user.username)}`}>Public profile</Link></DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => logout.mutate()}>
-            <LogOut aria-hidden="true" className="mr-2 size-3.5" />
-            Sign out
+          <DropdownMenuItem asChild className="gap-3 px-3 py-2.5">
+            <Link href={`/users/${encodeURIComponent(current.user.username)}`}>
+              <ExternalLink aria-hidden="true" className="size-4 text-[var(--color-text-muted)]" />
+              <span>Public profile</span>
+            </Link>
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            onSelect={() => logout.mutate()}
+            className="gap-3 px-3 py-2.5 text-rose-700 data-[highlighted]:bg-rose-50 data-[highlighted]:text-rose-800 dark:text-rose-300 dark:data-[highlighted]:bg-rose-950/40 dark:data-[highlighted]:text-rose-200"
+          >
+            <LogOut aria-hidden="true" className="size-4" />
+            <span>Sign out</span>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

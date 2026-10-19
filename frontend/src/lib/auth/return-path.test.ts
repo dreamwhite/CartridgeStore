@@ -4,7 +4,7 @@ import { safeReturnPath } from "./return-path";
 
 describe("safeReturnPath", () => {
   test("accepts local paths with query strings", () => {
-    expect(safeReturnPath("/account?tab=profile")).toBe("/account?tab=profile");
+    expect(safeReturnPath("/dashboard/account?tab=profile")).toBe("/dashboard/account?tab=profile");
   });
 
   test("rejects external and protocol-relative destinations", () => {

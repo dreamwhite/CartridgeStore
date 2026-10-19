@@ -1,6 +1,4 @@
 const configuredApiOrigin = process.env.NEXT_PUBLIC_PRG32_API_ORIGIN?.trim();
-const dualOriginEnabled = process.env.NEXT_PUBLIC_PRG32_DUAL_ORIGIN_ENABLED === "true";
-
 function normalizedOrigin(value: string | undefined): string | undefined {
   if (!value) return undefined;
   let parsed: URL;
@@ -14,11 +12,11 @@ function normalizedOrigin(value: string | undefined): string | undefined {
 export const publicApiOrigin = normalizedOrigin(configuredApiOrigin);
 
 export function isDualOriginEnabled(): boolean {
-  return dualOriginEnabled && publicApiOrigin !== undefined;
+  return publicApiOrigin !== undefined;
 }
 
 export function resolvePublicApiUrl(input: RequestInfo | URL): RequestInfo | URL {
-  if (!isDualOriginEnabled() || publicApiOrigin === undefined) return input;
+  if (publicApiOrigin === undefined) return input;
   if (input instanceof URL) return new URL(input.toString(), publicApiOrigin);
   if (typeof input !== "string") return input;
   if (/^https?:\/\//i.test(input)) return input;
@@ -26,6 +24,6 @@ export function resolvePublicApiUrl(input: RequestInfo | URL): RequestInfo | URL
 }
 
 export function publicApiPath(path: string): string {
-  if (!isDualOriginEnabled() || publicApiOrigin === undefined) return path;
+  if (publicApiOrigin === undefined) return path;
   return new URL(path, publicApiOrigin).toString();
 }

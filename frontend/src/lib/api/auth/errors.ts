@@ -3,7 +3,7 @@ import { ApiRequestError } from "../client";
 /** Converts authentication failures into user-facing messages. */
 export function authErrorMessage(
   error: unknown,
-  operation: "login" | "logout" | "session" | "providers" = "session",
+  operation: "login" | "logout" | "session" | "providers" | "profile" = "session",
 ): string {
   if (error instanceof ApiRequestError) {
     if (operation === "login" && error.status === 401) {
@@ -20,6 +20,9 @@ export function authErrorMessage(
     }
     if (error.status === 503) {
       return "The authentication service is temporarily unavailable.";
+    }
+    if (operation === "profile" && error.status === 400) {
+      return error.body?.error ?? "The profile details are invalid.";
     }
     if (operation === "providers") {
       return "Federated login options are temporarily unavailable.";

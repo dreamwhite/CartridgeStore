@@ -38,7 +38,7 @@ export function useRegistration(complete: boolean, initialToken: string) {
       setConfirmation("");
       removeSensitiveQueryData(queryClient);
       queryClient.setQueryData(authQueryKeys.currentUser(), result);
-      router.replace("/account");
+      router.replace("/dashboard/account");
     },
   });
 

@@ -13,7 +13,7 @@ const registrationPassword = "ui93-browser-registration-password-2026";
 
 test.describe.configure({ mode: "serial" });
 
-async function login(page, username, password, returnTo = "/account") {
+async function login(page, username, password, returnTo = "/dashboard/account") {
   await page.goto(`/login?return_to=${encodeURIComponent(returnTo)}`);
   await page.getByLabel("Username or email").fill(username);
   await page.getByLabel("Password", { exact: true }).fill(password);
@@ -73,7 +73,7 @@ test("local registration, login, logout and real authenticated account", async (
   await page.getByLabel("Password", { exact: true }).fill(registrationPassword);
   await page.getByLabel("Confirm password").fill(registrationPassword);
   await page.getByRole("button", { name: "Complete registration" }).click();
-  await expect(page).toHaveURL(/\/account$/);
+  await expect(page).toHaveURL(/\/dashboard\/account$/);
   expect((await page.context().cookies()).some((cookie) => cookie.name === "prg32_ts_session")).toBeTruthy();
   expect(await page.evaluate(async () => (await fetch("/api/auth/me")).status)).toBe(200);
   await expect(page.getByRole("heading", { name: "Your account" })).toBeVisible();
@@ -81,7 +81,7 @@ test("local registration, login, logout and real authenticated account", async (
   await expect(page.getByRole("heading", { name: "Passkeys" })).toBeVisible();
 
   await logout(page);
-  await page.goto("/account");
+  await page.goto("/dashboard/account");
   await expect(page).toHaveURL(/\/login\?reason=required/);
 });
 
@@ -167,7 +167,7 @@ test("creator draft and publishing workflow use real disposable Fastify writes",
   await page.getByRole("button", { name: "New draft" }).click();
   await expect(page.getByText("New cartridge draft")).toBeVisible();
   const draftInput = page.locator('input[aria-label^="Attach ZIP to draft"]');
-  const attachResponse = page.waitForResponse((response) => response.url().includes("/__workflow-fastify/api/drafts/") && response.url().endsWith("/artifact") && response.request().method() === "POST");
+  const attachResponse = page.waitForResponse((response) => response.url().includes("/api/drafts/") && response.url().endsWith("/artifact") && response.request().method() === "POST");
   await draftInput.setInputFiles({ name: "ui93-acceptance.zip", mimeType: "application/zip", buffer: bundle });
   const attached = await attachResponse;
   if (attached.status() !== 200) throw new Error(`draft artifact attach returned HTTP ${attached.status()}: ${await attached.text()}`);
@@ -199,10 +199,10 @@ test("creator draft and publishing workflow use real disposable Fastify writes",
 });
 
 test("authenticated surfaces remain usable across supported widths and themes", async ({ page }) => {
-  await login(page, "ui93-admin", adminPassword, "/account");
+  await login(page, "ui93-admin", adminPassword, "/dashboard/account");
   for (const width of [375, 768, 1024, 1440, 1920]) {
     await page.setViewportSize({ width, height: 900 });
-    await page.goto("/account");
+  await page.goto("/dashboard/account");
     await expect(page.getByRole("heading", { name: "Your account" })).toBeVisible();
     await expect.poll(() => page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1)).toBeTruthy();
     const themeToggle = page.getByRole("button", { name: /Switch to (light|dark) theme/ });

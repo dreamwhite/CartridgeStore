@@ -93,7 +93,7 @@ export const documentation: DocumentationArticle[] = [
     title: "Scores",
     summary: "Read and submit score records without merging player names with authenticated identities.",
     category: "Runtime APIs",
-    source: "../PRG32/docs/cartridge_store/score_api.md and " + apiSource,
+    source: "../PRG32/docs/score_api.md and " + apiSource,
     blocks: [
       { type: "paragraph", text: "GET /api/scores returns score records. The Store orders results by score descending and then created_at ascending, so the Scoreboard presents that returned order rather than calculating a new ranking algorithm." },
       { type: "code", language: "http", value: "GET /api/scores?game=pong&player=Ada&limit=20" },
@@ -124,7 +124,7 @@ export const documentation: DocumentationArticle[] = [
     source: apiSource,
     blocks: [
       { type: "table", headers: ["Method", "Path", "Purpose"], rows: [["GET", "/api/games", "List published cartridges"], ["GET", "/api/games/<id>", "Read cartridge metadata"], ["GET", "/api/games/<id>/download", "Download a selected binary"], ["GET", "/api/scores", "Read scores"], ["GET", "/api/stats/downloads", "Read download aggregates"], ["GET", "/api/stats/scores", "Read bounded top scores"], ["GET", "/api/stats/runs", "Read aggregate run counters"], ["GET", "/api/multiplayer/status", "Read relay status"], ["WS", "/api/multiplayer", "Open the relay"]] },
-      { type: "paragraph", text: "During the Flask-to-Fastify migration, public route ownership remains explicit. The Storefront calls the public API origin or the existing same-origin compatibility route; it does not access SQLite directly and it does not use isolated writer data for public statistics." },
+      { type: "paragraph", text: "The Storefront calls the public Fastify API origin directly. It does not access SQLite directly or depend on private storage boundaries for public statistics." },
       { type: "paragraph", text: "For authentication, publishing, review, CSRF, and the complete request/response examples, use the repository's full API reference. The Storefront documentation intentionally omits private infrastructure configuration and maintainer-only runbooks." },
       { type: "code", language: "http", value: "GET /.well-known/prg32-store.json\nGET /api/games\nGET /api/scores?game=pong&limit=20\nGET /api/stats/downloads?granularity=day&limit=30" },
     ],

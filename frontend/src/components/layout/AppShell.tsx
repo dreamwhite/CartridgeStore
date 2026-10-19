@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 import { AuthNavigation } from "../auth/AuthNavigation";
+import { BrandLogo } from "./BrandLogo";
 import { SiteFooter } from "./SiteFooter";
 import { ThemeToggle } from "./ThemeToggle";
 import { BootSplash } from "./BootSplash";
@@ -20,9 +21,13 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
       <BootSplash />
       <header className="sticky top-0 z-40 border-b border-[var(--color-border)] bg-[var(--color-surface)]/95 shadow-[var(--shadow-header)] backdrop-blur">
         <div className="page-gutter flex min-h-16 items-center justify-between gap-4 py-3">
-          <Link className="flex min-w-0 items-center gap-2.5 rounded-lg font-bold tracking-tight focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--color-ring)]" href="/" onClick={() => setMobileOpen(false)}>
-            <span aria-hidden="true" className="grid size-8 shrink-0 place-items-center rounded-md bg-[var(--color-primary)] text-sm text-white shadow-[var(--shadow-brand)]">P</span>
-            <span className="truncate">PRG32 <span className="hidden font-medium text-[var(--color-text-muted)] sm:inline">Cartridge Store</span></span>
+          <Link
+            aria-label="PRG32 Cartridge Store"
+            className="flex min-w-0 items-center rounded-lg focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--color-ring)]"
+            href="/"
+            onClick={() => setMobileOpen(false)}
+          >
+            <BrandLogo />
           </Link>
           <div className="flex items-center gap-2 sm:gap-3">
             <nav aria-label="Primary navigation" className="hidden items-center gap-1 md:flex">
@@ -56,7 +61,7 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
         </div>
       </header>
       <div className="min-h-0 flex-1">{children}</div>
-      <SiteFooter />
+      {!pathname.startsWith("/dashboard") && <SiteFooter />}
     </div>
   );
 }
