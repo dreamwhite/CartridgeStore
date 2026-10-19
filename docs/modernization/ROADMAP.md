@@ -64,6 +64,14 @@ The codebase is not considered migration-complete. The remaining work is
 product and operational work, not a reason to keep splitting already-cohesive
 orchestrators.
 
+The 2026-10-19 SRP audit did not identify another safe backend extraction:
+`app.ts` remains the composition root, `readiness/inventory.ts` is a
+declarative route catalog, `restore-workflow.ts` is one transactional restore
+state machine, `reconciliation.ts` already delegates file and operation scans,
+and the administration/federation services each own one transactional domain.
+These modules remain intentionally intact until a concrete ownership boundary
+or duplicated behavior appears.
+
 The canonical storage-v2 schema contract lives in
 [`docs/storage-schema.md`](../storage-schema.md); `docs/modernization/` contains
 this roadmap only.
