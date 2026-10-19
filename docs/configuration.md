@@ -48,6 +48,13 @@ are intentionally constrained to isolated test mode and disposable roots:
 
 Never point these test write paths at the Flask production `/data` mount.
 
+Secret-bearing Fastify settings support a companion `*_FILE` variable for
+Docker secrets. The standalone deployment uses this form for canonical read
+and write authorizations, the session secret, and the bootstrap token. Do not
+set both an inline value and its `*_FILE` companion; startup rejects that
+ambiguous configuration. Existing inline variables remain supported for local
+development and tests.
+
 ## Origin and session configuration
 
 | Variable | Meaning |

@@ -33,10 +33,20 @@ with `--json`; diagnostics go to stderr and secret values are redacted.
 
 For a fresh standalone installation, provide the existing Compose contract
 through an operator-controlled env file. Required values include
-`PRG32_DATA_DIR`, `PRG32_KEY_REGISTRY_FILE`, the canonical authorization
-values, session/bootstrap secrets, trusted-proxy setting, public origins and
-the public WebSocket URL. The env file must not be committed and must not be
-group/world-readable.
+`PRG32_DATA_DIR`, `PRG32_KEY_REGISTRY_FILE`, `PRG32_SECRET_DIR`, the
+trusted-proxy setting, public origins and the public WebSocket URL. The env
+file contains paths, not application secret values, and must not be committed
+or group/world-readable.
+
+Inside `PRG32_SECRET_DIR`, create the four read-only files expected by the
+standalone Compose file: `canonical-read-authorization`,
+`canonical-write-authorization`, `session-secret`, and `bootstrap-token`.
+Compose mounts them as Docker secrets; Fastify reads them through its
+`*_FILE` configuration boundary and rejects ambiguous inline/file settings.
+
+The Dream operational template uses the same filenames below
+`PRG32_OPERATIONAL_SECRET_DIR` and keeps the production variable namespace
+separate from the standalone profile.
 
 `update apply` remains intentionally fail-closed in M5.5.4 because a trusted
 image source, schema compatibility proof and rollback policy are not inferred

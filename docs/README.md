@@ -13,6 +13,7 @@ compatibility path, but it is not a target for further refactoring.
 | Start local development | [Development](development.md) |
 | Configure services and environments | [Configuration](configuration.md) |
 | Review trust boundaries and security rules | [Security](security.md) |
+| Review the canonical storage contract | [Storage schema](storage-schema.md) |
 | Run the Docker profiles | [Docker](docker.md) |
 | Operate a deployment | [Operations](operations.md) and [Deployment](deployment.md) |
 | Integrate firmware or tools | [API](api.md) |

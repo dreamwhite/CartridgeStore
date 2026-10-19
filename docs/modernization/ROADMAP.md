@@ -46,6 +46,10 @@ The codebase is not considered migration-complete. The remaining work is
 product and operational work, not a reason to keep splitting already-cohesive
 orchestrators.
 
+The canonical storage-v2 schema contract lives in
+[`docs/storage-schema.md`](../storage-schema.md); `docs/modernization/` contains
+this roadmap only.
+
 ## Workstreams
 
 ### 1. Frontend product completion
@@ -100,6 +104,10 @@ reading migration reports, and each profile has a stated purpose and rollback.
 
 Reduce the environment surface and separate configuration from secrets:
 
+- The standalone and Dream operational Compose boundaries now mount canonical
+  authorizations, session, and bootstrap material as Docker secrets; Fastify
+  accepts their `*_FILE` paths while retaining inline values for local
+  compatibility.
 - inventory every environment variable by owner and lifecycle;
 - remove aliases and transitional variables only after compatibility evidence;
 - group non-secret settings into a small documented configuration surface;
@@ -158,9 +166,17 @@ pnpm --dir backend run typecheck
 pnpm --dir backend run lint
 pnpm --dir backend run test
 pnpm --dir backend run build
+pnpm --dir cli run typecheck
+pnpm --dir cli run lint
+pnpm --dir cli run test
+pnpm --dir cli run build
+pytest -q
 docker compose config
 git diff --check
 ```
+
+The repository wrapper `./manage.sh --json ci check` runs this same gate plus
+the candidate, standalone, operational and root Compose configuration checks.
 
 Python legacy validation is separate and is not a modernization gate while
 Flask remains explicitly out of scope for refactoring.
