@@ -213,16 +213,18 @@ The repository wrapper `./manage.sh --json ci check` runs this same gate plus
 the candidate, standalone, operational and root Compose configuration checks.
 
 The latest complete gate passed on 2026-10-19 after the frontend CTA,
-standalone Compose and publication-execution changes. It verified backend,
-frontend and CLI typecheck, lint, test and build commands, `pytest -q`, all
-four Compose configuration checks, and `git diff --check`. Flask remains
-outside the modernization gate and outside the SRP refactoring scope.
+standalone Compose, publication-execution and statistics-presentation changes.
+It verified backend, frontend and CLI typecheck, lint, test and build commands,
+`pytest -q`, all four Compose configuration checks, and `git diff --check`.
+Flask remains outside the modernization gate and outside the SRP refactoring
+scope.
 
 The statistics presentation tranche was additionally verified on 2026-10-19
 with the current frontend typecheck, lint, 52 test files (120 tests), build,
-and `git diff --check`. The existing storefront import path remains available
-through `statistics-presentation.tsx`; no API, response, or browser contract
-was changed.
+and `git diff --check`. The full repository gate was then rerun with the same
+result. The existing storefront import path remains available through
+`statistics-presentation.tsx`; no API, response, or browser contract was
+changed.
 
 Python legacy validation is separate and is not a modernization gate while
 Flask remains explicitly out of scope for refactoring.
