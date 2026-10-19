@@ -2,9 +2,9 @@
 
 :root {
   color-scheme: light;
-  --color-bg: #f6f5f7;
+  --color-bg: #ffffff;
   --color-surface: #ffffff;
-  --color-surface-muted: #efedef;
+  --color-surface-muted: #f7f6f9;
   --color-surface-raised: #ffffff;
   --color-text: #211d2d;
   --color-text-muted: #655f75;
@@ -94,6 +94,235 @@ body {
   padding-inline: var(--space-gutter);
 }
 
+.homepage-shell {
+  overflow: hidden;
+  background: var(--color-bg);
+}
+
+.homepage-hero {
+  position: relative;
+  overflow: hidden;
+  border-bottom: 1px solid var(--color-border);
+  background: color-mix(in srgb, var(--color-surface-muted) 52%, var(--color-bg));
+}
+
+.homepage-hero::before {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(color-mix(in srgb, var(--color-border) 62%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in srgb, var(--color-border) 62%, transparent) 1px, transparent 1px);
+  background-size: 2.5rem 2.5rem;
+  content: "";
+  mask-image: linear-gradient(90deg, black, transparent 72%);
+  opacity: 0.45;
+  pointer-events: none;
+}
+
+.homepage-introduction {
+  background: var(--color-surface-muted);
+}
+
+.homepage-introduction-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+}
+
+.homepage-capabilities {
+  background: var(--color-bg);
+}
+
+.homepage-capability-card {
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-xl);
+  background: var(--color-surface);
+  box-shadow: var(--shadow-card);
+  transition: transform 180ms ease, box-shadow 180ms ease, border-color 180ms ease;
+}
+
+.homepage-capability-card:hover {
+  border-color: color-mix(in srgb, var(--color-primary) 45%, var(--color-border));
+  box-shadow: 0 14px 30px rgb(46 32 86 / 0.1);
+  transform: translateY(-3px);
+}
+
+.homepage-loop-panel,
+.homepage-cta-panel {
+  background: #2a2041;
+  box-shadow: 0 18px 40px rgb(46 32 86 / 0.16);
+}
+
+.homepage-loop-steps {
+  border: 1px solid rgb(255 255 255 / 0.15);
+  background: rgb(15 10 35 / 0.2);
+}
+
+.boot-splash {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: #08070d;
+  opacity: 1;
+  transition: opacity 260ms ease, visibility 260ms ease;
+}
+
+.boot-splash--exiting {
+  visibility: hidden;
+  opacity: 0;
+}
+
+.boot-splash__art {
+  position: relative;
+  width: min(78vw, 38rem);
+  aspect-ratio: 3 / 2;
+  overflow: hidden;
+  border: 1px solid rgb(174 113 255 / 0.36);
+  border-radius: 0.9rem;
+  box-shadow:
+    0 0 0 1px rgb(0 229 255 / 0.08),
+    0 1.5rem 5rem rgb(86 23 131 / 0.34);
+  isolation: isolate;
+}
+
+.boot-splash__image {
+  z-index: 0;
+  object-fit: contain;
+  filter: saturate(1.08) contrast(1.04);
+}
+
+.boot-splash__art::before,
+.boot-splash__art::after {
+  position: absolute;
+  z-index: 1;
+  inset: 0;
+  background: url("/prg32-boot-splash.png") center / 100% 100% no-repeat;
+  content: "";
+  opacity: 0;
+  pointer-events: none;
+}
+
+.boot-splash__art::before {
+  filter: hue-rotate(145deg) saturate(2.4) brightness(1.2);
+  mix-blend-mode: screen;
+  animation: boot-splash-glitch-cyan 2500ms steps(1, end) infinite;
+}
+
+.boot-splash__art::after {
+  filter: hue-rotate(285deg) saturate(2.8) brightness(1.16);
+  mix-blend-mode: screen;
+  animation: boot-splash-glitch-pink 2500ms steps(1, end) infinite;
+}
+
+.boot-splash__bar-mask {
+  position: absolute;
+  z-index: 2;
+  right: 25.6%;
+  bottom: 8.1%;
+  left: 25.6%;
+  height: 1.25%;
+  min-height: 0.35rem;
+  background: #08070d;
+  transform-origin: right center;
+  animation: boot-splash-bar-reveal 2400ms linear forwards;
+}
+
+@keyframes boot-splash-bar-reveal {
+  from {
+    transform: scaleX(1);
+  }
+
+  to {
+    transform: scaleX(0);
+  }
+}
+
+@keyframes boot-splash-glitch-cyan {
+  0%,
+  17%,
+  100% {
+    clip-path: inset(0 0 100% 0);
+    opacity: 0;
+    transform: translate(0);
+  }
+
+  18% {
+    clip-path: inset(12% 0 64% 0);
+    opacity: 0.7;
+    transform: translate(-0.25rem, 0.05rem);
+  }
+
+  20% {
+    clip-path: inset(64% 0 20% 0);
+    opacity: 0.45;
+    transform: translate(0.18rem, -0.04rem);
+  }
+
+  21% {
+    opacity: 0;
+  }
+
+  72% {
+    clip-path: inset(36% 0 48% 0);
+    opacity: 0.55;
+    transform: translate(-0.16rem);
+  }
+
+  74% {
+    opacity: 0;
+  }
+}
+
+@keyframes boot-splash-glitch-pink {
+  0%,
+  35%,
+  100% {
+    clip-path: inset(0 0 100% 0);
+    opacity: 0;
+    transform: translate(0);
+  }
+
+  36% {
+    clip-path: inset(54% 0 26% 0);
+    opacity: 0.62;
+    transform: translate(0.22rem, -0.04rem);
+  }
+
+  38% {
+    clip-path: inset(20% 0 68% 0);
+    opacity: 0.42;
+    transform: translate(-0.14rem, 0.05rem);
+  }
+
+  40% {
+    opacity: 0;
+  }
+
+  86% {
+    clip-path: inset(74% 0 8% 0);
+    opacity: 0.48;
+    transform: translate(0.16rem);
+  }
+
+  88% {
+    opacity: 0;
+  }
+}
+
+.scoreboard-page {
+  background:
+    radial-gradient(
+      circle at 86% 0%,
+      color-mix(in srgb, var(--color-primary-soft) 52%, transparent),
+      transparent 28rem
+    ),
+    linear-gradient(180deg, color-mix(in srgb, var(--color-surface) 42%, var(--color-bg)) 0%, var(--color-bg) 42rem);
+}
+
 .admin-page {
   width: auto;
   max-width: 100%;
@@ -126,11 +355,18 @@ body {
   gap: 0.875rem;
 }
 
-.homepage-signal-grid {
+.homepage-system-map {
+  grid-template-rows: repeat(4, minmax(3.75rem, 1fr));
   background-image:
     linear-gradient(color-mix(in srgb, var(--color-primary) 22%, transparent) 1px, transparent 1px),
     linear-gradient(90deg, color-mix(in srgb, var(--color-primary) 22%, transparent) 1px, transparent 1px);
-  background-size: 1.25rem 1.25rem;
+  background-size: 1rem 1rem;
+}
+
+@media (max-width: 640px) {
+  .homepage-system-map {
+    grid-template-rows: repeat(4, minmax(3rem, 1fr));
+  }
 }
 
 ::selection {
@@ -141,6 +377,12 @@ body {
 :focus-visible {
   outline: 2px solid var(--color-ring);
   outline-offset: 3px;
+}
+
+[data-combobox-input]:focus-visible,
+[data-combobox-toggle]:focus-visible {
+  outline: none;
+  outline-offset: 0;
 }
 
 button,
@@ -154,5 +396,11 @@ a {
   *::after {
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
+  }
+
+  .boot-splash__art::before,
+  .boot-splash__art::after,
+  .boot-splash__bar-mask {
+    display: none;
   }
 }

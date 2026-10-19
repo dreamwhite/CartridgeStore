@@ -18,9 +18,25 @@ export const metadata: Metadata = {
   },
 };
 
+const themeInitScript = `
+  (() => {
+    try {
+      const storedTheme = window.localStorage.getItem("prg32-theme");
+      if (storedTheme === "light" || storedTheme === "dark") {
+        document.documentElement.dataset.theme = storedTheme;
+      }
+    } catch {
+      // localStorage may be unavailable; keep the server-rendered theme.
+    }
+  })();
+`;
+
 export default function RootLayout({ children }: Readonly<{ children: ReactNode }>) {
   return (
-    <html lang="en" data-theme="dark" suppressHydrationWarning>
+    <html lang="en" data-theme="light" suppressHydrationWarning>
+      <head>
+        <script id="theme-init" dangerouslySetInnerHTML={{ __html: themeInitScript }} />
+      </head>
       <body>
         <Providers>
           <PwaRegistration /><AppShell>{children}</AppShell>

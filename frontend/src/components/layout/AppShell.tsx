@@ -7,6 +7,7 @@ import { usePathname } from "next/navigation";
 import { AuthNavigation } from "../auth/AuthNavigation";
 import { SiteFooter } from "./SiteFooter";
 import { ThemeToggle } from "./ThemeToggle";
+import { BootSplash } from "./BootSplash";
 import { navigationIsActive, PUBLIC_NAVIGATION } from "./navigation";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "../ui/dialog";
 
@@ -16,6 +17,7 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
 
   return (
     <div className="flex min-h-screen flex-col bg-[var(--color-bg)] text-[var(--color-text)]">
+      <BootSplash />
       <header className="sticky top-0 z-40 border-b border-[var(--color-border)] bg-[var(--color-surface)]/95 shadow-[var(--shadow-header)] backdrop-blur">
         <div className="page-gutter flex min-h-16 items-center justify-between gap-4 py-3">
           <Link className="flex min-w-0 items-center gap-2.5 rounded-lg font-bold tracking-tight focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[var(--color-ring)]" href="/" onClick={() => setMobileOpen(false)}>

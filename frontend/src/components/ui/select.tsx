@@ -11,7 +11,7 @@ export const SelectGroup = SelectPrimitive.Group;
 export const SelectValue = SelectPrimitive.Value;
 
 export function SelectTrigger({ className, children, ...props }: ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger>) {
-  return <SelectPrimitive.Trigger className={cn("inline-flex min-h-10 w-full items-center justify-between gap-2 rounded-md border border-[var(--color-input)] bg-[var(--color-bg)] px-3 py-2 text-left text-sm text-[var(--color-text)] outline-none transition-colors hover:bg-[var(--color-surface-muted)] focus:border-[var(--color-ring)] focus:ring-2 focus:ring-[var(--color-primary-soft)] disabled:cursor-not-allowed disabled:opacity-60", className)} {...props}>{children}<SelectPrimitive.Icon><ChevronDown aria-hidden="true" className="size-4 text-[var(--color-text-muted)]" /></SelectPrimitive.Icon></SelectPrimitive.Trigger>;
+  return <SelectPrimitive.Trigger className={cn("inline-flex min-h-11 w-full items-center justify-between gap-2 rounded-md border border-[var(--color-input)] bg-[var(--color-bg)] px-3 py-2 text-left text-sm text-[var(--color-text)] outline-none transition-colors hover:bg-[var(--color-surface-muted)] focus:border-[var(--color-ring)] focus:ring-2 focus:ring-[var(--color-primary-soft)] disabled:cursor-not-allowed disabled:opacity-60", className)} {...props}>{children}<SelectPrimitive.Icon><ChevronDown aria-hidden="true" className="size-4 text-[var(--color-text-muted)]" /></SelectPrimitive.Icon></SelectPrimitive.Trigger>;
 }
 
 export function SelectContent({ className, children, position = "popper", ...props }: ComponentPropsWithoutRef<typeof SelectPrimitive.Content>) {
@@ -26,7 +26,7 @@ export function SelectSeparator({ className, ...props }: ComponentPropsWithoutRe
   return <SelectPrimitive.Separator className={cn("my-1 h-px bg-[var(--color-border)]", className)} {...props} />;
 }
 
-export function SelectField({ label, value, onValueChange, children, placeholder, name, description, disabled }: { label: string; value: string; onValueChange: (value: string) => void; children: ReactNode; placeholder?: string; name?: string; description?: string; disabled?: boolean }) {
+export function SelectField({ label, value, onValueChange, children, placeholder, name, description, disabled, icon }: { label: string; value: string; onValueChange: (value: string) => void; children: ReactNode; placeholder?: string; name?: string; description?: string; disabled?: boolean; icon?: ReactNode }) {
   const id = name ? `select-${name}` : undefined;
-  return <div className="grid gap-1.5"><label htmlFor={id} className="text-sm font-semibold">{label}</label><Select name={name} value={value} onValueChange={onValueChange} disabled={disabled}><SelectTrigger id={id} aria-label={label}><SelectValue placeholder={placeholder} /></SelectTrigger><SelectContent>{children}</SelectContent></Select>{description && <p className="text-xs text-[var(--color-text-muted)]">{description}</p>}</div>;
+  return <div className="grid gap-2"><label htmlFor={id} className="flex items-center gap-2 text-sm font-semibold">{icon}{label}</label><Select name={name} value={value} onValueChange={onValueChange} disabled={disabled}><SelectTrigger id={id} aria-label={label}><SelectValue placeholder={placeholder} /></SelectTrigger><SelectContent>{children}</SelectContent></Select>{description && <p className="text-xs text-[var(--color-text-muted)]">{description}</p>}</div>;
 }

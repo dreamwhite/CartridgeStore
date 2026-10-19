@@ -8,7 +8,7 @@ import { authPath } from "./transport";
 /** Lists enabled federated authentication providers. */
 export function getAuthProviders(): Promise<AuthProvidersResponse> {
   return requestApiJson(
-    authPath("/api/auth/providers"),
+    publicApiPath(authPath("/api/auth/providers")),
     undefined,
     authProvidersResponseSchema,
   );

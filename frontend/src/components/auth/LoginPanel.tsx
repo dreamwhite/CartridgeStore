@@ -8,6 +8,7 @@ import { authErrorMessage } from "../../lib/api/auth";
 import { authIntegrationEnabled } from "../../lib/auth/config";
 import { safeReturnPath } from "../../lib/auth/return-path";
 import { useCurrentUser } from "../../lib/auth/use-current-user";
+import { cn } from "../../lib/cn";
 import { StatusMessage } from "../ui/status";
 import { FederatedLoginOptions } from "./federation/FederatedLoginOptions";
 import { LocalLoginForm } from "./local/LocalLoginForm";
@@ -39,7 +40,15 @@ export function LoginPanel({ enabled = authIntegrationEnabled }: LoginPanelProps
 
   return (
     <main className="page-gutter flex min-h-[calc(100vh-4rem)] items-center py-8 sm:py-12">
-      <section className="grid w-full overflow-hidden rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] md:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]" aria-labelledby="login-title">
+      <section
+        className={cn(
+          "mx-auto grid w-full max-w-5xl overflow-hidden rounded-xl border",
+          "border-[var(--color-border)] bg-[var(--color-surface)]",
+          "shadow-[var(--shadow-card)]",
+          "md:grid-cols-[minmax(0,1.05fr)_minmax(0,0.95fr)]",
+        )}
+        aria-labelledby="login-title"
+      >
         <div className="p-6 sm:p-10">
           <p className="technical-label text-[var(--color-primary)]">PRG32 Cartridge Store / Account</p>
           <h1 id="login-title" className="mt-2 text-3xl font-bold tracking-tight">Sign in</h1>

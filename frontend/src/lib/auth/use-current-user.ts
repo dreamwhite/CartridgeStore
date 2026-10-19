@@ -25,7 +25,12 @@ export function useCurrentUser(enabled = authIntegrationEnabled) {
     queryFn: currentUserOrAnonymous,
     enabled,
     retry: false,
-    staleTime: 30_000,
+    // An anonymous response is a valid session state, not a transient error.
+    // Keep it stable while browsing public pages; login/logout explicitly
+    // invalidates this query when the session can actually change.
+    staleTime: 5 * 60_000,
+    refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   });
 
   useEffect(() => {

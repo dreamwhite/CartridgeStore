@@ -1,4 +1,5 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { describe, expect, it } from "vitest";
 
 import { Homepage } from "./Homepage";
@@ -21,5 +22,20 @@ describe("Homepage", () => {
     expect(screen.getByRole("heading", { name: /Ready to find your next cartridge/i })).toBeInTheDocument();
     expect(screen.getByRole("link", { name: "Open Explore" })).toHaveAttribute("href", "/explore");
     expect(screen.getByRole("link", { name: /Browse docs/i })).toHaveAttribute("href", "/docs");
+  });
+
+  it("reveals project specifications when the system map is explored", async () => {
+    const user = userEvent.setup();
+    render(<Homepage />);
+
+    const map = screen.getByRole("group", { name: "Interactive PRG32 system map" });
+    const cartridgeCell = screen.getByRole("button", { name: "Inspect Cartridge format" });
+
+    expect(map).toBeInTheDocument();
+    expect(screen.getByText("INIT / UPDATE / DRAW")).toBeInTheDocument();
+
+    await user.hover(cartridgeCell);
+
+    expect(screen.getByText(/A \.prg32 cartridge carries metadata and target binaries/)).toBeInTheDocument();
   });
 });

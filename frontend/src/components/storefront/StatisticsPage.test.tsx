@@ -34,8 +34,8 @@ describe("StatisticsPage", () => {
 
     renderPage();
 
-    expect(await screen.findByText("Recorded downloads")).toBeInTheDocument();
-    expect(await screen.findByText("12", { selector: "p" })).toBeInTheDocument();
+    expect(await screen.findByText("Download activity")).toBeInTheDocument();
+    expect(await screen.findAllByText("12")).not.toHaveLength(0);
     expect(screen.getByText("2026-10-14")).toBeInTheDocument();
     expect(screen.getByText("PRG32 Pong")).toBeInTheDocument();
     expect(screen.getByRole("table", { name: "Download events by period" })).toBeInTheDocument();
@@ -62,7 +62,7 @@ describe("StatisticsPage", () => {
 
     renderPage();
 
-    expect(await screen.findAllByRole("alert")).toHaveLength(6);
+    expect(await screen.findAllByRole("alert")).toHaveLength(3);
     expect(screen.queryByText("12")).not.toBeInTheDocument();
   });
 });

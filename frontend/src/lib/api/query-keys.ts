@@ -64,7 +64,7 @@ export const profileQueryKeys = {
 } as const;
 
 export const statisticsQueryKeys = {
-  downloads: (filters: { granularity?: string; limit?: number } = {}) => ["statistics", "downloads", filters.granularity ?? "day", filters.limit ?? 30] as const,
+  downloads: (filters: { since?: string; until?: string; granularity?: string; limit?: number } = {}) => ["statistics", "downloads", filters] as const,
   scores: (limit = 5) => ["statistics", "scores", limit] as const,
   runs: () => ["statistics", "runs"] as const,
 } as const;
