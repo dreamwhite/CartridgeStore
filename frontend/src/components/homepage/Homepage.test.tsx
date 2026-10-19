@@ -20,8 +20,14 @@ describe("Homepage", () => {
     render(<Homepage />);
 
     expect(screen.getByRole("heading", { name: /Ready to find your next cartridge/i })).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Open Explore" })).toHaveAttribute("href", "/explore");
-    expect(screen.getByRole("link", { name: /Browse docs/i })).toHaveAttribute("href", "/docs");
+    expect(screen.getByRole("link", { name: "Open Explore" }))
+      .toHaveAttribute("href", "/explore");
+    expect(screen.getByRole("link", { name: "Open Explore" }))
+      .toHaveClass("homepage-cta-button-primary");
+    expect(screen.getByRole("link", { name: /Browse docs/i }))
+      .toHaveAttribute("href", "/docs");
+    expect(screen.getByRole("link", { name: /Browse docs/i }))
+      .toHaveClass("homepage-cta-button-secondary");
   });
 
   it("reveals project specifications when the system map is explored", async () => {
