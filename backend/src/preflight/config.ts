@@ -1,3 +1,4 @@
+import fs from "node:fs";
 import path from "node:path";
 
 export const PREFLIGHT_ABI = "prg32-operational-preflight-1.0" as const;
@@ -117,8 +118,18 @@ function pathEquals(left: string | undefined, right: string | undefined): boolea
 
 function statusForSecret(environment: NodeJS.ProcessEnv, name: string, minimumLength = 32): SensitiveValueStatus {
   const candidate = value(environment, name);
-  if (!candidate) return "MISSING";
-  return candidate.length >= minimumLength ? "PRESENT" : "INVALID_REFERENCE";
+  const fileReference = value(environment, `${name}_FILE`);
+  if (candidate && fileReference) return "INVALID_REFERENCE";
+  if (candidate) return candidate.length >= minimumLength ? "PRESENT" : "INVALID_REFERENCE";
+  if (!fileReference) return "MISSING";
+  if (!path.isAbsolute(fileReference)) return "INVALID_REFERENCE";
+  try {
+    const stats = fs.lstatSync(fileReference);
+    if (stats.isSymbolicLink() || !stats.isFile()) return "INVALID_REFERENCE";
+    return stats.size >= minimumLength ? "PRESENT" : "INVALID_REFERENCE";
+  } catch {
+    return "INVALID_REFERENCE";
+  }
 }
 
 function secretStatuses(environment: NodeJS.ProcessEnv): Readonly<Record<string, SensitiveValueStatus>> {

@@ -1,3 +1,7 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import { validateOidcContract, validatePreflightConfiguration, validateSamlContract } from "../src/preflight/config.js";
@@ -50,6 +54,57 @@ describe("configuration preflight", () => {
     expect(result.ok).toBe(false);
     expect(result.checks.find((check) => check.id === "candidate_session_secret")?.status).toBe("FAIL");
     expect(result.sensitive.PRG32_BACKEND_SESSION_SECRET).toBe("MISSING");
+  });
+
+  it("recognizes protected file-backed session and bootstrap secrets", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "prg32-preflight-secrets-"));
+    try {
+      const sessionPath = path.join(root, "session-secret");
+      const bootstrapPath = path.join(root, "bootstrap-token");
+      fs.writeFileSync(
+        sessionPath,
+        "session-secret-file-value-012345678901234567890\n",
+        { mode: 0o600 },
+      );
+      fs.writeFileSync(
+        bootstrapPath,
+        "bootstrap-token-file-value-012345678901234567890\n",
+        { mode: 0o600 },
+      );
+
+      const result = validatePreflightConfiguration(
+        candidateEnvironment({
+          PRG32_BACKEND_SESSION_SECRET: undefined,
+          PRG32_BACKEND_SESSION_SECRET_FILE: sessionPath,
+          PRG32_BACKEND_BOOTSTRAP_TOKEN: undefined,
+          PRG32_BACKEND_BOOTSTRAP_TOKEN_FILE: bootstrapPath,
+        }),
+        "candidate",
+      );
+
+      expect(result.sensitive.PRG32_BACKEND_SESSION_SECRET).toBe("PRESENT");
+      expect(result.sensitive.PRG32_BACKEND_BOOTSTRAP_TOKEN).toBe("PRESENT");
+      expect(
+        result.checks.find((check) => check.id === "candidate_session_secret")?.status,
+      ).toBe("PASS");
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("rejects ambiguous or unsafe file-backed secret references", () => {
+    const result = validatePreflightConfiguration(
+      candidateEnvironment({
+        PRG32_BACKEND_SESSION_SECRET:
+          "inline-session-secret-that-is-long-enough-123456",
+        PRG32_BACKEND_SESSION_SECRET_FILE: "relative/session-secret",
+      }),
+      "candidate",
+    );
+
+    expect(result.sensitive.PRG32_BACKEND_SESSION_SECRET).toBe(
+      "INVALID_REFERENCE",
+    );
   });
 
   it("never returns secret values in its machine-readable result", () => {
