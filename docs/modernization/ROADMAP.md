@@ -42,6 +42,18 @@ The latest scoped refactor commits are:
 - `5f7895b` — publication execution state machine;
 - `b0c683e` — canonical workflow durable execution.
 
+Recent product and deployment follow-up on `development`:
+
+- `d3c295f` — public storefront layout, interactive project signal and
+  responsive homepage states;
+- `95051de` — explicit primary and secondary participation CTAs;
+- `949617e` — Docker-secret file support for Fastify secret settings;
+- `51e6c7a` — application secret mounts in the supported Compose profiles;
+- `2dbb9e5` — preflight validation for file-backed secrets;
+- `50e5af3` — minimized standalone environment example;
+- `a143f4f` — optional standalone integrations left under setup/admin
+  ownership instead of being forced off by Compose.
+
 The codebase is not considered migration-complete. The remaining work is
 product and operational work, not a reason to keep splitting already-cohesive
 orchestrators.
@@ -96,6 +108,14 @@ development, classroom use and production-like validation:
 - keep optional services behind explicit profiles;
 - avoid host-specific paths and hidden volume coupling;
 - validate every profile with `docker compose config` and a smoke runtime.
+
+Current state: `deploy/standalone/compose.yaml` is the smallest two-service
+Fastify + Next.js topology and mounts the required application material as
+Docker secrets. Its optional SMTP, WebAuthn, mDNS and setup-network settings
+are no longer overridden unconditionally. The Dream operational template
+keeps its explicit `store.prg32.dream.test` and `api.prg32.dream.test`
+integration values because those are infrastructure-owned deployment
+settings.
 
 **Exit criteria:** a new operator can understand the Compose file without
 reading migration reports, and each profile has a stated purpose and rollback.
@@ -177,6 +197,12 @@ git diff --check
 
 The repository wrapper `./manage.sh --json ci check` runs this same gate plus
 the candidate, standalone, operational and root Compose configuration checks.
+
+The latest complete gate passed on 2026-10-19 after the frontend CTA and
+standalone Compose changes. It verified backend, frontend and CLI typecheck,
+lint, test and build commands, `pytest -q`, all four Compose configuration
+checks, and `git diff --check`. Flask remains outside the modernization gate
+and outside the SRP refactoring scope.
 
 Python legacy validation is separate and is not a modernization gate while
 Flask remains explicitly out of scope for refactoring.
