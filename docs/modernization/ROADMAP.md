@@ -41,6 +41,8 @@ The latest scoped refactor commits are:
 - `4164228` — frontend setup API;
 - `5f7895b` — publication execution state machine;
 - `b0c683e` — canonical workflow durable execution.
+- `d2743ea` — publication granular recovery delegates over one execution
+  implementation.
 
 Recent product and deployment follow-up on `development`:
 
@@ -198,11 +200,11 @@ git diff --check
 The repository wrapper `./manage.sh --json ci check` runs this same gate plus
 the candidate, standalone, operational and root Compose configuration checks.
 
-The latest complete gate passed on 2026-10-19 after the frontend CTA and
-standalone Compose changes. It verified backend, frontend and CLI typecheck,
-lint, test and build commands, `pytest -q`, all four Compose configuration
-checks, and `git diff --check`. Flask remains outside the modernization gate
-and outside the SRP refactoring scope.
+The latest complete gate passed on 2026-10-19 after the frontend CTA,
+standalone Compose and publication-execution changes. It verified backend,
+frontend and CLI typecheck, lint, test and build commands, `pytest -q`, all
+four Compose configuration checks, and `git diff --check`. Flask remains
+outside the modernization gate and outside the SRP refactoring scope.
 
 Python legacy validation is separate and is not a modernization gate while
 Flask remains explicitly out of scope for refactoring.
