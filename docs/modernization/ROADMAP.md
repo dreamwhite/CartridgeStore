@@ -27,7 +27,9 @@ source in `docs/`.
 
 The Next.js frontend and Fastify backend are active foundations. The frontend
 API, schema, workflow, federation-admin, setup and selected presentation
-boundaries have been split by domain. The Fastify backend has separate
+boundaries have been split by domain; the storefront statistics presentation
+is now separated into focused download, ranking, run-health, score and shared
+state modules. The Fastify backend has separate
 boundaries for configuration values, storage, backup, workflow, publication,
 federation, administration, setup and readiness.
 
@@ -43,6 +45,8 @@ The latest scoped refactor commits are:
 - `b0c683e` — canonical workflow durable execution.
 - `d2743ea` — publication granular recovery delegates over one execution
   implementation.
+- `16e1a52` — storefront statistics presentation by feature with a compatibility
+  barrel.
 
 Recent product and deployment follow-up on `development`:
 
@@ -205,6 +209,12 @@ standalone Compose and publication-execution changes. It verified backend,
 frontend and CLI typecheck, lint, test and build commands, `pytest -q`, all
 four Compose configuration checks, and `git diff --check`. Flask remains
 outside the modernization gate and outside the SRP refactoring scope.
+
+The statistics presentation tranche was additionally verified on 2026-10-19
+with the current frontend typecheck, lint, 52 test files (120 tests), build,
+and `git diff --check`. The existing storefront import path remains available
+through `statistics-presentation.tsx`; no API, response, or browser contract
+was changed.
 
 Python legacy validation is separate and is not a modernization gate while
 Flask remains explicitly out of scope for refactoring.
