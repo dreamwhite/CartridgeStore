@@ -1,5 +1,11 @@
 # Deployment
 
+> This page documents the transitional Flask compatibility image and its
+> legacy environment contract. For the current Fastify + Next.js deployment,
+> use [Operations](operations.md), the
+> [standalone guide](../deploy/standalone/README.md), or the
+> [Docker overview](docker.md).
+
 PRG32 Cartridge Store should run behind HTTPS in production, with persistent
 storage mounted outside the container or process directory.
 

@@ -1,11 +1,47 @@
 # Docker Deployment
 
-Docker deployment runs the web catalog, score API, metrics receiver, and
-multiplayer WebSocket relay as one service.
+The current application deployment is the two-service Fastify + Next.js
+runtime. Fastify owns the API and WebSocket boundary on port `5080`; Next.js
+owns the storefront on port `3000`. The standalone profile is the smallest
+operator-managed deployment, while the operational template targets the Dream
+Platform hostnames. The repository-root Compose file remains a compatibility
+harness for local migration work and still includes Flask.
 
-## Compose profiles
+## Canonical Fastify + Next.js deployment
 
-The repository uses one `docker-compose.yml` with explicit profiles. The
+Use the repository management interface for the standalone profile:
+
+```bash
+source "$HOME/.nvm/nvm.sh"
+nvm use 24
+./manage.sh config check
+./manage.sh start
+```
+
+The standalone Compose file is
+`deploy/standalone/compose.yaml`. It runs only `fastify` and `next`, keeps
+persistent application data below the operator-selected directory, and mounts
+application secrets from Docker-managed secret files. See the
+[standalone deployment guide](../deploy/standalone/README.md) for the required
+paths and the optional scheduler profile.
+
+The Dream operational template is
+`deploy/operational/compose.yaml`. It preserves the public origins used by the
+infrastructure:
+
+```text
+https://store.prg32.dream.test  # Next.js storefront
+https://api.prg32.dream.test    # Fastify API and WebSocket boundary
+```
+
+It expects external `dream_edge` and `dream_mail` networks and uses the
+operational secret directory documented in [Operations](operations.md).
+
+## Root compatibility Compose profiles
+
+The repository root also contains `docker-compose.yml` with explicit profiles.
+This file is intentionally transitional and is not the smallest production
+topology. The
 `dev` profile runs Next.js, the Fastify authentication/federation writer, the
 transitional Flask compatibility API, and an edge bridge behind the shared
 Dream Platform Traefik installation. It expects the external `dream_edge`
@@ -179,7 +215,7 @@ export SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))
 docker compose --profile prod up --build
 ```
 
-## Quick Start
+## Legacy Flask compatibility profile
 
 ```bash
 export SECRET_KEY="$(python -c 'import secrets; print(secrets.token_urlsafe(32))')"
