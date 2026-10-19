@@ -5,12 +5,10 @@ import { CANDIDATE_RUNTIME_MODE } from "../runtime/candidate.js";
 import { CANONICAL_DISPOSABLE_READ_MODE, CANONICAL_OPERATIONAL_READ_MODE, CANONICAL_OPERATIONAL_WORKFLOW_MODE, CANONICAL_WORKFLOW_MODE } from "../storage-v2/read-mode.js";
 import {
   booleanValue,
-  looksLikeSqliteUri,
   nonEmpty,
   optionalNonEmpty,
   optionalSecret,
   positiveInteger,
-  requiredSecret,
 } from "./env-values.js";
 import type { BackendConfig } from "./env-contracts.js";
 import { resolveAuthLimitsConfig } from "./env-auth-limits.js";
@@ -31,6 +29,10 @@ import { resolveScoresLimitsConfig } from "./env-scores-limits.js";
 import { resolveSecretLimitsConfig } from "./env-secret-limits.js";
 import { resolveSubmissionLimitsConfig } from "./env-submission-limits.js";
 import { resolveWebAuthnConfig } from "./env-webauthn.js";
+import {
+  validateRuntimeConfiguration,
+  validateWriterConfiguration,
+} from "./env-policy.js";
 
 export type { BackendConfig } from "./env-contracts.js";
 
@@ -168,95 +170,35 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
     false
   );
   const backupMode = optionalNonEmpty(environment.PRG32_BACKEND_BACKUP_MODE);
-  if (authWriteEnabled) {
-    if (authWriteMode !== "test" && !(operationalMode && authWriteMode === "operational")) {
-      throw new Error("PRG32_BACKEND_AUTH_WRITE_MODE must be test or operational when auth writes are enabled");
-    }
-    if (!authWriteDatabasePath) {
-      throw new Error("PRG32_BACKEND_AUTH_WRITE_DB is required when auth writes are enabled");
-    }
-    if (!authDisposableRoot) {
-      throw new Error("PRG32_BACKEND_AUTH_DISPOSABLE_ROOT is required when auth writes are enabled");
-    }
-    requiredSecret("PRG32_BACKEND_SESSION_SECRET", authSessionSecret);
-    if (authBootstrapToken) requiredSecret("PRG32_BACKEND_BOOTSTRAP_TOKEN", authBootstrapToken);
-    if (federationLifecycleTestToken && federationLifecycleTestToken.length < 32) throw new Error("PRG32_BACKEND_FEDERATION_LIFECYCLE_TEST_TOKEN must contain at least 32 characters");
-    if (federationLifecycleTestEnabled && !federationLifecycleTestToken) throw new Error("PRG32_BACKEND_FEDERATION_LIFECYCLE_TEST_TOKEN is required when lifecycle test routes are enabled");
-    if (looksLikeSqliteUri(authWriteDatabasePath)) {
-      throw new Error("SQLite URI syntax is not allowed for the auth write database");
-    }
-    if (path.resolve(authWriteDatabasePath) === path.resolve(configuredDatabase) && candidateRuntimeMode === undefined && !operationalMode) {
-      throw new Error("auth write database must be separate from the shadow database");
-    }
-    if (canonicalWorkflowMode === CANONICAL_WORKFLOW_MODE || operationalMode) {
-      const canonicalRoot = path.resolve(canonicalStorageRoot as string);
-      if (path.resolve(authDisposableRoot) !== canonicalRoot || path.resolve(authWriteDatabasePath) !== path.join(canonicalRoot, "store.sqlite")) {
-        throw new Error("canonical workflow authentication must use the canonical storage-v2 database");
-      }
-    }
-  }
-  if ((canonicalWorkflowMode === CANONICAL_WORKFLOW_MODE || operationalMode) && !authWriteEnabled) {
-    throw new Error("canonical workflow requires the canonical authentication writer");
-  }
-  if (federationLifecycleTestEnabled && (authWriteMode !== "test" || !authWriteEnabled || !authDisposableRoot || !authWriteDatabasePath)) {
-    throw new Error("federation lifecycle test routes require the isolated auth writer configuration");
-  }
-  if ((environment.NODE_ENV ?? "").trim().toLowerCase() === "production" && federationLifecycleTestEnabled) {
-    throw new Error("federation lifecycle test routes cannot be enabled in production");
-  }
-  if (secretEncryptionEnabled && !secretKeyRegistryPath) {
-    throw new Error("PRG32_BACKEND_SECRET_KEY_REGISTRY is required when secret encryption is enabled");
-  }
-  if (submissionWriteEnabled) {
-    if (submissionWriteMode !== "test") {
-      throw new Error("PRG32_BACKEND_SUBMISSION_WRITE_MODE must be test when submission writes are enabled");
-    }
-    if (!authWriteEnabled) {
-      throw new Error("submission writes require isolated authentication writes");
-    }
-    if (!submissionDisposableRoot) {
-      throw new Error("PRG32_BACKEND_SUBMISSION_DISPOSABLE_ROOT is required when submission writes are enabled");
-    }
-    if (path.resolve(submissionDisposableRoot) === path.resolve(configuredDatabase)) {
-      throw new Error("submission disposable root must be separate from the shadow database");
-    }
-  }
-  if (metricsWriteEnabled) {
-    if (metricsWriteMode !== "test") {
-      throw new Error("PRG32_BACKEND_METRICS_WRITE_MODE must be test when metrics writes are enabled");
-    }
-    if (!authWriteEnabled || !authDisposableRoot || !authWriteDatabasePath) {
-      throw new Error("metrics writes require isolated authentication writes");
-    }
-    if (!metricsDisposableRoot) {
-      throw new Error("PRG32_BACKEND_METRICS_DISPOSABLE_ROOT is required when metrics writes are enabled");
-    }
-    if (path.resolve(metricsDisposableRoot) !== path.resolve(authDisposableRoot)) {
-      throw new Error("metrics disposable root must reuse the authenticated disposable writer boundary");
-    }
-  }
-  if (scoresWriteEnabled) {
-    if (scoresWriteMode !== "test") {
-      throw new Error("PRG32_BACKEND_SCORES_WRITE_MODE must be test when score writes are enabled");
-    }
-    if (!authWriteEnabled || !authDisposableRoot || !authWriteDatabasePath) {
-      throw new Error("score writes require isolated authentication writes");
-    }
-    if (!scoresDisposableRoot) {
-      throw new Error("PRG32_BACKEND_SCORES_DISPOSABLE_ROOT is required when score writes are enabled");
-    }
-    if (path.resolve(scoresDisposableRoot) !== path.resolve(authDisposableRoot)) {
-      throw new Error("score disposable root must reuse the authenticated disposable writer boundary");
-    }
-  }
-  if (backupEnabled) {
-    if (backupMode !== "test") {
-      throw new Error("PRG32_BACKEND_BACKUP_MODE must be test when backup is enabled");
-    }
-    if (!authWriteEnabled || authWriteMode !== "test") {
-      throw new Error("backup requires the isolated authentication writer profile");
-    }
-  }
+  validateWriterConfiguration({
+    environment,
+    configuredDatabase,
+    canonicalStorageRoot,
+    canonicalWorkflowMode,
+    candidateRuntimeMode,
+    operationalMode,
+    authWriteEnabled,
+    authWriteMode,
+    authWriteDatabasePath,
+    authDisposableRoot,
+    authSessionSecret,
+    authBootstrapToken,
+    federationLifecycleTestToken,
+    federationLifecycleTestEnabled,
+    secretEncryptionEnabled,
+    secretKeyRegistryPath,
+    submissionWriteEnabled,
+    submissionWriteMode,
+    submissionDisposableRoot,
+    metricsWriteEnabled,
+    metricsWriteMode,
+    metricsDisposableRoot,
+    scoresWriteEnabled,
+    scoresWriteMode,
+    scoresDisposableRoot,
+    backupEnabled,
+    backupMode,
+  });
   const {
     authCookieSecure,
     authCookieSameSite,
@@ -269,47 +211,32 @@ export function loadConfig(environment: NodeJS.ProcessEnv = process.env): Backen
     trustedProxyCidrs,
     mdnsInterface,
   } = resolveNetworkConfig(environment);
-  if (candidateRuntimeMode !== undefined) {
-    const candidateRoot = path.resolve(canonicalStorageRoot ?? "");
-    const canonicalDatabase = path.join(candidateRoot, "store.sqlite");
-    if ((environment.NODE_ENV ?? "").trim().toLowerCase() === "production") {
-      throw new Error("the two-service disposable candidate is disabled in production");
-    }
-    if (configuredCatalogReadMode !== CANONICAL_DISPOSABLE_READ_MODE || canonicalWorkflowMode !== CANONICAL_WORKFLOW_MODE) {
-      throw new Error("the two-service candidate requires canonical disposable workflow mode");
-    }
-    if (path.resolve(configuredDatabase) !== canonicalDatabase || path.resolve(configuredStoreData) !== candidateRoot) {
-      throw new Error("the two-service candidate requires one canonical root and store.sqlite database");
-    }
-    if (!authWriteEnabled || path.resolve(authDisposableRoot ?? "") !== candidateRoot || path.resolve(authWriteDatabasePath ?? "") !== canonicalDatabase) {
-      throw new Error("the two-service candidate requires the canonical SQLite writer boundary");
-    }
-    if (legacyConfiguredUsers.length > 0 || environment.PRG32_USERS !== undefined || environment.PRG32_SCORE_DB !== undefined || environment.PRG32_METRICS_DB !== undefined || environment.PRG32_STORE_DATA !== undefined || environment.PRG32_STORE_DB !== undefined) {
-      throw new Error("legacy database and configured-user fallbacks are disabled in the two-service candidate");
-    }
-    if (mdnsEnabled) throw new Error("mDNS must remain disabled in the two-service candidate");
-    if (backupEnabled) throw new Error("public backup support is disabled in the two-service candidate");
-  }
-  if (operationalMode) {
-    if (candidateRuntimeMode !== undefined) throw new Error("candidate runtime mode cannot be combined with canonical-operational mode");
-    if (legacyConfiguredUsers.length > 0 || environment.PRG32_USERS !== undefined || environment.PRG32_SCORE_DB !== undefined || environment.PRG32_METRICS_DB !== undefined || environment.PRG32_STORE_DATA !== undefined || environment.PRG32_STORE_DB !== undefined) {
-      throw new Error("legacy database and configured-user fallbacks are disabled in canonical-operational mode");
-    }
-    if (path.resolve(configuredDatabase) !== path.join(path.resolve(canonicalStorageRoot as string), "store.sqlite") || path.resolve(configuredStoreData) !== path.resolve(canonicalStorageRoot as string)) {
-      throw new Error("canonical-operational mode requires one canonical root and store.sqlite database");
-    }
-    if (authWriteMode !== "operational" || !authWriteEnabled) throw new Error("canonical-operational mode requires the operational canonical auth writer");
-    if (!trustProxy) throw new Error("PRG32_BACKEND_TRUST_PROXY must be enabled in canonical-operational mode");
-    if (corsAllowedOrigins.some((origin) => origin === "*" || origin !== frontendPublicOrigin)) {
-      throw new Error("canonical-operational mode requires an exact CORS allowlist matching PRG32_BACKEND_FRONTEND_PUBLIC_ORIGIN");
-    }
-    if (mdnsEnabled) throw new Error("mDNS must remain disabled in canonical-operational mode");
-    if (federationLifecycleTestEnabled || federationAutoProvision) throw new Error("test federation lifecycle and auto-provisioning are disabled in canonical-operational mode");
-    requiredSecret("PRG32_BACKEND_SESSION_SECRET", authSessionSecret);
-    if (!authBootstrapToken) throw new Error("PRG32_BACKEND_BOOTSTRAP_TOKEN is required in canonical-operational mode");
-    requiredSecret("PRG32_BACKEND_BOOTSTRAP_TOKEN", authBootstrapToken);
-    if (!secretEncryptionEnabled || !secretKeyRegistryPath) throw new Error("canonical-operational mode requires external secret encryption key configuration");
-  }
+  validateRuntimeConfiguration({
+    environment,
+    configuredDatabase,
+    configuredStoreData,
+    legacyConfiguredUserCount: legacyConfiguredUsers.length,
+    configuredCatalogReadMode,
+    canonicalStorageRoot,
+    canonicalWorkflowMode,
+    candidateRuntimeMode,
+    operationalMode,
+    authWriteEnabled,
+    authWriteMode,
+    authWriteDatabasePath,
+    authDisposableRoot,
+    authSessionSecret,
+    authBootstrapToken,
+    federationLifecycleTestEnabled,
+    secretEncryptionEnabled,
+    secretKeyRegistryPath,
+    backupEnabled,
+    mdnsEnabled,
+    trustProxy,
+    corsAllowedOrigins,
+    frontendPublicOrigin,
+    federationAutoProvision,
+  });
   const mdnsHost = optionalNonEmpty(environment.PRG32_BACKEND_MDNS_HOST);
   const mdnsPort = positiveInteger(
     "PRG32_BACKEND_MDNS_PORT",
