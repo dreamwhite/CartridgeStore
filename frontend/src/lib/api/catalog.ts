@@ -9,6 +9,20 @@ export type CatalogQuery = {
   perPage?: number;
 };
 
+/**
+ * Selects the physical ESP32 target when it is available.
+ *
+ * The API does not guarantee an ordering for the architecture list, so the
+ * UI must not infer the default target from the first item.
+ */
+export function preferredCatalogArchitecture(
+  architectures: readonly string[],
+): string | undefined {
+  return architectures.includes("esp32c6")
+    ? "esp32c6"
+    : architectures[0];
+}
+
 function catalogPath(path: string, query?: URLSearchParams): string {
   const suffix = query && query.toString() ? `?${query.toString()}` : "";
   return `/api/games${path}${suffix}`;

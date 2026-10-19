@@ -7,7 +7,11 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 import { ApiRequestError, ApiResponseValidationError } from "../../lib/api/client";
-import { catalogDownloadPath, getGame } from "../../lib/api/catalog";
+import {
+  catalogDownloadPath,
+  getGame,
+  preferredCatalogArchitecture,
+} from "../../lib/api/catalog";
 import { catalogQueryKeys } from "../../lib/api/query-keys";
 import type { Game } from "../../lib/api/contracts";
 import { Badge } from "../ui/badge";
@@ -45,7 +49,9 @@ export function GameDetail() {
   const game = query.data?.game;
   const architecture = architectureOverride && game?.architectures.includes(architectureOverride)
     ? architectureOverride
-    : game?.architectures[0];
+    : game
+      ? preferredCatalogArchitecture(game.architectures)
+      : undefined;
   const variant = architecture && game ? game.variants[architecture] : undefined;
   const downloadUrl = game && architecture
     ? catalogDownloadPath(game.id, game.selected_version, architecture)
@@ -136,27 +142,31 @@ export function GameDetail() {
             <Badge variant="version">v{game.selected_version}</Badge>
           </header>
           <div className="overflow-hidden rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)]">
-            <div className="aspect-video bg-[var(--color-surface-muted)]">
-              {hasScreenshot && architecture ? (
-                <CartridgeArtwork
-                  key={`${game.id}-${game.selected_version}-${architecture}`}
-                  gameId={game.id}
-                  version={game.selected_version}
-                  kind="screenshot"
-                  architecture={architecture}
-                  alt={`${game.title} screenshot`}
-                  className="h-full w-full"
-                />
-              ) : (
+            {hasScreenshot && architecture ? (
+              <CartridgeArtwork
+                key={`${game.id}-${game.selected_version}-${architecture}`}
+                gameId={game.id}
+                version={game.selected_version}
+                kind="screenshot"
+                architecture={architecture}
+                alt={`${game.title} screenshot`}
+                className="aspect-video w-full"
+              />
+            ) : (
+              <div
+                className="flex aspect-video items-center justify-center
+                  bg-[var(--color-surface-muted)] p-8 sm:p-12"
+              >
                 <CartridgeArtwork
                   gameId={game.id}
                   version={game.selected_version}
                   kind="icon"
                   alt={`${game.title} artwork`}
-                  className="h-full w-full"
+                  className="size-48 rounded-xl border border-[var(--color-border)]
+                    shadow-[var(--shadow-card)] sm:size-56"
                 />
-              )}
-            </div>
+              </div>
+            )}
             <div className="flex flex-wrap items-center gap-2 border-t border-[var(--color-border)] px-4 py-3">
               <span className="text-xs font-semibold uppercase tracking-wide text-[var(--color-text-muted)]">
                 Available targets
@@ -193,7 +203,7 @@ export function GameDetail() {
             </CardContent>
           </Card>
         </div>
-        <aside className="space-y-5 lg:sticky lg:top-6">
+        <aside className="space-y-5 lg:sticky lg:top-20 lg:self-start">
           <Card>
             <CardHeader>
               <h2 className="font-bold">Download cartridge</h2>

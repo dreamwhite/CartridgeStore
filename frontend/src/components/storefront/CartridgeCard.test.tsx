@@ -26,7 +26,10 @@ describe("CartridgeCard", () => {
     render(<CartridgeCard game={game} />);
 
     expect(screen.getByRole("link", { name: "Open PRG32 Pong" })).toHaveAttribute("href", "/games/org.example.pong");
-    expect(screen.getByRole("link", { name: "Download" })).toHaveAttribute("href", "/api/games/org.example.pong/download?version=1.0.0&architecture=qemu");
+    expect(screen.getByRole("link", { name: "Download" })).toHaveAttribute(
+      "href",
+      "/api/games/org.example.pong/download?version=1.0.0&architecture=esp32c6",
+    );
     expect(screen.getByText("qemu")).toBeInTheDocument();
     expect(screen.getByText("esp32c6")).toBeInTheDocument();
   });

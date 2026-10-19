@@ -17,8 +17,12 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("../../lib/api/catalog", () => ({
   getCatalog: vi.fn(),
-  catalogMediaPath: (id: string, kind: string, version: string) => `/api/games/${id}/${kind}?version=${version}`,
-  catalogDownloadPath: (id: string, version: string, architecture: string) => `/api/games/${id}/download?version=${version}&architecture=${architecture}`,
+  catalogMediaPath: (id: string, kind: string, version: string) =>
+    `/api/games/${id}/${kind}?version=${version}`,
+  catalogDownloadPath: (id: string, version: string, architecture: string) =>
+    `/api/games/${id}/download?version=${version}&architecture=${architecture}`,
+  preferredCatalogArchitecture: (architectures: readonly string[]) =>
+    architectures.includes("esp32c6") ? "esp32c6" : architectures[0],
 }));
 
 const game = (overrides: Partial<Game> = {}): Game => ({
@@ -40,12 +44,29 @@ const game = (overrides: Partial<Game> = {}): Game => ({
 });
 
 function response(games: Game[]): GamesResponse {
-  return { ok: true, games, pagination: { page: 1, per_page: 100, total: games.length, pages: 1, has_next: false, has_prev: false, next_page: null, prev_page: null } };
+  return {
+    ok: true,
+    games,
+    pagination: {
+      page: 1,
+      per_page: 100,
+      total: games.length,
+      pages: 1,
+      has_next: false,
+      has_prev: false,
+      next_page: null,
+      prev_page: null,
+    },
+  };
 }
 
 function renderBrowser() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={client}><CatalogBrowser /></QueryClientProvider>);
+  return render(
+    <QueryClientProvider client={client}>
+      <CatalogBrowser />
+    </QueryClientProvider>,
+  );
 }
 
 describe("CatalogBrowser", () => {
@@ -56,13 +77,29 @@ describe("CatalogBrowser", () => {
   });
 
   test("renders real catalog results and exposes detail/download navigation", async () => {
-    vi.mocked(getCatalog).mockResolvedValue(response([game(), game({ id: "org.example.tetris", title: "PRG32 Tetris", architectures: ["qemu"] })]));
+    vi.mocked(getCatalog).mockResolvedValue(
+      response([
+        game(),
+        game({
+          id: "org.example.tetris",
+          title: "PRG32 Tetris",
+          architectures: ["qemu"],
+        }),
+      ]),
+    );
 
     renderBrowser();
 
-    expect((await screen.findAllByRole("heading", { name: "PRG32 Pong" })).length).toBeGreaterThan(0);
-    expect(screen.getAllByRole("link", { name: "Open PRG32 Tetris" })[0]).toHaveAttribute("href", "/games/org.example.tetris");
-    expect(screen.getAllByRole("link", { name: "Download" })[0]).toHaveAttribute("href", "/api/games/org.example.pong/download?version=1.0.0&architecture=qemu");
+    expect(
+      (await screen.findAllByRole("heading", { name: "PRG32 Pong" })).length,
+    ).toBeGreaterThan(0);
+    expect(
+      screen.getAllByRole("link", { name: "Open PRG32 Tetris" })[0],
+    ).toHaveAttribute("href", "/games/org.example.tetris");
+    expect(screen.getAllByRole("link", { name: "Download" })[0]).toHaveAttribute(
+      "href",
+      "/api/games/org.example.pong/download?version=1.0.0&architecture=esp32c6",
+    );
     expect(screen.getByLabelText("Search cartridges")).toBeInTheDocument();
   });
 

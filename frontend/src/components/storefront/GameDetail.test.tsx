@@ -22,6 +22,8 @@ vi.mock("../../lib/api/catalog", () => ({
     `/api/games/${id}/${kind}?version=${version}`,
   catalogDownloadPath: (id: string, version: string, architecture: string) =>
     `/api/games/${id}/download?version=${version}&architecture=${architecture}`,
+  preferredCatalogArchitecture: (architectures: readonly string[]) =>
+    architectures.includes("esp32c6") ? "esp32c6" : architectures[0],
 }));
 
 const detail: Game = {
@@ -76,16 +78,16 @@ describe("GameDetail", () => {
     expect(screen.getByRole("heading", { name: "Controls" })).toBeInTheDocument();
     expect(screen.getByText("D-Pad")).toBeInTheDocument();
     expect(screen.getByText("Add score / beep")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: "Download qemu" })).toHaveAttribute(
-      "href",
-      "/api/games/org.example.pong/download?version=1.0.0&architecture=qemu",
-    );
-
-    await user.click(screen.getByRole("combobox", { name: "Architecture" }));
-    await user.click(await screen.findByRole("option", { name: "esp32c6" }));
     expect(screen.getByRole("link", { name: "Download esp32c6" })).toHaveAttribute(
       "href",
       "/api/games/org.example.pong/download?version=1.0.0&architecture=esp32c6",
+    );
+
+    await user.click(screen.getByRole("combobox", { name: "Architecture" }));
+    await user.click(await screen.findByRole("option", { name: "qemu" }));
+    expect(screen.getByRole("link", { name: "Download qemu" })).toHaveAttribute(
+      "href",
+      "/api/games/org.example.pong/download?version=1.0.0&architecture=qemu",
     );
     await user.click(screen.getByRole("combobox", { name: "Version" }));
     await user.click(await screen.findByRole("option", { name: "0.9.0" }));
