@@ -15,7 +15,8 @@ therefore be used with any reverse proxy or with a private application network.
 - A local filesystem suitable for SQLite locking.
 - Node.js 24 and pnpm 12.5.1 only when building from source outside Docker;
   the operational images build with Node.js 24 themselves.
-- An operator-controlled canonical directory and an external 0600 key registry.
+- An operator-controlled canonical directory, an external 0600 key registry,
+  and four application secret files.
 
 Create those paths with the operator's chosen ownership and permissions. Do not
 use the Git checkout as the canonical data directory. The application expects
@@ -24,6 +25,22 @@ Fastify to be the sole writer.
 Copy the safe template from `deploy/examples/standalone.env.example` into the
 operator's secret/configuration system. Never commit a populated environment
 file or place secret values in the image.
+
+Create these files below `PRG32_SECRET_DIR`, outside the repository, with
+operator-controlled ownership and permissions:
+
+```text
+canonical-read-authorization
+canonical-write-authorization
+session-secret
+bootstrap-token
+```
+
+Each file must contain one value, may end with a newline, and must contain at
+least 32 characters where the backend requires a strong secret. Compose mounts
+them as read-only Docker secrets; the backend reads them through the matching
+`*_FILE` configuration and never receives their contents through Compose
+interpolation.
 
 ## Model A: external reverse proxy
 

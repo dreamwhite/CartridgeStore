@@ -20,15 +20,15 @@ services:
       PRG32_BACKEND_STORE_DATA: /data/canonical
       PRG32_BACKEND_CATALOG_READ_MODE: canonical-operational
       PRG32_BACKEND_CANONICAL_STORAGE_ROOT: /data/canonical
-      PRG32_BACKEND_CANONICAL_READ_AUTHORIZATION: ${PRG32_CANONICAL_READ_AUTHORIZATION:?set through an external secret provider}
+      PRG32_BACKEND_CANONICAL_READ_AUTHORIZATION_FILE: /run/secrets/prg32-canonical-read-authorization
       PRG32_BACKEND_CANONICAL_WORKFLOW_MODE: operational
-      PRG32_BACKEND_CANONICAL_WRITE_AUTHORIZATION: ${PRG32_CANONICAL_WRITE_AUTHORIZATION:?set through an external secret provider}
+      PRG32_BACKEND_CANONICAL_WRITE_AUTHORIZATION_FILE: /run/secrets/prg32-canonical-write-authorization
       PRG32_BACKEND_AUTH_WRITE_ENABLED: "true"
       PRG32_BACKEND_AUTH_WRITE_MODE: operational
       PRG32_BACKEND_AUTH_WRITE_DB: /data/canonical/store.sqlite
       PRG32_BACKEND_AUTH_DISPOSABLE_ROOT: /data/canonical
-      PRG32_BACKEND_SESSION_SECRET: ${PRG32_SESSION_SECRET:?set through an external secret provider}
-      PRG32_BACKEND_BOOTSTRAP_TOKEN: ${PRG32_BOOTSTRAP_TOKEN:?set through an external secret provider}
+      PRG32_BACKEND_SESSION_SECRET_FILE: /run/secrets/prg32-session-secret
+      PRG32_BACKEND_BOOTSTRAP_TOKEN_FILE: /run/secrets/prg32-bootstrap-token
       PRG32_BACKEND_SESSION_SECURE: "true"
       PRG32_BACKEND_SESSION_SAMESITE: ${PRG32_SESSION_SAMESITE:-lax}
       PRG32_BACKEND_SESSION_COOKIE_DOMAIN: ${PRG32_SESSION_COOKIE_DOMAIN:-}
@@ -70,6 +70,14 @@ services:
     secrets:
       - source: prg32_secret_key_registry
         target: prg32-secret-key-registry
+      - source: prg32_canonical_read_authorization
+        target: prg32-canonical-read-authorization
+      - source: prg32_canonical_write_authorization
+        target: prg32-canonical-write-authorization
+      - source: prg32_session_secret
+        target: prg32-session-secret
+      - source: prg32_bootstrap_token
+        target: prg32-bootstrap-token
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:5080/ready').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
@@ -169,3 +177,11 @@ networks:
 secrets:
   prg32_secret_key_registry:
     file: ${PRG32_KEY_REGISTRY_FILE:?provide an external 0600 key registry file}
+  prg32_canonical_read_authorization:
+    file: ${PRG32_SECRET_DIR:?provide an external secret directory}/canonical-read-authorization
+  prg32_canonical_write_authorization:
+    file: ${PRG32_SECRET_DIR:?provide an external secret directory}/canonical-write-authorization
+  prg32_session_secret:
+    file: ${PRG32_SECRET_DIR:?provide an external secret directory}/session-secret
+  prg32_bootstrap_token:
+    file: ${PRG32_SECRET_DIR:?provide an external secret directory}/bootstrap-token
