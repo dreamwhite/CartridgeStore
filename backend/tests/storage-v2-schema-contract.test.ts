@@ -7,7 +7,10 @@ import { compareDocumentedTargetSchema } from "../src/storage-v2/schema-contract
 
 describe("M5.2b documented target schema contract", () => {
   it("executes documented DDL and matches the executable target schema", () => {
-    const markdown = fs.readFileSync(path.resolve(process.cwd(), "../docs/modernization/79-storage-schema-specification.md"), "utf8");
+    const markdown = fs.readFileSync(
+      path.resolve(process.cwd(), "../docs/storage-schema.md"),
+      "utf8",
+    );
     expect(compareDocumentedTargetSchema(markdown)).toEqual([]);
   });
 });
