@@ -69,297 +69,81 @@ export class PublicationExecutionService {
     this.transition = options.transition;
   }
 
-  /** Stages source files and the expected catalog index. */
+  /** Stages a durable operation and preserves the granular recovery API. */
   stage(operation: PublicationOperation): PublicationOperation {
-    let current = operation;
-    if (current.state === "STAGED" || current.state === "VERIFIED") {
-      return current;
+    if (operation.state === "STAGED" || operation.state === "VERIFIED") {
+      return operation;
     }
-    if (current.state !== "PREPARED") {
+    if (operation.state !== "PREPARED") {
       fail(
         "operation cannot be staged from its current state",
         "invalid_operation_transition",
       );
     }
-    const loaded = loadPublicationIndex(this.root);
-    if (loaded.hash !== current.previousIndexSha256) {
-      fail("catalog index changed after preparation", "publication_index_changed");
-    }
-    for (const variant of current.variants) {
-      const sourcePath = assertInside(
-        this.root,
-        path.join(this.root, variant.sourceRelative),
-        "pending file",
-      );
-      const pendingImage = readBounded(
-        sourcePath,
-        PUBLICATION_MAX_CARTRIDGE_BYTES,
-        "pending_file_too_large",
-      );
-      const image = reviewedImage(
-        pendingImage,
-        variant.architecture,
-        current.reviewedMetadata,
-      ).image;
-      if (sha256(image) !== variant.expectedSha256) {
-        fail("pending file hash changed", "pending_hash_mismatch", variant);
-      }
-      const stagePath = assertInside(
-        this.root,
-        path.join(this.root, variant.stagedRelative),
-        "staged file",
-      );
-      ensureDirectory(this.root, path.dirname(path.relative(this.root, stagePath)));
-      writeAtomic(this.root, variant.stagedRelative, image);
-    }
-    const expectedIndex = indexForPublication(
-      loaded.index,
-      current.gameId,
-      current.version,
-      current.variants,
-      current.createdAt,
-    );
-    const indexBytes = serializeJson(expectedIndex);
-    if (sha256(indexBytes) !== current.expectedIndexSha256) {
-      fail("planned index identity changed", "publication_plan_mismatch");
-    }
-    this.hit("before-index-temp-write");
-    writeAtomic(this.root, current.indexStagedRelative, indexBytes);
-    this.hit("after-index-temp-write");
-    current = this.transition(current, "STAGED");
-    this.hit("after-staging");
-    return current;
+    return this.stageUnlocked(operation);
   }
 
-  /** Verifies staged cartridge images and the staged index. */
+  /** Verifies staged files and preserves the granular recovery API. */
   verifyStaged(operation: PublicationOperation): PublicationOperation {
-    let current = operation;
-    if (current.state === "VERIFIED") return current;
-    if (current.state !== "STAGED") {
+    if (operation.state === "VERIFIED") return operation;
+    if (operation.state !== "STAGED") {
       fail(
         "operation cannot be verified from its current state",
         "invalid_operation_transition",
       );
     }
-    for (const variant of current.variants) {
-      const stagePath = assertInside(
-        this.root,
-        path.join(this.root, variant.stagedRelative),
-        "staged file",
-      );
-      const image = readBounded(
-        stagePath,
-        PUBLICATION_MAX_CARTRIDGE_BYTES,
-        "staged_file_corrupt",
-      );
-      if (sha256(image) !== variant.expectedSha256) {
-        fail("staged file hash mismatch", "staged_hash_mismatch", variant);
-      }
-      validateCartridgeBinary(image);
-    }
-    const indexBytes = readBounded(
-      assertInside(
-        this.root,
-        path.join(this.root, current.indexStagedRelative),
-        "staged index",
-      ),
-      PUBLICATION_INDEX_MAX_BYTES,
-      "staged_index_corrupt",
-    );
-    if (sha256(indexBytes) !== current.expectedIndexSha256) {
-      fail("staged index hash mismatch", "staged_index_mismatch");
-    }
-    this.hit("after-staged-verification");
-    current = this.transition(current, "VERIFIED");
-    return current;
+    return this.verifyUnlocked(operation);
   }
 
-  /** Replaces published cartridge files after staged verification. */
+  /** Replaces published files after staged verification. */
   replaceFiles(operation: PublicationOperation): PublicationOperation {
-    let current = operation;
     if (
-      current.state === "FILES_REPLACED" ||
-      current.state === "INDEX_REPLACED" ||
-      current.state === "DATABASE_UPDATED" ||
-      current.state === "COMPLETED"
+      operation.state === "FILES_REPLACED" ||
+      operation.state === "INDEX_REPLACED" ||
+      operation.state === "DATABASE_UPDATED" ||
+      operation.state === "COMPLETED"
     ) {
-      return current;
+      return operation;
     }
-    if (current.state !== "VERIFIED") {
+    if (operation.state !== "VERIFIED") {
       fail(
         "files cannot be replaced from the current operation state",
         "invalid_operation_transition",
       );
     }
-    for (const variant of current.variants) {
-      const target = assertInside(
-        this.root,
-        path.join(this.root, variant.targetRelative),
-        "published target",
-      );
-      ensureDirectory(this.root, path.dirname(path.relative(this.root, target)));
-      const existing = fs.existsSync(target) ? sha256File(target) : null;
-      if (existing === variant.expectedSha256) continue;
-      if (existing !== variant.previousSha256) {
-        fail(
-          "published target changed outside the operation",
-          "publication_target_ambiguous",
-          variant,
-        );
-      }
-      if (variant.previousSha256 !== null) {
-        const backup = assertInside(
-          this.root,
-          path.join(this.root, variant.backupRelative),
-          "publication backup",
-        );
-        if (!fs.existsSync(backup)) {
-          ensureDirectory(
-            this.root,
-            path.dirname(path.relative(this.root, backup)),
-          );
-          fs.copyFileSync(target, backup, fs.constants.COPYFILE_EXCL);
-          if (sha256File(backup) !== variant.previousSha256) {
-            fail("publication backup hash mismatch", "publication_backup_corrupt");
-          }
-        }
-      }
-      this.hit("before-binary-replacement");
-      const staged = assertInside(
-        this.root,
-        path.join(this.root, variant.stagedRelative),
-        "staged file",
-      );
-      if (!fs.existsSync(staged) || sha256File(staged) !== variant.expectedSha256) {
-        fail("staged file is unavailable for replacement", "staged_file_corrupt");
-      }
-      fs.renameSync(staged, target);
-      this.hit("after-binary-replacement");
-      if (sha256File(target) !== variant.expectedSha256) {
-        fail("published file hash mismatch after replacement", "publication_hash_mismatch");
-      }
-    }
-    current = this.transition(current, "FILES_REPLACED");
-    return current;
+    return this.replaceFilesUnlocked(operation);
   }
 
   /** Replaces the public catalog index after file replacement. */
   replaceIndex(operation: PublicationOperation): PublicationOperation {
-    let current = operation;
     if (
-      current.state === "INDEX_REPLACED" ||
-      current.state === "DATABASE_UPDATED" ||
-      current.state === "COMPLETED"
+      operation.state === "INDEX_REPLACED" ||
+      operation.state === "DATABASE_UPDATED" ||
+      operation.state === "COMPLETED"
     ) {
-      return current;
+      return operation;
     }
-    if (current.state !== "FILES_REPLACED") {
+    if (operation.state !== "FILES_REPLACED") {
       fail(
         "index cannot be replaced from the current operation state",
         "invalid_operation_transition",
       );
     }
-    const indexPath = path.join(this.root, "index.json");
-    const existing = fs.existsSync(indexPath) ? sha256File(indexPath) : null;
-    if (existing !== current.expectedIndexSha256) {
-      if (existing !== current.previousIndexSha256) {
-        fail("catalog index changed outside the operation", "publication_index_ambiguous");
-      }
-      if (existing !== null) {
-        const backup = assertInside(
-          this.root,
-          path.join(this.root, current.indexBackupRelative),
-          "index backup",
-        );
-        if (!fs.existsSync(backup)) {
-          ensureDirectory(
-            this.root,
-            path.dirname(path.relative(this.root, backup)),
-          );
-          fs.copyFileSync(indexPath, backup, fs.constants.COPYFILE_EXCL);
-          if (sha256File(backup) !== current.previousIndexSha256) {
-            fail("index backup hash mismatch", "publication_backup_corrupt");
-          }
-        }
-      }
-      this.hit("before-index-replacement");
-      const staged = assertInside(
-        this.root,
-        path.join(this.root, current.indexStagedRelative),
-        "staged index",
-      );
-      if (!fs.existsSync(staged) || sha256File(staged) !== current.expectedIndexSha256) {
-        fail("staged index is unavailable", "staged_index_corrupt");
-      }
-      fs.renameSync(staged, indexPath);
-      this.hit("after-index-replacement");
-    }
-    if (sha256File(indexPath) !== current.expectedIndexSha256) {
-      fail("catalog index hash mismatch after replacement", "publication_index_mismatch");
-    }
-    current = this.transition(current, "INDEX_REPLACED");
-    return current;
+    return this.replaceIndexUnlocked(operation);
   }
 
-  /** Updates the legacy submission row after the public files are committed. */
+  /** Updates the legacy submission row after public files are committed. */
   updateDatabase(operation: PublicationOperation): PublicationOperation {
-    let current = operation;
-    if (current.state === "DATABASE_UPDATED" || current.state === "COMPLETED") {
-      return current;
+    if (operation.state === "DATABASE_UPDATED" || operation.state === "COMPLETED") {
+      return operation;
     }
-    if (current.state !== "INDEX_REPLACED") {
+    if (operation.state !== "INDEX_REPLACED") {
       fail(
         "database cannot be updated from the current operation state",
         "invalid_operation_transition",
       );
     }
-    this.hit("before-database-update");
-    this.database.exec("BEGIN IMMEDIATE");
-    try {
-      const row = this.database
-        .prepare(
-          "SELECT status FROM cartridge_submissions WHERE id = ?",
-        )
-        .get(current.submissionId) as { status?: string } | undefined;
-      if (!row) fail("submission disappeared during publication", "submission_not_found");
-      if (row.status === "pending") {
-        if (current.reviewedMetadata && current.reviewer) {
-          this.database
-            .prepare(
-              "UPDATE cartridge_submissions SET status = 'verified', " +
-                "metadata_json = ?, reviewed_by_user_id = ?, reviewed_by = ?, " +
-                "reviewed_at = datetime('now') WHERE id = ?",
-            )
-            .run(
-              encodePythonJson(current.reviewedMetadata),
-              current.reviewer.id,
-              current.reviewer.name,
-              current.submissionId,
-            );
-        } else {
-          this.database
-            .prepare(
-              "UPDATE cartridge_submissions SET status = 'verified', " +
-                "reviewed_by = 'publication-consistency', " +
-                "reviewed_at = datetime('now') WHERE id = ?",
-            )
-            .run(current.submissionId);
-        }
-      } else if (row.status !== "verified") {
-        fail(
-          "submission state changed outside the operation",
-          "submission_state_ambiguous",
-          row,
-        );
-      }
-      this.database.exec("COMMIT");
-    } catch (error) {
-      if (this.database.inTransaction) this.database.exec("ROLLBACK");
-      throw error;
-    }
-    this.hit("after-database-update");
-    current = this.transition(current, "DATABASE_UPDATED");
-    return current;
+    return this.updateDatabaseUnlocked(operation);
   }
 
   /** Completes an operation and removes its temporary files. */
@@ -374,11 +158,7 @@ export class PublicationExecutionService {
         "invalid_operation_transition",
       );
     }
-    this.hit("before-completion");
-    const completed = this.transition(operation, "COMPLETED");
-    this.cleanupCompleted(completed);
-    this.hit("after-completion");
-    return completed;
+    return this.completeUnlocked(operation);
   }
 
   /** Runs the complete publication state machine from a durable operation. */
