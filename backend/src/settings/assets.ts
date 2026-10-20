@@ -6,7 +6,7 @@ export const MAX_ASSET_BYTES = 2 * 1024 * 1024;
 
 /** Detected format for a managed application asset. */
 export interface AssetMime {
-  readonly extension: "png" | "jpg" | "ico";
+  readonly extension: "png" | "jpg" | "webp" | "ico";
   readonly mimeType: string;
 }
 
@@ -58,6 +58,19 @@ export function detectAssetMime(
     return { extension: "jpg", mimeType: "image/jpeg" };
   }
   if (
+    data.byteLength >= 12 &&
+    data[0] === 0x52 &&
+    data[1] === 0x49 &&
+    data[2] === 0x46 &&
+    data[3] === 0x46 &&
+    data[8] === 0x57 &&
+    data[9] === 0x45 &&
+    data[10] === 0x42 &&
+    data[11] === 0x50
+  ) {
+    return { extension: "webp", mimeType: "image/webp" };
+  }
+  if (
     kind === "favicon" &&
     data.byteLength >= 6 &&
     data[0] === 0 &&
@@ -76,5 +89,5 @@ export function isSafeAssetFilename(
   kind: AssetKind,
   filename: string
 ): boolean {
-  return new RegExp(`^${kind}-[a-f0-9]{32}\\.(png|jpg|ico)$`).test(filename);
+  return new RegExp(`^${kind}-[a-f0-9]{32}\\.(png|jpg|webp|ico)$`).test(filename);
 }

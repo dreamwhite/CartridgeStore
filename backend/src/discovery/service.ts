@@ -27,10 +27,15 @@ function isMissingMdnsDependency(error: unknown): boolean {
   return candidate.code === "MODULE_NOT_FOUND" && typeof candidate.message === "string" && candidate.message.includes("multicast-dns");
 }
 
-async function loadMdnsTransport(contract: DiscoveryContract, interfaceName: string): Promise<DiscoveryTransport> {
+async function loadMdnsTransport(contract: DiscoveryContract): Promise<DiscoveryTransport> {
   try {
     const { MulticastDnsTransport } = await import("./transport.js");
-    return new MulticastDnsTransport(contract, interfaceName);
+    // multicast-dns uses its `interface` option as both the bind address and
+    // multicast interface. Binding UDP 5353 directly to the selected address
+    // prevents multicast queries from being delivered on Linux/Docker. The
+    // contract still advertises the configured interface address; the
+    // transport binds all local addresses so the OS can route multicast.
+    return new MulticastDnsTransport(contract);
   } catch (error) {
     if (isMissingMdnsDependency(error)) throw new DiscoveryDependencyError();
     throw new Error("mDNS transport could not be loaded");
@@ -44,7 +49,7 @@ function normalizeDiscoveryStartupError(error: unknown): unknown {
 const activeInstances = new Set<string>();
 
 export class DiscoveryService {
-  private readonly enabled: boolean;
+  private enabled: boolean;
   private readonly contractFactory: () => DiscoveryContract;
   private readonly transportFactory: (contract: DiscoveryContract) => DiscoveryTransport | Promise<DiscoveryTransport>;
   private transport: DiscoveryTransport | null = null;
@@ -64,6 +69,19 @@ export class DiscoveryService {
 
   status(): { readonly enabled: boolean; readonly state: DiscoveryState; readonly instance: string | null } {
     return { enabled: this.enabled, state: this.state, instance: this.instanceName };
+  }
+
+  async setEnabled(enabled: boolean): Promise<void> {
+    if (enabled) {
+      this.enabled = true;
+      if (this.state === "disabled" || this.state === "stopped") this.state = "idle";
+      await this.start();
+      return;
+    }
+
+    await this.stop();
+    this.enabled = false;
+    this.state = "disabled";
   }
 
   async start(): Promise<void> {
@@ -100,9 +118,11 @@ export class DiscoveryService {
     if (transport) {
       try { await transport.stop(); } finally {
         if (this.instanceName) activeInstances.delete(this.instanceName);
+        this.instanceName = null;
       }
     } else if (this.instanceName) {
       activeInstances.delete(this.instanceName);
+      this.instanceName = null;
     }
     if (this.enabled) this.state = "stopped";
   }
@@ -119,15 +139,15 @@ function localAddress(interfaceName: string): string {
   throw new Error("mDNS requires a non-loopback IPv4 interface");
 }
 
-export function createDiscoveryService(config: BackendConfig): DiscoveryService {
+export function createDiscoveryService(config: BackendConfig, initiallyEnabled = false): DiscoveryService {
   return new DiscoveryService({
-    enabled: config.mdnsEnabled,
+    enabled: initiallyEnabled,
     contract: () => buildDiscoveryContract({
       name: config.mdnsName,
       host: config.mdnsHost ?? defaultDiscoveryHost(),
       address: localAddress(config.mdnsInterface),
       port: config.mdnsPort
     }),
-    transportFactory: (contract) => loadMdnsTransport(contract, config.mdnsInterface)
+    transportFactory: (contract) => loadMdnsTransport(contract)
   });
 }

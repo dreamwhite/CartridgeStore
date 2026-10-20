@@ -8,8 +8,10 @@ import { DISCOVERY_ABI, DISCOVERY_SERVICE_TYPE, SETTINGS, WRITABLE_SETTING_KEYS,
 import { parseSettingsPatch, parseStoredValue, SettingsValidationError } from "./schemas.js";
 import type { SecretStore } from "../secrets/service.js";
 import type { AdminAuditLog } from "../admin/audit.js";
-import type { EmailService, SmtpRuntimeConfig } from "../email/service.js";
+import { EmailDeliveryError, type EmailService, type SmtpRuntimeConfig } from "../email/service.js";
 import { OutboundValidationError, resolveOutboundHost } from "../setup/outbound.js";
+import type { DiscoveryService } from "../discovery/service.js";
+import { emailTemplatePreviews } from "../email/templates.js";
 import type { AssetKind } from "./assets.js";
 import { SettingsAssetStore } from "./asset-store.js";
 import { SettingsError } from "./errors.js";
@@ -36,6 +38,7 @@ export interface SettingsServiceOptions {
   readonly secrets?: SecretStore;
   readonly audit?: AdminAuditLog;
   readonly email?: EmailService;
+  readonly discovery?: DiscoveryService;
 }
 
 const APPLICATION_SETTING_DEFINITIONS = {
@@ -57,6 +60,7 @@ const APPLICATION_SETTING_DEFINITIONS = {
   "smtp.host": { type: "string", category: "smtp", sensitivity: "admin", default: "" },
   "smtp.port": { type: "number", category: "smtp", sensitivity: "admin", default: 1025 },
   "smtp.encryption": { type: "enum", category: "smtp", sensitivity: "admin", default: "none" },
+  "smtp.secure": { type: "boolean", category: "smtp", sensitivity: "admin", default: false },
   "smtp.auth_enabled": { type: "boolean", category: "smtp", sensitivity: "admin", default: false },
   "smtp.username": { type: "string", category: "smtp", sensitivity: "admin", default: "" },
   "smtp.from_name": { type: "string", category: "smtp", sensitivity: "admin", default: "PRG32 Cartridge Store" },
@@ -97,6 +101,7 @@ export class SettingsService {
   readonly secrets: SecretStore | undefined;
   private readonly audit: AdminAuditLog | undefined;
   private readonly email: EmailService | undefined;
+  private readonly discovery: DiscoveryService | undefined;
 
   constructor(options: SettingsServiceOptions) {
     this.databaseSource = options.database;
@@ -107,6 +112,7 @@ export class SettingsService {
     this.secrets = options.secrets;
     this.audit = options.audit;
     this.email = options.email;
+    this.discovery = options.discovery;
     this.assetStore = new SettingsAssetStore({
       database: () => this.database,
       writableDatabase: this.writable,
@@ -141,11 +147,14 @@ export class SettingsService {
         publish_max_bundle_mb: settingView(database, "publish_max_bundle_mb", Math.floor(this.config.submissionMaxArchiveBytes / (1024 * 1024))),
         publish_allowed_architectures: settingView(database, "publish_allowed_architectures", Object.keys(ARCHITECTURES)),
         mdns: {
-          enabled: settingValue(database, "mdns_enabled"),
+          enabled: this.discovery?.status().enabled ?? this.mdnsPreference() ?? false,
           name: settingValue(database, "mdns_name"),
           service_type: DISCOVERY_SERVICE_TYPE,
           port: this.discoveryPort(),
-          runtime: "discovery contract is fixed; Fastify does not dynamically reconfigure mDNS"
+          state: this.discovery?.status().state ?? "unavailable",
+          instance: this.discovery?.status().instance ?? null,
+          infrastructure_allowed: this.config.mdnsEnabled,
+          runtime: "mDNS starts and stops when the saved browser preference changes"
         },
         discovery: {
           abi: DISCOVERY_ABI,
@@ -153,7 +162,8 @@ export class SettingsService {
           port: this.discoveryPort(),
           version: this.config.storeVersion
         },
-        smtp
+        smtp,
+        email_templates: emailTemplatePreviews()
       }
     };
   }
@@ -189,7 +199,7 @@ export class SettingsService {
     const secret = rawValue(database, "smtp_password");
     return {
       enabled: value("smtp.enabled", false), host: value("smtp.host", ""), port: value("smtp.port", 1025),
-      encryption: value("smtp.encryption", "none"), auth_enabled: value("smtp.auth_enabled", false),
+      encryption: value("smtp.encryption", "none"), secure: value("smtp.secure", value("smtp.encryption", "none") === "implicit_tls"), auth_enabled: value("smtp.auth_enabled", false),
       username: value("smtp.username", ""), from_name: value("smtp.from_name", "PRG32 Cartridge Store"),
       from_email: value("smtp.from_email", this.config.emailFrom), reply_to: value("smtp.reply_to", ""),
       connection_timeout_ms: value("smtp.connection_timeout_ms", 10000), delivery_timeout_ms: value("smtp.delivery_timeout_ms", 10000),
@@ -219,6 +229,7 @@ export class SettingsService {
     const smtp: SmtpRuntimeConfig = {
       host,
       port: Number(get("smtp.port", 1025)),
+      secure: get("smtp.secure", encryption === "implicit_tls") === true,
       encryption,
       connectionTimeoutMs: Number(get("smtp.connection_timeout_ms", 10000)),
       deliveryTimeoutMs: Number(get("smtp.delivery_timeout_ms", 10000)),
@@ -236,6 +247,22 @@ export class SettingsService {
 
   private hasTable(database: Database.Database, table: string): boolean {
     return Boolean(database.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(table));
+  }
+
+  private storedMdnsPreference(database: Database.Database): boolean | undefined {
+    if (!this.hasTable(database, "application_settings")) return undefined;
+    const row = database.prepare("SELECT value_json FROM application_settings WHERE setting_key = 'discovery.mdns_enabled'").get() as { value_json?: unknown } | undefined;
+    if (typeof row?.value_json !== "string") return undefined;
+    try {
+      const value = JSON.parse(row.value_json) as unknown;
+      return typeof value === "boolean" ? value : undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  mdnsPreference(): boolean | undefined {
+    return this.storedMdnsPreference(this.database);
   }
 
   private parseApplicationPatch(value: unknown): { readonly values: Partial<Record<ApplicationSettingKey, unknown>>; readonly smtpPassword?: string } {
@@ -285,11 +312,10 @@ export class SettingsService {
   }
 
   private discoveryPort(): number {
-    const candidate = Number(this.config.storePortOverride);
-    return Number.isSafeInteger(candidate) && candidate > 0 ? candidate : 5080;
+    return this.config.mdnsPort;
   }
 
-  update(value: unknown, context?: { readonly actorUserId: number; readonly requestId: string }): Record<string, unknown> {
+  async update(value: unknown, context?: { readonly actorUserId: number; readonly requestId: string }): Promise<Record<string, unknown>> {
     if (!this.writable) throw new SettingsError("settings_unavailable", 503, "settings write isolation is unavailable");
     let patch: Partial<Record<WritableSettingKey, SettingValue>>;
     let application: { readonly values: Partial<Record<ApplicationSettingKey, unknown>>; readonly smtpPassword?: string };
@@ -315,6 +341,24 @@ export class SettingsService {
       throw new SettingsError("settings_invalid_value", 400, "settings patch is invalid");
     }
     if (Object.keys(patch).length === 0 && Object.keys(application.values).length === 0 && application.smtpPassword === undefined) return this.read();
+    const requestedMdns = application.values["discovery.mdns_enabled"];
+    if (requestedMdns === true && !this.config.mdnsEnabled) {
+      throw new SettingsError("mdns_infrastructure_denied", 409, "mDNS is disabled by deployment policy");
+    }
+    let discoveryPrevious: boolean | undefined;
+    if (requestedMdns !== undefined && this.discovery) {
+      const desired = requestedMdns === true;
+      const current = this.discovery.status().enabled;
+      if (current !== desired) {
+        discoveryPrevious = current;
+        try {
+          await this.discovery.setEnabled(desired);
+        } catch (error) {
+          try { await this.discovery.setEnabled(current); } catch { /* preserve the original discovery error */ }
+          throw new SettingsError("mdns_runtime_failed", 503, "mDNS could not be updated", { cause: error });
+        }
+      }
+    }
     const database = this.writable;
     try {
       this.validateRuntimePatch(application.values, application.smtpPassword);
@@ -346,6 +390,9 @@ export class SettingsService {
       this.fault?.("before-settings-commit");
       database.exec("COMMIT");
     } catch (error) {
+      if (discoveryPrevious !== undefined && this.discovery) {
+        try { await this.discovery.setEnabled(discoveryPrevious); } catch { /* preserve the storage error */ }
+      }
       if (database.inTransaction) database.exec("ROLLBACK");
       if (error instanceof SettingsValidationError || error instanceof SettingsError) throw error;
       throw new SettingsError("settings_storage_failed", 503, "settings update failed", { cause: error });
@@ -359,15 +406,42 @@ export class SettingsService {
 
   async testSmtpConnection(): Promise<void> {
     if (!this.email) throw new SettingsError("smtp_unavailable", 503, "email delivery is unavailable");
+    this.assertSmtpEnabled();
     const target = await this.smtpNetworkTarget();
-    await this.email.testConnection(target.lookup);
+    try {
+      await this.email.testConnection(target.lookup);
+    } catch (error) {
+      if (error instanceof EmailDeliveryError) {
+        throw new SettingsError("smtp_connection_failed", 502, "SMTP connection failed", { cause: error });
+      }
+      throw error;
+    }
   }
 
   async sendSmtpTest(to: string): Promise<void> {
     if (!this.email) throw new SettingsError("smtp_unavailable", 503, "email delivery is unavailable");
+    this.assertSmtpEnabled();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(to) || to.length > 254) throw new SettingsError("smtp_test_recipient_invalid", 400, "test recipient is invalid");
     const target = await this.smtpNetworkTarget();
-    await this.email.sendTest(to, target.lookup);
+    try {
+      const storeNameSetting = this.applicationSettings(this.database)["application.store_name"];
+      const storeName = storeNameSetting && typeof storeNameSetting === "object" && !Array.isArray(storeNameSetting) && "value" in storeNameSetting && typeof (storeNameSetting as { value?: unknown }).value === "string"
+        ? (storeNameSetting as { value: string }).value
+        : "PRG32 Cartridge Store";
+      await this.email.sendTest(to, target.lookup, storeName);
+    } catch (error) {
+      if (error instanceof EmailDeliveryError) {
+        throw new SettingsError("smtp_delivery_failed", 502, "SMTP test message failed", { cause: error });
+      }
+      throw error;
+    }
+  }
+
+  private assertSmtpEnabled(): void {
+    const enabled = this.applicationSettings(this.database)["smtp.enabled"] as { value?: unknown } | undefined;
+    if (enabled?.value !== true) {
+      throw new SettingsError("smtp_disabled", 409, "SMTP delivery is disabled; enable SMTP and save settings before testing the connection");
+    }
   }
 
   private async smtpNetworkTarget(): Promise<{ readonly lookup: NonNullable<Parameters<EmailService["testConnection"]>[0]> }> {

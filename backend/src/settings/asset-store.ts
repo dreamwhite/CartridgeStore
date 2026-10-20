@@ -50,7 +50,9 @@ export class SettingsAssetStore {
         ? "image/png"
         : filename.endsWith(".jpg")
           ? "image/jpeg"
-          : "image/x-icon";
+          : filename.endsWith(".webp")
+            ? "image/webp"
+            : "image/x-icon";
       return {
         path: resolved,
         extension: filename.split(".").pop() ?? "",
@@ -110,7 +112,7 @@ export class SettingsAssetStore {
       throw new SettingsError(
         "asset_invalid_type",
         400,
-        `${kind} must be a valid PNG, JPEG, or favicon ICO`,
+        `${kind} must be a valid PNG, JPEG, WebP, or favicon ICO`,
       );
     }
     this.assertRegularDirectory();

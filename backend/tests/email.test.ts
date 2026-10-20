@@ -76,8 +76,8 @@ async function implicitTlsServer(): Promise<{ port: number; ca: Buffer }> {
   return { port: await listen(server), ca: credentials.ca };
 }
 
-function transport(port: number, encryption: "none" | "starttls" | "implicit_tls", extra: Partial<{ username: string; password: string; ca: Buffer }> = {}): SmtpEmailTransport {
-  return new SmtpEmailTransport({ host: "127.0.0.1", port, encryption, connectionTimeoutMs: 1000, deliveryTimeoutMs: 1000, ...extra });
+function transport(port: number, encryption: "none" | "starttls" | "implicit_tls", extra: Partial<{ username: string; password: string; ca: Buffer; secure: boolean }> = {}): SmtpEmailTransport {
+  return new SmtpEmailTransport({ host: "127.0.0.1", port, encryption, secure: extra.secure ?? encryption === "implicit_tls", connectionTimeoutMs: 1000, deliveryTimeoutMs: 1000, ...extra });
 }
 
 afterEach(async () => {
@@ -97,6 +97,11 @@ describe("SMTP transport compatibility matrix", () => {
     await expect(transport(startTls.port, "starttls", { ca: startTls.ca }).testConnection()).resolves.toBeUndefined();
     const implicit = await implicitTlsServer();
     await expect(transport(implicit.port, "implicit_tls", { ca: implicit.ca }).testConnection()).resolves.toBeUndefined();
+  });
+
+  it("supports the explicit secure flag for implicit TLS", async () => {
+    const implicit = await implicitTlsServer();
+    await expect(transport(implicit.port, "none", { secure: true, ca: implicit.ca }).testConnection()).resolves.toBeUndefined();
   });
 
   it("fails closed for refusal, timeout, and a server that does not offer STARTTLS", async () => {

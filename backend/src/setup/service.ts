@@ -172,7 +172,7 @@ export class SetupService {
     if (state === "INSTALLATION_RECOVERY_REQUIRED") throw new SetupError("setup_recovery_required", 409, "installation recovery requires operator intervention");
   }
 
-  saveStep(session: SetupSession, stepValue: unknown, payload: unknown, requestId: string): Record<string, unknown> {
+  async saveStep(session: SetupSession, stepValue: unknown, payload: unknown, requestId: string): Promise<Record<string, unknown>> {
     this.requireSession(session);
     if (typeof stepValue !== "string" || !(SETUP_STEPS as readonly string[]).includes(stepValue)) throw new SetupError("setup_step_invalid", 400, "installation step is invalid");
     if (!isSetupRecord(payload) || Buffer.byteLength(JSON.stringify(payload), "utf8") > MAX_SETUP_PAYLOAD_BYTES) throw new SetupError("setup_payload_invalid", 400, "installation step payload is invalid");
@@ -180,13 +180,13 @@ export class SetupService {
     const row = this.row();
     if (parseSetupSteps(row.completed_steps_json).includes(step)) return this.progress(session);
     if (step === "admin") this.saveAdmin(session, payload, requestId);
-    else if (step === "store") this.updateSettings(session, payload, ["application.store_name", "application.store_description", "application.contact_email"], requestId);
-    else if (step === "registration") this.updateSettings(session, payload, ["registration.enabled", "registration.require_email_verification"], requestId);
-    else if (step === "security") this.updateSettings(session, payload, ["session.lifetime_seconds", "publishing.enabled", "review.require_note_on_rejection", "security.notify_user_on_account_change"], requestId);
-    else if (step === "smtp") this.updateSettings(session, payload, ["smtp.enabled", "smtp.host", "smtp.port", "smtp.encryption", "smtp.auth_enabled", "smtp.username", "smtp.from_name", "smtp.from_email", "smtp.reply_to", "smtp.connection_timeout_ms", "smtp.delivery_timeout_ms", "smtp.password"], requestId);
+    else if (step === "store") await this.updateSettings(session, payload, ["application.store_name", "application.store_description", "application.contact_email"], requestId);
+    else if (step === "registration") await this.updateSettings(session, payload, ["registration.enabled", "registration.require_email_verification"], requestId);
+    else if (step === "security") await this.updateSettings(session, payload, ["session.lifetime_seconds", "publishing.enabled", "review.require_note_on_rejection", "security.notify_user_on_account_change"], requestId);
+    else if (step === "smtp") await this.updateSettings(session, payload, ["smtp.enabled", "smtp.host", "smtp.port", "smtp.encryption", "smtp.secure", "smtp.auth_enabled", "smtp.username", "smtp.from_name", "smtp.from_email", "smtp.reply_to", "smtp.connection_timeout_ms", "smtp.password"], requestId);
     else if (step === "oidc") this.saveOidc(session, payload, requestId);
     else if (step === "saml") this.saveSaml(session, payload, requestId);
-    else if (step === "mdns") this.saveMdns(session, payload, requestId);
+    else if (step === "mdns") await this.saveMdns(session, payload, requestId);
     else this.markStep(session, step, requestId);
     return this.progress(session);
   }
@@ -209,7 +209,7 @@ export class SetupService {
     }
   }
 
-  private updateSettings(session: SetupSession, payload: Record<string, unknown>, allowed: readonly string[], requestId: string, stepOverride?: SetupStep): void {
+  private async updateSettings(session: SetupSession, payload: Record<string, unknown>, allowed: readonly string[], requestId: string, stepOverride?: SetupStep): Promise<void> {
     const application: Record<string, unknown> = {};
     for (const key of allowed) {
       const source = key === "smtp.password" ? key : key;
@@ -217,7 +217,7 @@ export class SetupService {
     }
     const current = this.row();
     if (current.admin_user_id === null) throw new SetupError("setup_admin_required", 409, "create the initial administrator first");
-    this.options.settings.update({ application_settings: application }, { actorUserId: current.admin_user_id, requestId });
+    await this.options.settings.update({ application_settings: application }, { actorUserId: current.admin_user_id, requestId });
     this.markStep(session, stepOverride ?? this.currentStep(allowed), requestId);
   }
 
@@ -236,10 +236,10 @@ export class SetupService {
     this.providerStepHandlers.saveSaml(session, payload, requestId);
   }
 
-  private saveMdns(session: SetupSession, payload: Record<string, unknown>, requestId: string): void {
+  private async saveMdns(session: SetupSession, payload: Record<string, unknown>, requestId: string): Promise<void> {
     const enabled = setupBooleanValue(payload.enabled, "enabled", false);
     if (enabled && !this.options.config.mdnsEnabled) throw new SetupError("mdns_infrastructure_denied", 409, "mDNS is disabled by deployment policy");
-    this.updateSettings(session, { "discovery.mdns_enabled": enabled }, ["discovery.mdns_enabled"], requestId, "mdns");
+    await this.updateSettings(session, { "discovery.mdns_enabled": enabled }, ["discovery.mdns_enabled"], requestId, "mdns");
   }
 
   private apiOrigin(): string {

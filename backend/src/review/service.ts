@@ -18,6 +18,7 @@ import {
   type RejectionOperation,
 } from "./rejection-journal.js";
 import type { RuntimePolicy } from "../settings/runtime-policy.js";
+import type { ApprovalNotifier } from "../email/notifications.js";
 
 const MAX_REVIEW_SUBMISSIONS = 1000;
 const MAX_OWNED_SUBMISSIONS_PER_PAGE = 100;
@@ -76,6 +77,8 @@ export interface ReviewWorkflowService {
   reject(submissionId: number, principal: Principal, note?: string): SubmissionRecord;
 }
 
+export type { ApprovalNotifier } from "../email/notifications.js";
+
 type SubmissionRow = Omit<SubmissionRecord, "metadata" | "architectures">;
 
 function fail(message: string, code: ReviewErrorCode = "review_invalid_request", statusCode = 400): never {
@@ -125,6 +128,7 @@ export interface ReviewServiceOptions {
   readonly publication?: PublicationConsistencyService;
   readonly fault?: (point: "after-rejection-database-update" | "after-rejection-cleanup") => void;
   readonly policy?: RuntimePolicy;
+  readonly approvalNotifier?: ApprovalNotifier;
 }
 
 export class ReviewService {
@@ -134,6 +138,7 @@ export class ReviewService {
   readonly publication: PublicationConsistencyService;
   private readonly fault: ReviewServiceOptions["fault"];
   private readonly policy: RuntimePolicy | undefined;
+  private readonly approvalNotifier: ApprovalNotifier | undefined;
 
   constructor(options: ReviewServiceOptions) {
     this.root = path.resolve(options.root);
@@ -141,6 +146,7 @@ export class ReviewService {
     this.maxSubmissions = options.maxSubmissions ?? MAX_REVIEW_SUBMISSIONS;
     this.fault = options.fault;
     this.policy = options.policy;
+    this.approvalNotifier = options.approvalNotifier;
     if (!fs.existsSync(this.root) || !fs.lstatSync(this.root).isDirectory() || fs.lstatSync(this.root).isSymbolicLink()) fail("review disposable root is invalid", "review_unavailable", 503);
     this.publication = options.publication ?? new PublicationConsistencyService({ root: this.root, database: this.database });
     ensureRejectionJournalRoot(this.root);
@@ -212,7 +218,9 @@ export class ReviewService {
       if (error instanceof ReviewError) throw error;
       throw new ReviewError("review operation failed", "review_operation_failed", 500, { cause: error });
     }
-    return this.detail(id);
+    const approved = this.detail(id);
+    this.approvalNotifier?.(approved, this.database).catch(() => undefined);
+    return approved;
   }
 
   reject(submissionId: number, principal: Principal, note = ""): SubmissionRecord {

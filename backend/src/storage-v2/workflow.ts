@@ -145,6 +145,7 @@ export class CanonicalWorkflowService implements ReviewWorkflowService {
   private readonly config: BackendConfig;
   private readonly fault: CanonicalWorkflowOptions["fault"];
   private readonly policy: RuntimePolicy | undefined;
+  private readonly approvalNotifier: CanonicalWorkflowOptions["approvalNotifier"];
   private readonly execution: CanonicalWorkflowExecutionService;
 
   constructor(options: CanonicalWorkflowOptions) {
@@ -168,6 +169,7 @@ export class CanonicalWorkflowService implements ReviewWorkflowService {
     this.staging = new StagingStore(this.resource.paths);
     this.fault = options.fault;
     this.policy = options.policy;
+    this.approvalNotifier = options.approvalNotifier;
     this.execution = new CanonicalWorkflowExecutionService({
       root: this.root,
       database: this.database,
@@ -297,7 +299,9 @@ export class CanonicalWorkflowService implements ReviewWorkflowService {
     } catch (error) { if (this.database.inTransaction) this.database.exec("ROLLBACK"); throw error; }
     this.hit("after-durable-intent");
     this.execute(operationId);
-    return this.detail(submissionId);
+    const approved = this.detail(submissionId);
+    this.approvalNotifier?.(approved, this.database).catch(() => undefined);
+    return approved;
   }
 
   reject(submissionId: number, principal: Principal, note = ""): SubmissionRecord {

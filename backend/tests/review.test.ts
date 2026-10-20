@@ -126,6 +126,8 @@ describe("review and publication parity", () => {
     expect(verified.statusCode).toBe(200);
     const verifiedSubmission = verified.json<Record<string, unknown>>().submission as Record<string, unknown>;
     expect(verifiedSubmission).toMatchObject({ id, status: "verified", metadata: { title: "Reviewed Title", tags: ["approved"] }, reviewed_by: "editor" });
+    const emailMessages = (await fixture.app.inject({ method: "GET", url: "/api/_test/email/messages", headers: { "x-prg32-bootstrap-token": BOOTSTRAP } })).json<Record<string, unknown>>().messages as Array<Record<string, unknown>>;
+    expect(emailMessages.some((message) => message.to === "editor@example.test" && message.subject === "Reviewed Title 1.0.0 was approved")).toBe(true);
     for (const architecture of ["qemu", "esp32c6"]) {
       const file = fs.readFileSync(path.join(fixture.storeRoot, "cartridges/org.example.review/1.0.0", `${architecture}.prg32`));
       expect(parseCartridge(file).metadata?.title).toBe("Reviewed Title");

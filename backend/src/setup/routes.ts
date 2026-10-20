@@ -115,7 +115,7 @@ export function registerSetupRoutes(app: FastifyInstance, options: SetupRouteOpt
       options.setup.requireSession(session);
       if (!constantTimeEqual(session.csrfToken, csrfHeader(request))) return json(reply, { ok: false, error: "csrf token missing or invalid", code: "csrf_failed" }, 403);
       const input = body(request);
-      const result = options.setup.saveStep(session, input.step, input.payload ?? {}, requestId(request));
+      const result = await options.setup.saveStep(session, input.step, input.payload ?? {}, requestId(request));
       reply.header("cache-control", "no-store");
       return json(reply, result);
     } catch (error) { return errorResponse(reply, request, error); }

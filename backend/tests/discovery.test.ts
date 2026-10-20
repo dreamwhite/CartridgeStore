@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { buildDiscoveryContract } from "../src/discovery/contract.js";
 import { createDiscoveryService, DiscoveryDependencyError, DiscoveryService } from "../src/discovery/service.js";
 import type { DiscoveryTransport } from "../src/discovery/transport.js";
-import { buildMdnsRecords } from "../src/discovery/transport.js";
+import { buildMdnsRecords, isRelevantDiscoveryQuestion } from "../src/discovery/transport.js";
 import { loadConfig } from "../src/config/env.js";
 import { buildApp } from "../src/app.js";
 
@@ -54,6 +54,13 @@ describe("mDNS discovery contract and lifecycle", () => {
     });
   });
 
+  it("matches DNS questions with or without the wire-format trailing dot", () => {
+    const value = contract();
+    expect(isRelevantDiscoveryQuestion(value, value.serviceType)).toBe(true);
+    expect(isRelevantDiscoveryQuestion(value, value.serviceType.replace(/\.$/u, ""))).toBe(true);
+    expect(isRelevantDiscoveryQuestion(value, "_other._tcp.local.")).toBe(false);
+  });
+
   it("is disabled by default and never constructs a transport", async () => {
     let constructed = 0;
     const service = new DiscoveryService({
@@ -88,6 +95,19 @@ describe("mDNS discovery contract and lifecycle", () => {
     await second.stop();
     expect(firstTransport.stops).toBe(1);
     expect(secondTransport.stops).toBe(1);
+  });
+
+  it("starts and stops the advertiser when the runtime preference changes", async () => {
+    const transport = new FakeTransport();
+    const service = new DiscoveryService({ enabled: false, contract: contract(), transportFactory: () => transport });
+
+    await service.setEnabled(true);
+    expect(service.status()).toMatchObject({ enabled: true, state: "announced" });
+    expect(transport.starts).toBe(1);
+
+    await service.setEnabled(false);
+    expect(service.status()).toEqual({ enabled: false, state: "disabled", instance: null });
+    expect(transport.stops).toBe(1);
   });
 
   it("fails closed on transport startup and cleans partial state", async () => {

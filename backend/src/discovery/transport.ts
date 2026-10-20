@@ -50,8 +50,21 @@ export function buildMdnsRecords(contract: DiscoveryContract, ttl = 120): { read
   };
 }
 
+function normalizeDnsName(name: string): string {
+  return name.replace(/\.+$/u, "");
+}
+
+export function isRelevantDiscoveryQuestion(contract: DiscoveryContract, name: string): boolean {
+  const normalizedName = normalizeDnsName(name);
+  return normalizedName === normalizeDnsName(contract.serviceType)
+    || normalizedName === normalizeDnsName(contract.instanceName)
+    || normalizedName === normalizeDnsName(contract.host);
+}
+
 function relevant(contract: DiscoveryContract, packet: MdnsPacket): boolean {
-  return (packet.questions ?? []).some((question) => question.name === contract.serviceType || question.name === contract.instanceName || question.name === contract.host);
+  return (packet.questions ?? []).some((question) => {
+    return isRelevantDiscoveryQuestion(contract, question.name);
+  });
 }
 
 export class MulticastDnsTransport implements DiscoveryTransport {

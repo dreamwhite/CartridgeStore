@@ -49,6 +49,7 @@ import { CanonicalDraftService } from "./storage-v2/drafts.js";
 import { mountDraftEndpoints } from "./storage-v2/draft-endpoints.js";
 import { createDiscoveryService, DiscoveryDependencyError } from "./discovery/service.js";
 import { createEmailService } from "./email/service.js";
+import { createApprovalNotifier } from "./email/notifications.js";
 import { AdminAuditLog } from "./admin/audit.js";
 import { RuntimePolicy } from "./settings/runtime-policy.js";
 import { registerSetupRoutes } from "./setup/routes.js";
@@ -66,6 +67,11 @@ export interface AppOptions {
 export function buildApp(options: AppOptions): FastifyInstance {
   const database = new ReadonlyDatabaseManager(options.config);
   const email = createEmailService(options.config);
+  const approvalNotifier = createApprovalNotifier({
+    email,
+    ...(options.config.emailPublicOrigin === undefined ? {} : { publicOrigin: options.config.emailPublicOrigin }),
+    storeName: options.config.storeName,
+  });
   const auth = new AuthService({ config: options.config, readonlyDatabase: database, email });
   let runtimeDatabase: Database.Database | null = null;
   const runtimePolicy = new RuntimePolicy(() => runtimeDatabase ?? auth.database());
@@ -75,7 +81,8 @@ export function buildApp(options: AppOptions): FastifyInstance {
       config: options.config,
       root: options.config.canonicalStorageRoot,
         database: openTargetStorage(options.config.canonicalStorageRoot, "read-write"),
-        policy: runtimePolicy
+        policy: runtimePolicy,
+        approvalNotifier,
     })
     : null;
   const canonicalDrafts = canonicalWorkflow ? new CanonicalDraftService(canonicalWorkflow.database, canonicalWorkflow.paths, options.config, canonicalWorkflow) : null;
@@ -155,6 +162,7 @@ export function buildApp(options: AppOptions): FastifyInstance {
     writableDatabase: options.config.authWriteEnabled ? auth.writableDatabase() : null,
     audit
   });
+  const discovery = createDiscoveryService(options.config);
   const settings = new SettingsService({
     config: options.config,
     database: () => canonicalDatabaseForReads ?? auth.database(),
@@ -162,7 +170,8 @@ export function buildApp(options: AppOptions): FastifyInstance {
     ...(options.config.canonicalStorageRoot ? { assetDirectory: path.join(options.config.canonicalStorageRoot, "storage", "objects", "site-assets") } : {}),
     secrets,
     audit,
-    email
+    email,
+    discovery
   });
   const setupDatabase = canonicalWorkflow?.database ?? (auth.isWriteEnabled() ? auth.writableDatabase() : null);
   const setup = new SetupService({
@@ -193,6 +202,7 @@ export function buildApp(options: AppOptions): FastifyInstance {
       database: auth.writableDatabase(),
       maxSubmissions: options.config.reviewMaxSubmissions,
       policy: runtimePolicy,
+      approvalNotifier,
       ...(publication === null ? {} : { publication })
     })
     : null);
@@ -235,7 +245,6 @@ export function buildApp(options: AppOptions): FastifyInstance {
     requestTimeout: options.config.httpRequestTimeoutMs,
     keepAliveTimeout: options.config.httpKeepAliveTimeoutMs
   });
-  const discovery = createDiscoveryService(options.config);
   const catalogRateLimiter = new BoundedRateLimiter(options.config.httpCatalogRateLimitMax, options.config.httpRateLimitWindowSeconds, options.config.httpRateLimitMaxClients);
   const downloadRateLimiter = new BoundedRateLimiter(options.config.httpDownloadRateLimitMax, options.config.httpRateLimitWindowSeconds, options.config.httpRateLimitMaxClients);
 
@@ -354,9 +363,29 @@ export function buildApp(options: AppOptions): FastifyInstance {
   });
 
   app.addHook("onReady", async () => {
-    if (!options.config.mdnsEnabled) return;
+    let persistedPreference: boolean | undefined;
     try {
-      await discovery.start();
+      persistedPreference = settings.mdnsPreference();
+    } catch {
+      // If the read model is unavailable, retain the explicit env-controlled
+      // startup behavior so the failure is reported by the discovery layer.
+      if (options.config.mdnsEnabled) persistedPreference = true;
+    }
+    if (persistedPreference !== undefined) {
+      if (!persistedPreference) return;
+      if (!options.config.mdnsEnabled) {
+        app.log.warn("mDNS is enabled in application settings but disabled by deployment policy");
+        return;
+      }
+    } else if (!options.config.mdnsEnabled) {
+      return;
+    } else {
+      // The deployment enables the capability; the browser preference still
+      // controls whether this instance advertises itself.
+      return;
+    }
+    try {
+      await discovery.setEnabled(true);
     } catch (error) {
       const code = error instanceof DiscoveryDependencyError ? error.code : "mdns_start_failed";
       app.log.error({ code }, "mDNS startup failed while explicitly enabled");

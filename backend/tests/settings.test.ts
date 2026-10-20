@@ -14,6 +14,7 @@ const roots: string[] = [];
 const apps: Array<ReturnType<typeof buildApp>> = [];
 const BOOTSTRAP = "settings-bootstrap-token-1234567890";
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+const WEBP = Buffer.from([0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50]);
 
 function createDatabase(): { readonly root: string; readonly databasePath: string; readonly storeRoot: string } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "prg32-m63d2b-"));
@@ -221,6 +222,22 @@ describe("settings API", () => {
     expect(responseCode(await disabled.app.inject({ method: "PATCH", url: "/api/admin/settings", payload: { store_name: "nope" } }))).toBe("settings_unavailable");
   });
 
+  it("explains that SMTP must be enabled before a connection test", async () => {
+    const test = fixture();
+    const admin = await adminSession(test.app);
+    const response = await test.app.inject({
+      method: "POST",
+      url: "/api/admin/settings/smtp/test-connection",
+      headers: { cookie: admin.cookie, "x-csrftoken": admin.csrf },
+    });
+    expect(response.statusCode).toBe(409);
+    expect(response.json()).toMatchObject({
+      ok: false,
+      code: "smtp_disabled",
+      error: "SMTP delivery is disabled; enable SMTP and save settings first",
+    });
+  });
+
   it("validates, serves, replaces, and safely rolls back managed assets", async () => {
     const test = fixture();
     const admin = await adminSession(test.app);
@@ -262,6 +279,14 @@ describe("settings API", () => {
     const faviconResponse = await test.app.inject({ method: "GET", url: assetUrl(favicon) });
     expect(faviconResponse.statusCode).toBe(200);
     expect(header(faviconResponse, "content-type")).toContain("image/x-icon");
+
+    const webpUpload = multipart(WEBP, admin.csrf);
+    const webp = await test.app.inject({ method: "POST", url: "/api/admin/settings/assets/logo", headers: { cookie: admin.cookie, "x-csrftoken": admin.csrf, "content-type": webpUpload.contentType }, payload: webpUpload.body });
+    expect(webp.statusCode).toBe(200);
+    expect(jsonObject(webp).asset).toMatchObject({ kind: "logo", mime_type: "image/webp", size: WEBP.byteLength });
+    const webpResponse = await test.app.inject({ method: "GET", url: assetUrl(webp) });
+    expect(webpResponse.statusCode).toBe(200);
+    expect(header(webpResponse, "content-type")).toContain("image/webp");
 
     const faultRoot = path.join(test.root, "fault-assets");
     const db = new Database(test.databasePath);

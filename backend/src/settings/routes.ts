@@ -101,7 +101,16 @@ function operationFailure(reply: FastifyReply, request: FastifyRequest, error: u
     const publicErrors: Record<string, string> = {
       settings_conflict: "settings update conflicted with a newer version",
       settings_invalid_value: "invalid settings request",
+      mdns_infrastructure_denied: "mDNS is disabled by deployment policy",
+      mdns_runtime_failed: "mDNS could not be updated",
       smtp_invalid_configuration: "SMTP configuration is invalid",
+      smtp_disabled: "SMTP delivery is disabled; enable SMTP and save settings first",
+      smtp_connection_failed: "SMTP connection failed",
+      smtp_delivery_failed: "SMTP test message failed",
+      provider_private_target_denied: "SMTP target is blocked by the server network policy",
+      provider_dns_failed: "SMTP host could not be resolved",
+      provider_host_invalid: "SMTP host is invalid",
+      provider_port_invalid: "SMTP port is invalid",
       secret_storage_unavailable: "secret storage is unavailable",
       smtp_unavailable: "SMTP delivery is unavailable",
       smtp_test_recipient_invalid: "test recipient is invalid",
@@ -195,7 +204,7 @@ export function registerSettingsRoutes(app: FastifyInstance, options: SettingsRo
       const current = requireAdmin(request, reply, options, true);
       if (!current) return reply;
       if (current.principal.id === null) return adminFailure(reply, 401);
-      return json(reply, options.settings.update(request.body, { actorUserId: current.principal.id, requestId: request.id }));
+      return json(reply, await options.settings.update(request.body, { actorUserId: current.principal.id, requestId: request.id }));
     } catch (error) {
       return operationFailure(reply, request, error);
     }

@@ -1,6 +1,7 @@
 import type { BackendConfig } from "../config/env.js";
 import type { RuntimePolicy } from "../settings/runtime-policy.js";
 import type { StorageDatabase } from "./types.js";
+import type { ApprovalNotifier } from "../email/notifications.js";
 
 /** Fault injection points for canonical workflow recovery tests. */
 export type CanonicalWorkflowFaultPoint =
@@ -20,6 +21,7 @@ export interface CanonicalWorkflowOptions {
   readonly database: StorageDatabase;
   readonly fault?: (point: CanonicalWorkflowFaultPoint) => void;
   readonly policy?: RuntimePolicy;
+  readonly approvalNotifier?: ApprovalNotifier;
 }
 
 /** Event data recorded when a published cartridge is downloaded. */
