@@ -197,7 +197,7 @@ body {
   background: color-mix(in srgb, var(--color-bg) 76%, transparent);
   backdrop-filter: blur(8px);
   opacity: 1;
-  transition: opacity 260ms ease, visibility 260ms ease;
+  transition: opacity 240ms ease, visibility 240ms ease;
 }
 
 .boot-splash--exiting {
@@ -258,7 +258,7 @@ body {
   min-height: 0.35rem;
   background: var(--color-surface);
   transform-origin: right center;
-  animation: boot-splash-bar-reveal 900ms linear forwards;
+  animation: boot-splash-bar-reveal 700ms linear forwards;
 }
 
 @keyframes boot-splash-bar-reveal {

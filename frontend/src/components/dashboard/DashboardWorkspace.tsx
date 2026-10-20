@@ -2,32 +2,23 @@
 
 import type { LucideIcon } from "lucide-react";
 import {
-  Activity,
   Archive,
   ArrowUpRight,
   BarChart3,
   BookOpen,
   Box,
   CheckCircle2,
-  ChevronDown,
   ChevronRight,
   CirclePlus,
   FileCode2,
   FolderKanban,
-  LayoutDashboard,
-  Mail,
   PackageCheck,
-  Palette,
   Rocket,
-  Settings2,
-  SlidersHorizontal,
   Store,
   UploadCloud,
-  UserRound,
 } from "lucide-react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { type ReactNode, useState } from "react";
+import { useSyncExternalStore, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { ApiRequestError } from "../../lib/api/client";
@@ -37,71 +28,14 @@ import { listDrafts, listMySubmissions, WorkflowIntegrationUnavailableError } fr
 import { useCurrentUser } from "../../lib/auth/use-current-user";
 import type { OwnedSubmissionSummary, PublisherDraft } from "../../lib/api/contracts";
 import { CartridgeArtwork } from "../storefront/CartridgeArtwork";
-import { SettingsPanel } from "../admin/settings/SettingsPanel";
+import { DashboardNav } from "./DashboardNav";
+import {
+  SettingsPanel,
+} from "../admin/settings/SettingsPanel";
+import type { SettingsSectionId } from "../admin/settings/settings-sections";
 import { Badge, type BadgeVariant } from "../ui/badge";
 import { Button } from "../ui/button";
 import { StatusMessage } from "../ui/status";
-
-type DashboardNavChild = {
-  label: string;
-  href: string;
-  icon: LucideIcon;
-};
-
-type DashboardNavItem = {
-  label: string;
-  href: string;
-  icon: LucideIcon;
-  section: "Workspace" | "Account";
-  children?: readonly DashboardNavChild[];
-};
-
-const dashboardNav: DashboardNavItem[] = [
-  {
-    label: "Overview",
-    href: "/dashboard",
-    icon: LayoutDashboard,
-    section: "Workspace",
-  },
-  {
-    label: "My cartridges",
-    href: "/dashboard/cartridges",
-    icon: Box,
-    section: "Workspace",
-  },
-  {
-    label: "Drafts",
-    href: "/dashboard/drafts",
-    icon: FolderKanban,
-    section: "Workspace",
-  },
-  {
-    label: "Statistics",
-    href: "/stats",
-    icon: BarChart3,
-    section: "Workspace",
-  },
-  {
-    label: "Settings",
-    href: "/dashboard/settings",
-    icon: Settings2,
-    section: "Account",
-    children: [
-      { label: "General", href: "/dashboard/settings#general", icon: SlidersHorizontal },
-      { label: "Appearance", href: "/dashboard/settings#appearance", icon: Palette },
-      { label: "Registration", href: "/dashboard/settings#registration", icon: UserRound },
-      { label: "Publishing", href: "/dashboard/settings#publishing", icon: Rocket },
-      { label: "Telemetry", href: "/dashboard/settings#telemetry", icon: Activity },
-      { label: "Email delivery", href: "/dashboard/settings#email", icon: Mail },
-    ],
-  },
-  {
-    label: "Account",
-    href: "/dashboard/account",
-    icon: UserRound,
-    section: "Account",
-  },
-];
 
 function errorMessage(error: unknown): string {
   if (error instanceof WorkflowIntegrationUnavailableError) return "The publishing workflow is not available in this environment.";
@@ -133,94 +67,10 @@ function catalogBadge(action: AdminCartridge["moderation_action"]): { label: str
   return { label: "Live in store", variant: "published" };
 }
 
-function DashboardNav({ canSubmit }: { canSubmit: boolean }) {
-  const pathname = usePathname();
-  const showPublishCta = canSubmit && pathname === "/dashboard";
-  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
-  return (
-    <nav aria-label="Developer dashboard" className="space-y-0.5">
-      {dashboardNav.map((item, index) => {
-        const Icon = item.icon;
-        const active = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(`${item.href}/`));
-        return (
-          <div key={item.href}>
-            {(index === 0 || dashboardNav[index - 1]?.section !== item.section) && (
-              <p className={`${index === 0 ? "" : "mt-4"} mb-1.5 px-3 text-[0.65rem] font-bold uppercase tracking-[0.18em] text-[var(--color-text-muted)]`}>
-                {item.section}
-              </p>
-            )}
-            <div className="relative">
-              <Link href={item.href} aria-current={active ? "page" : undefined} className={`group flex items-center gap-3 rounded-lg border px-3 py-2 text-sm font-semibold transition-colors ${item.children ? "pr-10" : ""} ${active ? "border-[var(--color-primary)] bg-[var(--color-primary-soft)] text-[var(--color-primary-strong)]" : "border-transparent text-[var(--color-text-muted)] hover:border-[var(--color-border)] hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-text)]"}`}>
-                <Icon aria-hidden="true" className="size-4 shrink-0" />
-                <span>{item.label}</span>
-                {!item.children && active && <span aria-hidden="true" className="ml-auto size-1.5 rounded-full bg-[var(--color-primary)]" />}
-              </Link>
-              {item.children ? (
-                <button
-                  type="button"
-                  aria-controls={`dashboard-submenu-${item.href.replaceAll("/", "-")}`}
-                  aria-expanded={expandedGroups[item.href] ?? active}
-                  aria-label={`${expandedGroups[item.href] ?? active ? "Collapse" : "Expand"} ${item.label}`}
-                  className="absolute right-1 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-current transition-colors hover:bg-black/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ring)]"
-                  onClick={() => {
-                    setExpandedGroups((current) => ({
-                      ...current,
-                      [item.href]: !(current[item.href] ?? active),
-                    }));
-                  }}
-                >
-                  <ChevronDown
-                    aria-hidden="true"
-                    className={`size-4 transition-transform duration-200 ${expandedGroups[item.href] ?? active ? "rotate-180" : ""}`}
-                  />
-                </button>
-              ) : null}
-            </div>
-          {item.children ? (
-            <div
-              id={`dashboard-submenu-${item.href.replaceAll("/", "-")}`}
-              aria-hidden={!(expandedGroups[item.href] ?? active)}
-              className={`grid overflow-hidden transition-[grid-template-rows,opacity] duration-200 ease-out ${expandedGroups[item.href] ?? active ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0"}`}
-            >
-              <div className="min-h-0 overflow-hidden border-l border-[var(--color-border)] pl-3 pt-1">
-                <div className="grid gap-0.5">
-                  {item.children.map((child) => {
-                    const ChildIcon = child.icon;
-                    const childTabIndex = expandedGroups[item.href] ?? active ? 0 : -1;
-                    return (
-                      <Link
-                        key={child.href}
-                        href={child.href}
-                        tabIndex={childTabIndex}
-                        className="flex items-center gap-2 rounded-md px-2.5 py-1.5 text-xs font-semibold text-[var(--color-text-muted)] transition-colors hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-primary-strong)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ring)]"
-                      >
-                        <ChildIcon aria-hidden="true" className="size-3.5 shrink-0" />
-                        <span>{child.label}</span>
-                      </Link>
-                    );
-                  })}
-                </div>
-              </div>
-            </div>
-          ) : null}
-          </div>
-        );
-      })}
-      {showPublishCta && (
-        <Link href="/dashboard/publish" className="mt-4 flex items-center gap-3 rounded-lg bg-[var(--color-primary)] px-3 py-2 text-sm font-semibold text-white shadow-[var(--shadow-brand)] transition-colors hover:bg-[var(--color-primary-strong)]">
-          <Rocket aria-hidden="true" className="size-4 shrink-0" />
-          <span>Publish new</span>
-          <ArrowUpRight aria-hidden="true" className="ml-auto size-4" />
-        </Link>
-      )}
-    </nav>
-  );
-}
-
 function MetricCard({ label, value, detail, icon: Icon, tone = "neutral" }: { label: string; value: number; detail: string; icon: LucideIcon; tone?: "neutral" | "primary" | "success" | "warning" }) {
   const toneClass = tone === "primary" ? "bg-[var(--color-primary-soft)] text-[var(--color-primary-strong)]" : tone === "success" ? "bg-[var(--color-success-soft)] text-[var(--color-success-foreground)]" : tone === "warning" ? "bg-[var(--color-warning-soft)] text-[var(--color-warning-foreground)]" : "bg-[var(--color-surface-muted)] text-[var(--color-text-muted)]";
   return (
-    <section className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 shadow-[var(--shadow-card)] sm:p-5">
+    <section className="border-y border-[var(--color-border)] bg-transparent p-4 sm:p-5">
       <div className="flex items-start justify-between gap-3"><p className="text-sm font-semibold text-[var(--color-text-muted)]">{label}</p><span className={`grid size-9 place-items-center rounded-lg ${toneClass}`}><Icon aria-hidden="true" className="size-4" /></span></div>
       <p className="mt-4 text-3xl font-bold tracking-tight">{value}</p>
       <p className="mt-1 text-xs text-[var(--color-text-muted)]">{detail}</p>
@@ -243,6 +93,14 @@ function PageHeader({ eyebrow, title, description, action }: { eyebrow: string; 
   return <header className="flex flex-col justify-between gap-5 border-b border-[var(--color-border)] pb-6 sm:flex-row sm:items-end"><div><p className="technical-label text-[var(--color-primary)]">{eyebrow}</p><h1 className="mt-2 text-3xl font-bold tracking-tight">{title}</h1><p className="mt-2 max-w-2xl text-sm leading-6 text-[var(--color-text-muted)]">{description}</p></div>{action}</header>;
 }
 
+function useHydrated(): boolean {
+  return useSyncExternalStore(
+    () => () => undefined,
+    () => true,
+    () => false,
+  );
+}
+
 function SubmissionRow({ submission }: { submission: OwnedSubmissionSummary }) {
   const badge = submissionBadge(submission.status);
   return <li className="flex flex-col gap-2 border-b border-[var(--color-border)] py-3 last:border-0 sm:flex-row sm:items-center sm:justify-between"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="truncate font-semibold">{submission.title}</h3><Badge variant={badge.variant}>{badge.label}</Badge></div><p className="mt-1 truncate text-sm text-[var(--color-text-muted)]">{submission.game_id} · v{submission.version}</p></div><div className="flex items-center gap-3 text-xs text-[var(--color-text-muted)]"><span>{formatDate(submission.reviewed_at ?? submission.created_at)}</span><ChevronRight aria-hidden="true" className="size-4" /></div></li>;
@@ -259,6 +117,7 @@ function CatalogRow({ cartridge, onModerate, pending }: { cartridge: AdminCartri
 }
 
 export function DashboardWorkspace() {
+  const hydrated = useHydrated();
   const current = useCurrentUser();
   const user = current.user;
   const canSubmit = Boolean(user?.permissions?.includes("catalog:submit"));
@@ -267,7 +126,7 @@ export function DashboardWorkspace() {
   const submissions = useQuery({ queryKey: workflowQueryKeys.mine(1), queryFn: () => listMySubmissions(undefined, 1, 8), enabled: canSubmit, retry: false });
   const catalog = useQuery({ queryKey: adminQueryKeys.catalog({ moderation: true }), queryFn: () => adminApi.listModerationInventory({ page: 1, limit: 8 }), enabled: canManageCatalog, retry: false });
 
-  if (current.isPending) return <DashboardFrame canSubmit={false}><DashboardLoading /></DashboardFrame>;
+  if (!hydrated || current.isPending) return <DashboardFrame canSubmit={false}><DashboardLoading /></DashboardFrame>;
   if (current.error) return <DashboardFrame canSubmit={false}><StatusMessage tone="danger" className="p-5">{errorMessage(current.error)}</StatusMessage></DashboardFrame>;
   if (!user) return <DashboardFrame canSubmit={false}><StatusMessage tone="warning" className="p-5">Sign in is required to use the developer dashboard.</StatusMessage></DashboardFrame>;
 
@@ -292,16 +151,65 @@ export function DashboardWorkspace() {
 
     {workflowError && <StatusMessage tone="warning" className="p-4">{errorMessage(workflowError)}</StatusMessage>}{catalogError && <StatusMessage tone="warning" className="p-4">{errorMessage(catalogError)}</StatusMessage>}
 
-    <section className="rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-[var(--shadow-card)] sm:p-6"><div className="flex items-start justify-between gap-4 border-b border-[var(--color-border)] pb-4"><div><p className="technical-label text-[var(--color-primary)]">Release pipeline</p><h2 className="mt-1 text-lg font-bold">Recent submissions</h2></div><Link href="/dashboard/cartridges" className="inline-flex items-center gap-1 text-sm font-semibold text-[var(--color-primary-strong)] hover:underline">View all <ArrowUpRight aria-hidden="true" className="size-3.5" /></Link></div>{!canSubmit ? <p className="py-6 text-sm text-[var(--color-text-muted)]">Your account does not have cartridge submission permission.</p> : submissions.isPending ? <p className="py-6 text-sm text-[var(--color-text-muted)]">Loading your release pipeline…</p> : submissionItems.length === 0 ? <div className="flex flex-col items-start gap-3 py-6 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-semibold">No releases yet</p><p className="mt-1 text-sm text-[var(--color-text-muted)]">Start with a cartridge bundle and your first release will appear here.</p></div><Button asChild size="sm"><Link href="/dashboard/publish"><Rocket aria-hidden="true" className="size-4" />Create first release</Link></Button></div> : <ul>{submissionItems.slice(0, 5).map((submission) => <SubmissionRow key={submission.id} submission={submission} />)}</ul>}</section>
+    <section className="border-y border-[var(--color-border)] py-5 sm:py-6">
+      <div className="flex items-start justify-between gap-4 border-b border-[var(--color-border)] pb-4">
+        <div>
+          <p className="technical-label text-[var(--color-primary)]">
+            Release pipeline
+          </p>
+          <h2 className="mt-1 text-lg font-bold">Recent submissions</h2>
+        </div>
+        <Link
+          href="/dashboard/cartridges"
+          className="inline-flex items-center gap-1 text-sm font-semibold text-[var(--color-primary-strong)] hover:underline"
+        >
+          View all
+          <ArrowUpRight aria-hidden="true" className="size-3.5" />
+        </Link>
+      </div>
+      {!canSubmit ? (
+        <p className="py-6 text-sm text-[var(--color-text-muted)]">
+          Your account does not have cartridge submission permission.
+        </p>
+      ) : submissions.isPending ? (
+        <p className="py-6 text-sm text-[var(--color-text-muted)]">
+          Loading your release pipeline…
+        </p>
+      ) : submissionItems.length === 0 ? (
+        <div className="flex flex-col items-start gap-3 py-6 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <p className="font-semibold">No releases yet</p>
+            <p className="mt-1 text-sm text-[var(--color-text-muted)]">
+              Start with a cartridge bundle and your first release will appear here.
+            </p>
+          </div>
+          <Button asChild size="sm">
+            <Link href="/dashboard/publish">
+              <Rocket aria-hidden="true" className="size-4" />
+              Create first release
+            </Link>
+          </Button>
+        </div>
+      ) : (
+        <ul>
+          {submissionItems
+            .slice(0, 5)
+            .map((submission) => (
+              <SubmissionRow key={submission.id} submission={submission} />
+            ))}
+        </ul>
+      )}
+    </section>
   </div></DashboardFrame>;
 }
 
 export function DashboardDraftsWorkspace() {
+  const hydrated = useHydrated();
   const current = useCurrentUser();
   const user = current.user;
   const canSubmit = Boolean(user?.permissions?.includes("catalog:submit"));
   const drafts = useQuery({ queryKey: workflowQueryKeys.drafts(), queryFn: listDrafts, enabled: canSubmit, retry: false });
-  if (current.isPending) return <DashboardFrame canSubmit={false}><DashboardLoading /></DashboardFrame>;
+  if (!hydrated || current.isPending) return <DashboardFrame canSubmit={false}><DashboardLoading /></DashboardFrame>;
   if (current.error) return <DashboardFrame canSubmit={false}><StatusMessage tone="danger" className="p-5">{errorMessage(current.error)}</StatusMessage></DashboardFrame>;
   if (!user) return <DashboardFrame canSubmit={false}><StatusMessage tone="warning" className="p-5">Sign in is required to view drafts.</StatusMessage></DashboardFrame>;
   const items = drafts.data?.drafts ?? [];
@@ -309,6 +217,7 @@ export function DashboardDraftsWorkspace() {
 }
 
 export function DashboardCartridgesWorkspace() {
+  const hydrated = useHydrated();
   const current = useCurrentUser();
   const queryClient = useQueryClient();
   const user = current.user;
@@ -321,23 +230,28 @@ export function DashboardCartridgesWorkspace() {
     if (!withdrawn && !window.confirm(`Withdraw ${cartridge.title} from the public store?`)) return;
     moderation.mutate({ cartridge, action: withdrawn ? "restored" : "unpublished" });
   }
-  if (current.isPending) return <DashboardFrame canSubmit={false}><DashboardLoading /></DashboardFrame>;
+  if (!hydrated || current.isPending) return <DashboardFrame canSubmit={false}><DashboardLoading /></DashboardFrame>;
   if (current.error) return <DashboardFrame canSubmit={false}><StatusMessage tone="danger" className="p-5">{errorMessage(current.error)}</StatusMessage></DashboardFrame>;
   if (!user) return <DashboardFrame canSubmit={false}><StatusMessage tone="warning" className="p-5">Sign in is required to view cartridges.</StatusMessage></DashboardFrame>;
   const items = catalog.data?.cartridges ?? [];
   return <DashboardFrame canSubmit={canSubmit}><div className="space-y-6"><PageHeader eyebrow="Store control" title="My cartridges" description="See what is live, inspect the public detail page, and withdraw a release without deleting its cartridge data." action={<Button asChild><Link href="/dashboard/publish"><CirclePlus aria-hidden="true" className="size-4" />Publish new</Link></Button>} />{!canManageCatalog ? <StatusMessage tone="warning" className="p-4">Your account does not have permission to manage catalog visibility.</StatusMessage> : catalog.error ? <StatusMessage tone="warning" className="p-4">{errorMessage(catalog.error)}</StatusMessage> : catalog.isPending ? <DashboardLoading /> : items.length === 0 ? <section className="rounded-xl border border-dashed border-[var(--color-border)] bg-[var(--color-surface)] p-10 text-center"><span className="mx-auto grid size-12 place-items-center rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary-strong)]"><Box aria-hidden="true" className="size-5" /></span><h2 className="mt-4 text-lg font-bold">No releases in the catalog</h2><p className="mx-auto mt-2 max-w-md text-sm text-[var(--color-text-muted)]">Publish a validated cartridge to see its store visibility here.</p><Button asChild className="mt-5"><Link href="/dashboard/publish">Publish a cartridge</Link></Button></section> : <ul className="grid gap-3">{items.map((cartridge) => <CatalogRow key={`${cartridge.id}/${cartridge.selected_version}`} cartridge={cartridge} onModerate={moderate} pending={moderation.isPending} />)}</ul>}</div></DashboardFrame>;
 }
 
-export function DashboardSettingsWorkspace() {
+export function DashboardSettingsWorkspace({
+  section,
+}: {
+  section: SettingsSectionId;
+}) {
+  const hydrated = useHydrated();
   const current = useCurrentUser();
   const user = current.user;
   const canSubmit = Boolean(user?.permissions?.includes("catalog:submit"));
 
-  if (current.isPending) return <DashboardFrame canSubmit={false}><DashboardLoading /></DashboardFrame>;
+  if (!hydrated || current.isPending) return <DashboardFrame canSubmit={false}><DashboardLoading /></DashboardFrame>;
   if (current.error) return <DashboardFrame canSubmit={false}><StatusMessage tone="danger" className="p-5">{errorMessage(current.error)}</StatusMessage></DashboardFrame>;
   if (!user) return <DashboardFrame canSubmit={false}><StatusMessage tone="warning" className="p-5">Sign in is required to view developer settings.</StatusMessage></DashboardFrame>;
 
-  return <DashboardFrame canSubmit={canSubmit}><div className="space-y-6"><PageHeader eyebrow="Developer workspace" title="Settings" description="Configure the local Cartridge Store runtime and publishing guardrails. Account security remains available separately under your account menu." /><SettingsPanel /></div></DashboardFrame>;
+  return <DashboardFrame canSubmit={canSubmit}><div className="space-y-8"><PageHeader eyebrow="Developer settings" title="Settings" description="Manage one focused area of the Cartridge Store configuration at a time." /><SettingsPanel section={section} /></div></DashboardFrame>;
 }
 
 export function DashboardFrame({ children, canSubmit }: { children: ReactNode; canSubmit: boolean }) {

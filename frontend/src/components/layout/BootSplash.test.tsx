@@ -27,8 +27,8 @@ describe("BootSplash", () => {
       }),
     ).toBeInTheDocument();
 
-    act(() => vi.advanceTimersByTime(1000));
-    act(() => vi.advanceTimersByTime(260));
+    act(() => vi.advanceTimersByTime(760));
+    act(() => vi.advanceTimersByTime(240));
 
     expect(
       screen.queryByRole("status", {

@@ -320,6 +320,14 @@ export default function SetupPage() {
                   onChange={(value) => update("smtp_port", value)}
                 />
                 <Field
+                  label="Secure SMTP connection"
+                  name="smtp_secure"
+                  type="checkbox"
+                  value={Boolean(form.smtp_secure ?? false)}
+                  onChange={(value) => update("smtp_secure", value)}
+                  help="Use implicit TLS, normally with port 465."
+                />
+                <Field
                   label="Username"
                   name="smtp_username"
                   value={String(form.smtp_username ?? "")}

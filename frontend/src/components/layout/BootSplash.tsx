@@ -3,7 +3,8 @@
 import Image from "next/image";
 import { useCallback, useEffect, useState } from "react";
 
-const SPLASH_DURATION_MS = 1000;
+const SPLASH_DURATION_MS = 760;
+const SPLASH_EXIT_DURATION_MS = 240;
 
 export function BootSplash() {
   // The root layout keeps this component mounted during client-side
@@ -13,7 +14,7 @@ export function BootSplash() {
 
   const dismiss = useCallback(() => {
     setExiting(true);
-    window.setTimeout(() => setVisible(false), 260);
+    window.setTimeout(() => setVisible(false), SPLASH_EXIT_DURATION_MS);
   }, []);
 
   useEffect(() => {

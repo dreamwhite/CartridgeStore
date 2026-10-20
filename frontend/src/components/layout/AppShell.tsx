@@ -9,6 +9,7 @@ import { BrandLogo } from "./BrandLogo";
 import { SiteFooter } from "./SiteFooter";
 import { ThemeToggle } from "./ThemeToggle";
 import { BootSplash } from "./BootSplash";
+import { RuntimeFavicon } from "./RuntimeFavicon";
 import { navigationIsActive, PUBLIC_NAVIGATION } from "./navigation";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "../ui/dialog";
 
@@ -19,6 +20,7 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
   return (
     <div className="flex min-h-screen flex-col bg-[var(--color-bg)] text-[var(--color-text)]">
       <BootSplash />
+      <RuntimeFavicon />
       <header className="sticky top-0 z-40 border-b border-[var(--color-border)] bg-[var(--color-surface)]/95 shadow-[var(--shadow-header)] backdrop-blur">
         <div className="page-gutter flex min-h-16 items-center justify-between gap-4 py-3">
           <Link

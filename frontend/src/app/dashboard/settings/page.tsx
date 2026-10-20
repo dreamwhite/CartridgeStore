@@ -1,6 +1,6 @@
-import { DashboardSettingsWorkspace } from "../../../components/dashboard/DashboardWorkspace";
+import { redirect } from "next/navigation";
 
 /** Runtime and publishing settings for the developer dashboard. */
 export default function DashboardSettingsPage() {
-  return <DashboardSettingsWorkspace />;
+  redirect("/dashboard/settings/general");
 }

@@ -66,6 +66,7 @@ export function payloadFor(
       "smtp.host": value("smtp_host"),
       "smtp.port": Number(value("smtp_port", "1025")),
       "smtp.encryption": value("smtp_encryption", "none"),
+      "smtp.secure": Boolean(value("smtp_secure", false)),
       "smtp.auth_enabled": Boolean(value("smtp_auth", false)),
       "smtp.username": value("smtp_username"),
       "smtp.password": value("smtp_password"),
