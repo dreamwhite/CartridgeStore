@@ -1,0 +1,37 @@
+services:
+  backend:
+    networks:
+      - app
+      - mail
+      - dream_edge
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: ${DREAM_EDGE_NETWORK:-dream_edge}
+      traefik.http.routers.prg32-api.rule: Host(`${PRG32_API_DOMAIN:-api.prg32.dream.test}`)
+      traefik.http.routers.prg32-api.entrypoints: websecure
+      traefik.http.routers.prg32-api.tls: "true"
+      traefik.http.routers.prg32-api.middlewares: dream-security-headers@file
+      traefik.http.services.prg32-api.loadbalancer.server.port: "5090"
+
+  next:
+    networks:
+      - app
+      - dream_edge
+    labels:
+      traefik.enable: "true"
+      traefik.docker.network: ${DREAM_EDGE_NETWORK:-dream_edge}
+      traefik.http.routers.prg32-store.rule: Host(`${PRG32_STORE_DOMAIN:-store.prg32.dream.test}`)
+      traefik.http.routers.prg32-store.entrypoints: websecure
+      traefik.http.routers.prg32-store.tls: "true"
+      traefik.http.routers.prg32-store.middlewares: dream-security-headers@file
+      traefik.http.services.prg32-store.loadbalancer.server.port: "3000"
+
+  # The Dream Platform Traefik edge owns ports 80/443 in this mode.
+  nginx:
+    profiles:
+      - standalone
+
+networks:
+  dream_edge:
+    name: ${DREAM_EDGE_NETWORK:-dream_edge}
+    external: true

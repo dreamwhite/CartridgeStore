@@ -2,7 +2,6 @@ name: prg32-cartridge-store
 
 services:
   backend:
-    profiles: ["dev"]
     build:
       context: ./backend
       dockerfile: Dockerfile.dev
@@ -31,26 +30,24 @@ services:
       PRG32_BACKEND_OIDC_PUBLIC_ORIGIN: https://api.prg32.dream.test/
       PRG32_BACKEND_FEDERATION_PUBLIC_ORIGIN: https://api.prg32.dream.test/
       PRG32_BACKEND_CORS_ORIGINS: https://store.prg32.dream.test
+      # Mailpit remains an external Dream service; allow only this exact
+      # container through outbound checks.
+      PRG32_BACKEND_SETUP_NETWORK_TEST_ALLOWLIST: ${PRG32_BACKEND_SETUP_NETWORK_TEST_ALLOWLIST:-mailpit}
       PRG32_BACKEND_BACKUP_ENABLED: "false"
-      PRG32_BACKEND_MDNS_ENABLED: "false"
+      # The deployment permits mDNS in local development; the persisted
+      # browser setting controls whether the service is actually advertised.
+      PRG32_BACKEND_MDNS_ENABLED: ${PRG32_BACKEND_MDNS_ENABLED:-true}
+      PRG32_BACKEND_MDNS_INTERFACE: ${PRG32_BACKEND_MDNS_INTERFACE:-eth0}
+      PRG32_BACKEND_MDNS_HOST: ${PRG32_BACKEND_MDNS_HOST:-prg32-store.local}
+      PRG32_BACKEND_MDNS_PORT: "5090"
       PRG32_BACKEND_LOG_LEVEL: ${PRG32_BACKEND_LOG_LEVEL:-info}
-    ports:
-      - "127.0.0.1:5090:5090"
     volumes:
       - ./backend:/app
       - ${PRG32_BACKEND_NODE_MODULES_DIR:-./.local/backend/node_modules}:/app/node_modules
       - ${PRG32_CANONICAL_DATA_DIR:-./.local/candidate/canonical}:/canonical
     networks:
       - app
-      - edge
-    labels:
-      traefik.enable: "true"
-      traefik.docker.network: ${DREAM_EDGE_NETWORK:-dream_edge}
-      traefik.http.routers.prg32-api-dev.rule: Host(`${PRG32_API_DOMAIN:-api.prg32.dream.test}`)
-      traefik.http.routers.prg32-api-dev.entrypoints: websecure
-      traefik.http.routers.prg32-api-dev.tls: "true"
-      traefik.http.routers.prg32-api-dev.middlewares: dream-security-headers@file
-      traefik.http.services.prg32-api-dev.loadbalancer.server.port: "5090"
+      - mail
     healthcheck:
       test:
         - CMD
@@ -65,7 +62,6 @@ services:
       start_period: 10s
 
   next:
-    profiles: ["dev"]
     build:
       context: ./frontend
       dockerfile: Dockerfile.dev
@@ -86,19 +82,37 @@ services:
       - ${PRG32_FRONTEND_NEXT_CACHE_DIR:-./.local/frontend/next-cache}:/app/.next
     networks:
       - app
-      - edge
-    labels:
-      traefik.enable: "true"
-      traefik.docker.network: ${DREAM_EDGE_NETWORK:-dream_edge}
-      traefik.http.routers.prg32-store-dev.rule: Host(`${PRG32_STORE_DOMAIN:-store.prg32.dream.test}`)
-      traefik.http.routers.prg32-store-dev.entrypoints: websecure
-      traefik.http.routers.prg32-store-dev.tls: "true"
-      traefik.http.routers.prg32-store-dev.middlewares: dream-security-headers@file
-      traefik.http.services.prg32-store-dev.loadbalancer.server.port: "3000"
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/health').then(response => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
+  nginx:
+    image: nginx:1.27-alpine
+    environment:
+      PRG32_STORE_DOMAIN: ${PRG32_STORE_DOMAIN:-store.prg32.dream.test}
+      PRG32_API_DOMAIN: ${PRG32_API_DOMAIN:-api.prg32.dream.test}
+      NGINX_ENVSUBST_FILTER: "^(PRG32_STORE_DOMAIN|PRG32_API_DOMAIN)$"
+    depends_on:
+      backend:
+        condition: service_healthy
+      next:
+        condition: service_healthy
+    ports:
+      - "${PRG32_HTTP_BIND:-0.0.0.0}:${PRG32_HTTP_PORT:-80}:80"
+      - "${PRG32_HTTPS_BIND:-0.0.0.0}:${PRG32_HTTPS_PORT:-443}:443"
+    volumes:
+      - ./deploy/local/nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - ${PRG32_TLS_DIR:-./.local/tls}:/etc/nginx/tls:ro
+    networks:
+      - app
+    restart: unless-stopped
 
 networks:
   app:
     name: prg32_store_dev
-  edge:
-    name: ${DREAM_EDGE_NETWORK:-dream_edge}
+  mail:
+    name: ${DREAM_MAIL_NETWORK:-dream_mail}
     external: true
