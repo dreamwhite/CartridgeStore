@@ -1,7 +1,7 @@
 # PRG32 Cartridge Store documentation
 
 The repository has one application runtime: a Fastify API and a Next.js
-frontend. The author's local Dream/Traefik and dnsmasq setup publishes the
+frontend. The author's local dnsmasq setup resolves the
 development-only hosts `api.prg32.dream.test` and `store.prg32.dream.test`.
 Production uses separately configured registered domains; see
 [Deployment](deployment.md).
@@ -11,6 +11,7 @@ Production uses separately configured registered domains; see
 | Need | Document |
 | --- | --- |
 | Understand the running system | [Architecture](architecture.md) |
+| Understand the shared local infrastructure | [Dream Platform](dream-platform.md) |
 | Start local development | [Development](development.md) |
 | Configure services | [Configuration](configuration.md) |
 | Review security rules | [Security](security.md) |

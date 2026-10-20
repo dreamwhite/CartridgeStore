@@ -1,12 +1,15 @@
 # Deployment
 
-Deployment templates use the Fastify API and Next.js frontend as two services
-behind an operator-controlled reverse proxy.
+Deployment templates use the Fastify API and Next.js frontend behind an
+operator-controlled reverse proxy. The local development Compose file also
+includes a standalone Nginx edge for a reproducible `docker compose up -d`
+workflow.
 
 ## Local and production hosts
 
-The author's local Dream integration uses dnsmasq and Traefik to resolve these
-development-only hosts:
+The author's local dnsmasq setup resolves these development-only hosts. The
+repository's local Compose file terminates TLS and routes them with Nginx;
+Dream/Traefik is not required for the application edge:
 
 | Local host | Service |
 | --- | --- |
@@ -19,8 +22,8 @@ starting `deploy/operational/compose.yaml`:
 
 | Variable | Production value |
 | --- | --- |
-| `PRG32_STORE_DOMAIN` | Store hostname used by the Traefik router |
-| `PRG32_API_DOMAIN` | API hostname used by the Traefik router |
+| `PRG32_STORE_DOMAIN` | Store hostname used by the Nginx edge |
+| `PRG32_API_DOMAIN` | API hostname used by the Nginx edge |
 | `PRG32_FRONTEND_PUBLIC_ORIGIN` | Full HTTPS storefront origin |
 | `PRG32_API_PUBLIC_ORIGIN` | Full HTTPS API origin |
 | `PRG32_API_WS_URL` | Full `wss://` multiplayer endpoint |

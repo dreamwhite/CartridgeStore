@@ -5,7 +5,7 @@
 1. Browsers and firmware clients are untrusted inputs.
 2. Fastify is the only application API authority.
 3. Next.js is presentation code and must not duplicate API business rules.
-4. Traefik terminates external TLS and routes exact hosts. The backend still
+4. The operator-controlled edge terminates external TLS and routes exact hosts. The backend still
    validates configured origins and forwarded headers.
 
 ## Authentication and federation

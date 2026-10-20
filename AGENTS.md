@@ -6,9 +6,10 @@ Guidance for coding agents working in this repository.
 
 PRG32 Cartridge Store is the classroom service for PRG32 cartridges. The
 repository contains one Fastify/TypeScript API and one Next.js frontend behind
-an external reverse-proxy edge. In the author's local environment,
-Dream/Traefik and dnsmasq publish the development-only hosts
-`store.prg32.dream.test` and `api.prg32.dream.test`. These names are not
+an Nginx edge. In the author's local environment, dnsmasq resolves the
+development-only hosts `store.prg32.dream.test` and `api.prg32.dream.test`.
+The backend reuses Dream Platform's external `dream_mail` network for Mailpit,
+but this repository does not create a Mailpit service. These names are not
 production domains; production must provide its own registered DNS names, TLS
 certificates, public origins, cookie domain, and WebSocket URL through the
 operational Compose variables.
@@ -74,8 +75,9 @@ instead of replacing existing ones.
 - Keep persistent data mounted at `/data` in deployment templates.
 - Keep the WebSocket relay on the same HTTP port as the API.
 - Images must run without host-specific paths.
-- Local development uses only `backend` and `next` behind the external
-  `dream_edge` network.
+- Local development uses `backend`, `next` and the repository-owned Nginx edge.
+- Local development may attach the backend to the external `dream_mail`
+  network; do not add a second Mailpit service to this Compose project.
 
 ## Firmware consistency
 

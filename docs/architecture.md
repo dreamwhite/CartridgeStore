@@ -3,34 +3,38 @@
 ## Runtime topology
 
 ```text
-                  Local Dream / Traefik edge
+                    Local Nginx edge
                               │
-                 ┌────────────┴────────────┐
+                 ┌────────────┼────────────┐
                  │                         │
        store.prg32.dream.test      api.prg32.dream.test
                  │                         │
              Next.js :3000             Fastify :5090
                  │                         │
                  └────── browser API ────┘
+                              │
+              external Dream Platform mail network
 ```
 
 The diagram shows the local dnsmasq-backed `.dream.test` environment only.
 Production uses the same service topology with operator-provided domains and
-origins. The edge owns TLS and host routing. The browser calls the API origin directly;
+origins. Nginx owns local TLS and host routing. The browser calls the API origin directly;
 Next does not proxy application routes. Fastify owns HTTP, WebSocket,
 authentication, catalog, publication, telemetry, statistics and discovery.
 
 ## Local Compose
 
-The development profile has two services:
+The development Compose file has three services:
 
 | Service | Responsibility |
 | --- | --- |
 | `backend` | Fastify API, canonical SQLite and filesystem store |
 | `next` | Next.js development server and UI |
+| `nginx` | Local TLS termination, host routing and WebSocket forwarding |
 
-Both services join the external `dream_edge` network. The local backend is
-also bound to `127.0.0.1:5090` for diagnostics. The default data directory is
+The backend also joins the external `dream_mail` network, where Dream Platform
+provides Mailpit. The application services otherwise join the private
+`prg32_store_dev` network. The default data directory is
 `.local/candidate/canonical`, which is disposable and never replaces an
 operator-controlled data root.
 

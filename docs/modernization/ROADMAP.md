@@ -1,7 +1,7 @@
 # Modernization roadmap
 
 The runtime cutover is complete when the Fastify API, Next.js frontend and
-Dream edge are the only application path. Keep this file short; detailed audit
+repository-owned Nginx edge are the only application path. Keep this file short; detailed audit
 evidence belongs in the tranche report referenced below.
 
 ## Completed
@@ -11,7 +11,8 @@ evidence belongs in the tranche report referenced below.
   telemetry boundaries.
 - Removed the old application runtime, templates, static assets and Python
   dependency surface.
-- Simplified development Compose to `backend` plus `next`.
+- Simplified development Compose to `backend`, `next` and the repository-owned
+  Nginx edge, reusing Dream Platform's external Mailpit network.
 - Switched browser API calls to the explicit API origin.
 - Added the PRG32 brand asset and dashboard UI refinements.
 
@@ -24,6 +25,10 @@ evidence belongs in the tranche report referenced below.
 - Prepare the Fumadocs project from the maintained Markdown documentation.
 - Revisit dashboard workspace decomposition after the public storefront is
   stable.
+- Define API version discovery for firmware clients, including a stable
+  bootstrap/discovery document and a compatibility strategy for legacy routes;
+  validate the design against the working PRG32 firmware prototype before
+  implementing it.
 
 ## Guardrails
 

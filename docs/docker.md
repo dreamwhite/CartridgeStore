@@ -2,17 +2,48 @@
 
 ## Development
 
-The root Compose profile is intentionally small:
+The root Compose file is self-contained and includes the local TLS edge:
 
 ```bash
-docker compose --profile dev up -d --build
-docker compose --profile dev ps
-docker compose --profile dev logs -f backend next
+./deploy/local/setup-tls.sh
+docker compose up -d --build
+docker compose ps
+docker compose logs -f backend next nginx
 ```
 
-It starts only `backend` and `next`, joins the external `dream_edge` network,
-and uses a disposable bind-mounted canonical root. The API is available on
-loopback port `5090`; the edge publishes the public HTTPS hosts.
+It starts `backend`, `next` and `nginx` on the private `prg32_store_dev`
+network. The backend also attaches to the external `dream_mail` network and
+uses the Mailpit service provided by Dream Platform; this project does not
+create a second Mailpit container. Nginx publishes ports 80 and 443, redirects
+HTTP to HTTPS, routes the Store/API subhosts and preserves WebSocket upgrades.
+The application services are not exposed directly on host ports.
+
+The external network must already exist:
+
+```bash
+docker network inspect dream_mail
+```
+
+Override its name with `DREAM_MAIL_NETWORK` when Dream Platform uses a
+different network name.
+
+## Dream Platform edge
+
+When the shared Dream Platform Traefik service should own HTTPS ingress, use
+the dedicated override instead of starting the local Nginx service:
+
+```bash
+docker compose \
+  --env-file /path/to/dream-platform/.env \
+  -f docker-compose.yml \
+  -f docker-compose.dream-platform.yml \
+  up -d --build backend next
+```
+
+The override attaches the routed services to the external `dream_edge` network
+and adds the `store.prg32.dream.test` and `api.prg32.dream.test` Traefik
+routers. Traefik and the standalone Nginx edge are mutually exclusive owners
+of host ports 80 and 443.
 
 ## Deployment images
 
@@ -33,7 +64,7 @@ The frontend receives its public API origin at build time through
 Only remove project resources after verifying the exact targets:
 
 ```bash
-docker compose --profile dev down --remove-orphans
+docker compose down --remove-orphans
 docker image prune -f
 docker builder prune -f
 docker volume prune -f
