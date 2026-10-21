@@ -21,6 +21,7 @@ const themeInitScript = `
       const storedTheme = window.localStorage.getItem("prg32-theme");
       if (storedTheme === "light" || storedTheme === "dark") {
         document.documentElement.dataset.theme = storedTheme;
+        document.documentElement.classList.toggle("dark", storedTheme === "dark");
       }
     } catch {
       // localStorage may be unavailable; keep the server-rendered theme.

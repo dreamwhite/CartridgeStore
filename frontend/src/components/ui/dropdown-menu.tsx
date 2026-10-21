@@ -16,15 +16,15 @@ export function DropdownMenuContent({ className, sideOffset = 8, ...props }: Com
 }
 
 export function DropdownMenuItem({ className, inset, ...props }: ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Item> & { inset?: boolean }) {
-  return <DropdownMenuPrimitive.Item className={cn("relative flex min-h-9 cursor-default select-none items-center rounded-md px-3 py-2 text-sm outline-none transition-colors data-[disabled]:pointer-events-none data-[disabled]:opacity-40 data-[highlighted]:bg-[var(--color-primary-soft)] data-[highlighted]:text-[var(--color-text)]", inset && "pl-8", className)} {...props} />;
+  return <DropdownMenuPrimitive.Item className={cn("relative flex min-h-9 cursor-default select-none items-center rounded-md px-3 py-2 text-sm outline-none transition-colors focus-visible:!outline-none focus-visible:ring-0 data-[disabled]:pointer-events-none data-[disabled]:opacity-40 data-[highlighted]:bg-[var(--color-surface-muted)] data-[highlighted]:text-[var(--color-text)]", inset && "pl-8", className)} {...props} />;
 }
 
 export function DropdownMenuCheckboxItem({ className, children, checked, ...props }: ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.CheckboxItem>) {
-  return <DropdownMenuPrimitive.CheckboxItem checked={checked} className={cn("relative flex min-h-9 cursor-default select-none items-center rounded-md py-2 pl-8 pr-3 text-sm outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-40 data-[highlighted]:bg-[var(--color-primary-soft)]", className)} {...props}><span className="absolute left-2 flex size-4 items-center justify-center"><DropdownMenuPrimitive.ItemIndicator><Check aria-hidden="true" className="size-4" /></DropdownMenuPrimitive.ItemIndicator></span>{children}</DropdownMenuPrimitive.CheckboxItem>;
+  return <DropdownMenuPrimitive.CheckboxItem checked={checked} className={cn("relative flex min-h-9 cursor-default select-none items-center rounded-md py-2 pl-8 pr-3 text-sm outline-none focus-visible:!outline-none focus-visible:ring-0 data-[disabled]:pointer-events-none data-[disabled]:opacity-40 data-[highlighted]:bg-[var(--color-surface-muted)]", className)} {...props}><span className="absolute left-2 flex size-4 items-center justify-center"><DropdownMenuPrimitive.ItemIndicator><Check aria-hidden="true" className="size-4" /></DropdownMenuPrimitive.ItemIndicator></span>{children}</DropdownMenuPrimitive.CheckboxItem>;
 }
 
 export function DropdownMenuRadioItem({ className, children, ...props }: ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.RadioItem>) {
-  return <DropdownMenuPrimitive.RadioItem className={cn("relative flex min-h-9 cursor-default select-none items-center rounded-md py-2 pl-8 pr-3 text-sm outline-none data-[disabled]:pointer-events-none data-[disabled]:opacity-40 data-[highlighted]:bg-[var(--color-primary-soft)]", className)} {...props}><span className="absolute left-2 flex size-4 items-center justify-center"><DropdownMenuPrimitive.ItemIndicator><Circle aria-hidden="true" className="size-2 fill-current" /></DropdownMenuPrimitive.ItemIndicator></span>{children}</DropdownMenuPrimitive.RadioItem>;
+  return <DropdownMenuPrimitive.RadioItem className={cn("relative flex min-h-9 cursor-default select-none items-center rounded-md py-2 pl-8 pr-3 text-sm outline-none focus-visible:!outline-none focus-visible:ring-0 data-[disabled]:pointer-events-none data-[disabled]:opacity-40 data-[highlighted]:bg-[var(--color-surface-muted)] data-[state=checked]:text-[var(--color-primary-strong)]", className)} {...props}><span className="absolute left-2 flex size-4 items-center justify-center"><DropdownMenuPrimitive.ItemIndicator><Circle aria-hidden="true" className="size-2 fill-current" /></DropdownMenuPrimitive.ItemIndicator></span>{children}</DropdownMenuPrimitive.RadioItem>;
 }
 
 export function DropdownMenuLabel({ className, inset, ...props }: ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Label> & { inset?: boolean }) {
@@ -40,5 +40,5 @@ export function DropdownMenuShortcut({ className, ...props }: ComponentPropsWith
 }
 
 export function DropdownMenuSubTrigger({ className, children, inset, ...props }: ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.SubTrigger> & { inset?: boolean }) {
-  return <DropdownMenuPrimitive.SubTrigger className={cn("flex cursor-default select-none items-center rounded-md px-3 py-2 text-sm outline-none data-[state=open]:bg-[var(--color-primary-soft)] data-[highlighted]:bg-[var(--color-primary-soft)]", inset && "pl-8", className)} {...props}>{children}<ChevronRight aria-hidden="true" className="ml-auto size-4" /></DropdownMenuPrimitive.SubTrigger>;
+  return <DropdownMenuPrimitive.SubTrigger className={cn("flex cursor-default select-none items-center rounded-md px-3 py-2 text-sm outline-none focus-visible:!outline-none focus-visible:ring-0 data-[state=open]:bg-[var(--color-surface-muted)] data-[highlighted]:bg-[var(--color-surface-muted)]", inset && "pl-8", className)} {...props}>{children}<ChevronRight aria-hidden="true" className="ml-auto size-4" /></DropdownMenuPrimitive.SubTrigger>;
 }

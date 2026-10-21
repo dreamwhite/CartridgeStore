@@ -1,12 +1,13 @@
 "use client";
 
-import { Save } from "lucide-react";
-import { useMemo, useState } from "react";
+import { CheckCircle2, Save } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
 
 import { Button } from "../../ui/button";
 import { Notice } from "../admin-ui";
 import { publicApiPath } from "../../../lib/api/origin";
 import type { ManagedAssetKind } from "../../../lib/runtime-assets";
+import { StatusMessage } from "../../ui/status";
 import type { SettingsSectionId } from "./settings-sections";
 import {
   SettingsSectionContent,
@@ -33,6 +34,12 @@ export function SettingsPanel({
   const [smtpRecipient, setSmtpRecipient] = useState("admin@example.test");
   const [smtpLog, setSmtpLog] = useState<SmtpLogEntry[]>([]);
   const [success, setSuccess] = useState("");
+
+  useEffect(() => {
+    if (!success) return;
+    const timeout = window.setTimeout(() => setSuccess(""), 3500);
+    return () => window.clearTimeout(timeout);
+  }, [success]);
 
   const initialValues = useMemo(
     () =>
@@ -100,7 +107,7 @@ export function SettingsPanel({
       {
         onSuccess: () => {
           setSmtpPassword("");
-          setSuccess("Settings salvate.");
+          setSuccess("Settings saved.");
         },
       },
     );
@@ -161,7 +168,19 @@ export function SettingsPanel({
 
   return (
     <div className="space-y-6">
-      <Notice error={error} success={success} />
+      <Notice error={error} />
+      {success ? (
+        <div className="pointer-events-none fixed inset-x-4 top-24 z-50 flex justify-end sm:right-6 sm:left-auto">
+          <StatusMessage
+            tone="success"
+            aria-live="polite"
+            className="flex items-center gap-2 px-3 py-2 shadow-lg"
+          >
+            <CheckCircle2 aria-hidden="true" className="size-4" />
+            {success}
+          </StatusMessage>
+        </div>
+      ) : null}
       {query.isLoading ? (
         <p>Loading settings…</p>
       ) : (

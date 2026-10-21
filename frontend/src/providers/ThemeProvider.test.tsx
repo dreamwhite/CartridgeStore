@@ -18,5 +18,6 @@ describe("ThemeProvider", () => {
 
     await waitFor(() => expect(screen.getByRole("button", { name: "Switch to dark theme" })).toBeInTheDocument());
     expect(document.documentElement.dataset.theme).toBe("light");
+    expect(document.documentElement).not.toHaveClass("dark");
   });
 });
