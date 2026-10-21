@@ -6,6 +6,7 @@ import {
   ArrowUpRight,
   BarChart3,
   Box,
+  ClipboardList,
   ChevronDown,
   FolderKanban,
   LayoutDashboard,
@@ -21,6 +22,8 @@ import {
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState } from "react";
+
+import { useCurrentUser } from "../../lib/auth/use-current-user";
 
 type DashboardNavChild = {
   label: string;
@@ -40,7 +43,8 @@ const dashboardNav: DashboardNavItem[] = [
   { label: "Overview", href: "/dashboard", icon: LayoutDashboard, section: "Workspace" },
   { label: "My cartridges", href: "/dashboard/cartridges", icon: Box, section: "Workspace" },
   { label: "Drafts", href: "/dashboard/drafts", icon: FolderKanban, section: "Workspace" },
-  { label: "Statistics", href: "/stats", icon: BarChart3, section: "Workspace" },
+  { label: "Statistics", href: "/dashboard/statistics", icon: BarChart3, section: "Workspace" },
+  { label: "Audit trail", href: "/dashboard/audit", icon: ClipboardList, section: "Workspace" },
   {
     label: "Settings",
     href: "/dashboard/settings",
@@ -62,12 +66,15 @@ const dashboardNav: DashboardNavItem[] = [
 
 export function DashboardNav({ canSubmit }: { canSubmit: boolean }) {
   const pathname = usePathname();
+  const current = useCurrentUser();
+  const canViewAudit = current.user?.role === "admin" || Boolean(current.user?.permissions?.includes("settings:read"));
+  const visibleNav = canViewAudit ? dashboardNav : dashboardNav.filter((item) => item.href !== "/dashboard/audit");
   const showPublishCta = canSubmit && pathname === "/dashboard";
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
 
   return (
     <nav aria-label="Developer dashboard" className="space-y-0.5">
-      {dashboardNav.map((item, index) => {
+      {visibleNav.map((item, index) => {
         const Icon = item.icon;
         const childActive = item.children?.some(
           (child) => pathname === child.href || pathname.startsWith(`${child.href}/`),
@@ -79,7 +86,7 @@ export function DashboardNav({ canSubmit }: { canSubmit: boolean }) {
 
         return (
           <div key={item.href}>
-            {(index === 0 || dashboardNav[index - 1]?.section !== item.section) && (
+            {(index === 0 || visibleNav[index - 1]?.section !== item.section) && (
               <p className={`${index === 0 ? "" : "mt-4"} mb-1.5 px-3 text-[0.65rem] font-bold uppercase tracking-[0.18em] text-[var(--color-text-muted)]`}>
                 {item.section}
               </p>

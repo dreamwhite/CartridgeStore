@@ -90,7 +90,20 @@ function legacyVariant(sqlite: Database.Database, releaseId: string, architectur
   if (!row) return null;
   const compatibility = recordValue(jsonParse(row.compatibility_json, {}));
   const legacy = recordValue(compatibility?.legacyPublicVariant);
-  return legacy ?? { architecture, size: Number(row.size_bytes), sha256: String(row.sha256), has_screenshot: false, has_signature: false };
+  const media = sqlite.prepare(
+    `SELECT m.kind, o.media_type
+       FROM media m JOIN storage_objects o ON o.object_id = m.object_id
+      WHERE m.release_id = ? AND m.kind IN ('icon', 'screenshot')
+        AND o.state = 'available' AND (m.architecture = ? OR m.architecture = '')
+      ORDER BY CASE WHEN m.architecture = ? THEN 0 ELSE 1 END`
+  ).all(releaseId, architecture, architecture) as Array<{ kind?: string; media_type?: string }>;
+  const icon = media.find((item) => item.kind === "icon");
+  const screenshot = media.find((item) => item.kind === "screenshot");
+  return {
+    ...(legacy ?? { architecture, size: Number(row.size_bytes), sha256: String(row.sha256), has_screenshot: false, has_signature: false }),
+    ...(icon?.media_type ? { icon_mime: icon.media_type } : {}),
+    ...(screenshot?.media_type ? { screenshot_mime: screenshot.media_type, has_screenshot: true } : {})
+  };
 }
 
 function matchesQuery(game: JsonRecord, needle: string): boolean {
@@ -189,6 +202,15 @@ export class CanonicalCatalog {
       if (!value) throw new CatalogError("artifact is unavailable");
       variants[item.architecture] = value;
     }
+    const publisherUserId = typeof cartridge.publisher_user_id === "number"
+      ? cartridge.publisher_user_id
+      : typeof currentRelease.created_by_user_id === "number"
+        ? currentRelease.created_by_user_id
+        : null;
+    const publisher = publisherUserId === null
+      ? null
+      : this.resource.sqlite.prepare("SELECT username FROM users WHERE id = ?").get(publisherUserId) as { username?: string } | undefined;
+
     return {
       id: cartridgeId,
       title: String(currentRelease.title),
@@ -202,7 +224,7 @@ export class CanonicalCatalog {
       metadata: jsonParse(selectedRelease.metadata_json, null),
       colophon: selectedRelease.colophon_json ? jsonParse(selectedRelease.colophon_json, null) : null,
       variants,
-      publisher: "",
+      publisher: typeof publisher?.username === "string" ? publisher.username : "",
       updated_at: String(currentRelease.published_at ?? currentRelease.created_at)
     };
   }

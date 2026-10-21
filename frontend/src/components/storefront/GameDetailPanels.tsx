@@ -30,7 +30,7 @@ function controlEntries(colophon: ColophonValue | null): Array<{
 }
 
 /** Renders the playable controls published in a cartridge colophon. */
-export function ColophonControls({ colophon }: { colophon: Game["colophon"] }) {
+export function ColophonControls({ colophon, compact = false }: { colophon: Game["colophon"]; compact?: boolean }) {
   const value = recordValue(colophon);
   const controls = controlEntries(value);
   const subtitle = stringValue(value?.subtitle);
@@ -39,7 +39,7 @@ export function ColophonControls({ colophon }: { colophon: Game["colophon"] }) {
   if (controls.length === 0 && !subtitle && !developer) return null;
 
   return (
-    <section className="mt-6 border-t border-[var(--color-border)] pt-5">
+    <section className={compact ? "" : "mt-6 border-t border-[var(--color-border)] pt-5"}>
       <div className="flex items-start gap-3">
         <span
           className="grid size-9 shrink-0 place-items-center rounded-lg
@@ -109,6 +109,7 @@ function metadataEntries(metadata: Record<string, unknown> | null) {
   return Object.entries(metadata).filter(
     ([key, value]) =>
       !duplicateFields.has(key) &&
+      key !== "description" &&
       ["string", "number", "boolean"].includes(typeof value),
   );
 }
@@ -120,10 +121,11 @@ function MetadataValue({ value }: { value: string }) {
         href={value}
         target="_blank"
         rel="noopener noreferrer"
-        className="inline-flex max-w-full items-center gap-1 break-all
+        className="inline-flex min-w-0 max-w-full items-center gap-1 overflow-hidden
           text-[var(--color-primary-strong)] hover:underline"
+        title={value}
       >
-        <span>{value}</span>
+        <span className="truncate">{value}</span>
         <ExternalLink aria-hidden="true" className="size-3.5 shrink-0" />
       </a>
     );
@@ -135,13 +137,15 @@ function MetadataValue({ value }: { value: string }) {
 /** Renders the non-duplicated technical fields published in cartridge metadata. */
 export function TechnicalMetadata({
   metadata,
+  className,
 }: {
   metadata: Game["metadata"];
+  className?: string;
 }) {
   const entries = metadataEntries(metadata);
 
   return (
-    <Card className="mt-6">
+    <Card className={className ? `mt-6 ${className}` : "mt-6"}>
       <CardHeader>
         <div className="flex items-start gap-3">
           <span
