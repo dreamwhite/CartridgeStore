@@ -12,5 +12,5 @@ export {
   ScorePreviewSkeleton,
   StatisticsError,
 } from "./scores";
-export { EmptyChart, SkeletonBlock, StatCard } from "./shared";
+export { ChartTooltip, EmptyChart, SkeletonBlock, StatCard } from "./shared";
 export { Download, Gamepad2 } from "lucide-react";

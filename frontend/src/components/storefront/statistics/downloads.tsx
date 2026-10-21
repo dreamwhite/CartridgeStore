@@ -1,7 +1,10 @@
+"use client";
+
 import type { DownloadSeriesPoint } from "../../../lib/api/contracts";
+import { useState } from "react";
 
 import { formatChartDate, formatStatisticsNumber } from "./formatters";
-import { SkeletonBlock } from "./shared";
+import { ChartTooltip, SkeletonBlock } from "./shared";
 
 export type DownloadRange = "week" | "month" | "year" | "all";
 
@@ -49,6 +52,7 @@ export function DownloadTrend({
   range: DownloadRange;
   onRangeChange: (range: DownloadRange) => void;
 }) {
+  const [activeDate, setActiveDate] = useState<string | null>(null);
   const ordered = [...series].sort((left, right) =>
     left.date.localeCompare(right.date),
   );
@@ -77,6 +81,7 @@ export function DownloadTrend({
     ? ordered.map((_, index) => index)
     : [0, Math.floor((ordered.length - 1) / 2), ordered.length - 1];
   const gridRatios = [0, 0.5, 1];
+  const activePoint = points.find((point) => point.date === activeDate);
 
   return (
     <div>
@@ -115,12 +120,13 @@ export function DownloadTrend({
             ))}
           </div>
         </div>
-        <svg
-          className="h-auto w-full"
-          viewBox={`0 0 ${width} ${height}`}
-          role="img"
-          aria-labelledby="download-chart-title download-chart-description"
-        >
+        <div className="relative">
+          <svg
+            className="h-auto w-full"
+            viewBox={`0 0 ${width} ${height}`}
+            role="img"
+            aria-labelledby="download-chart-title download-chart-description"
+          >
           <title id="download-chart-title">Downloads by day</title>
           <desc id="download-chart-description">
             Daily download events for the selected period.
@@ -167,19 +173,30 @@ export function DownloadTrend({
             strokeWidth="3"
           />
           {points.map((point) => (
-            <circle
+            <g
               key={point.date}
-              cx={point.x}
-              cy={point.y}
-              r="5"
-              fill="var(--color-surface)"
-              stroke="var(--color-primary)"
-              strokeWidth="3"
+              tabIndex={0}
+              role="img"
+              aria-label={`${formatChartDate(point.date)}: ${formatStatisticsNumber(point.downloads)} downloads`}
+              onMouseEnter={() => setActiveDate(point.date)}
+              onMouseLeave={() => setActiveDate(null)}
+              onFocus={() => setActiveDate(point.date)}
+              onBlur={() => setActiveDate(null)}
             >
-              <title>
-                {`${formatChartDate(point.date)}: ${formatStatisticsNumber(point.downloads)} downloads`}
-              </title>
-            </circle>
+              <circle cx={point.x} cy={point.y} r="11" fill="transparent" />
+              <circle
+                cx={point.x}
+                cy={point.y}
+                r="5"
+                fill="var(--color-surface)"
+                stroke="var(--color-primary)"
+                strokeWidth="3"
+              >
+                <title>
+                  {`${formatChartDate(point.date)}: ${formatStatisticsNumber(point.downloads)} downloads`}
+                </title>
+              </circle>
+            </g>
           ))}
           {labelIndexes.map((index) => {
             const point = points[index];
@@ -201,7 +218,23 @@ export function DownloadTrend({
               </text>
             );
           })}
-        </svg>
+          </svg>
+          {activePoint && (
+            <div
+              className="pointer-events-none absolute"
+              style={{
+                left: `${(activePoint.x / width) * 100}%`,
+                top: `${(activePoint.y / height) * 100}%`,
+              }}
+            >
+              <ChartTooltip
+                label={formatChartDate(activePoint.date)}
+                value={`${formatStatisticsNumber(activePoint.downloads)} downloads`}
+                className="-translate-x-1/2 -translate-y-[calc(100%+0.75rem)]"
+              />
+            </div>
+          )}
+        </div>
         {ordered.length === 0 && (
           <div className="pointer-events-none absolute inset-x-16 top-1/2 -translate-y-1/2 text-center">
             <p className="text-sm font-semibold">No activity yet</p>

@@ -1,7 +1,8 @@
 import { Activity, CheckCircle2, Gauge } from "lucide-react";
 
 import { formatStatisticsNumber } from "./formatters";
-import { SkeletonBlock } from "./shared";
+import { ChartTooltip, SkeletonBlock } from "./shared";
+import { useState } from "react";
 
 /** Renders the run completion summary. */
 export function RunHealth({
@@ -13,6 +14,7 @@ export function RunHealth({
   finished: number;
   active: number;
 }) {
+  const [showTooltip, setShowTooltip] = useState(false);
   const completion = total > 0 ? Math.min((finished / total) * 100, 100) : 0;
   return (
     <div
@@ -22,8 +24,16 @@ export function RunHealth({
         "sm:justify-center sm:gap-10",
       ].join(" ")}
     >
+      <div className="relative">
       <div
-        className="grid size-28 place-items-center rounded-full border-[10px] border-[var(--color-surface-muted)]"
+        className="grid size-28 place-items-center rounded-full border-[10px] border-[var(--color-surface-muted)] outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-primary)]"
+        tabIndex={0}
+        role="img"
+        aria-label={`${formatStatisticsNumber(finished)} of ${formatStatisticsNumber(total)} runs completed (${Math.round(completion)}%)`}
+        onMouseEnter={() => setShowTooltip(true)}
+        onMouseLeave={() => setShowTooltip(false)}
+        onFocus={() => setShowTooltip(true)}
+        onBlur={() => setShowTooltip(false)}
         style={{
           background: `conic-gradient(var(--color-primary) ${completion}%, transparent 0)`,
         }}
@@ -41,6 +51,8 @@ export function RunHealth({
             finished
           </span>
         </div>
+      </div>
+      {showTooltip && <div className="absolute bottom-[calc(100%+0.65rem)] left-1/2 -translate-x-1/2"><ChartTooltip label="Run completion" value={`${formatStatisticsNumber(finished)} / ${formatStatisticsNumber(total)} completed`} /></div>}
       </div>
       <div className="space-y-3">
         <div className="flex items-center justify-between gap-4">

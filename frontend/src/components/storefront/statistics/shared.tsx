@@ -77,6 +77,31 @@ export function EmptyChart({
   );
 }
 
+/** Small, high-contrast tooltip shared by interactive statistics visuals. */
+export function ChartTooltip({
+  label,
+  value,
+  className = "",
+}: {
+  label: string;
+  value: string;
+  className?: string;
+}) {
+  return (
+    <div
+      role="tooltip"
+      className={[
+        "pointer-events-none z-20 min-w-max rounded-md bg-[var(--color-text)]",
+        "px-2.5 py-1.5 text-xs font-semibold text-[var(--color-surface)]",
+        "shadow-lg",
+        className,
+      ].join(" ")}
+    >
+      <p>{label} · {value}</p>
+    </div>
+  );
+}
+
 export function SkeletonBlock({ className }: { className: string }) {
   return (
     <div

@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 import { formatStatisticsNumber } from "./formatters";
-import { EmptyChart, SkeletonBlock } from "./shared";
+import { ChartTooltip, EmptyChart, SkeletonBlock } from "./shared";
 
 /** Loading state for the most-downloaded games list. */
 export function TopGamesSkeleton() {
@@ -95,19 +95,16 @@ export function TopGames({
                     width: `${Math.max((game.downloads / maximum) * 100, 4)}%`,
                   }}
                 />
-                <div
-                  role="tooltip"
+                <ChartTooltip
+                  label={game.title}
+                  value={`${formatStatisticsNumber(game.downloads)} downloads`}
                   className={[
-                    "pointer-events-none absolute bottom-[calc(100%+0.55rem)]",
-                    "left-1/2 z-10 -translate-x-1/2 translate-y-1 rounded-md",
-                    "bg-[var(--color-text)] px-2.5 py-1.5 text-xs font-semibold",
-                    "text-[var(--color-surface)] opacity-0 shadow-lg transition",
+                    "absolute bottom-[calc(100%+0.55rem)] left-1/2",
+                    "-translate-x-1/2 translate-y-1 opacity-0 transition",
                     "group-hover:translate-y-0 group-hover:opacity-100",
                     "group-focus-within:translate-y-0 group-focus-within:opacity-100",
                   ].join(" ")}
-                >
-                  {game.title} · {formatStatisticsNumber(game.downloads)} downloads
-                </div>
+                />
               </div>
             </div>
           </li>
