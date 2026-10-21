@@ -72,7 +72,7 @@ export type AdminToken = {
 export type AdminAuditEvent = {
   event_id: string;
   timestamp: string;
-  actor_user_id: number;
+  actor_user_id: number | null;
   target_type: string;
   target_id: string;
   action: string;
@@ -160,6 +160,10 @@ export type AdminCatalogResponse = AdminResponse<{ cartridge: AdminCartridge }>;
 export type AdminAuditResponse = AdminResponse<{
   events: AdminAuditEvent[];
   limit: number;
+}>;
+
+export type AdminAuditEventResponse = AdminResponse<{
+  event: AdminAuditEvent;
 }>;
 
 export type AdminPrincipalResponse = AdminResponse<{ user: Principal }>;

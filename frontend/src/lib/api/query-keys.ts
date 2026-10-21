@@ -41,9 +41,10 @@ export const adminQueryKeys = {
   tokens: (filters: { page?: number; userId?: number } = {}) => ["admin", "tokens", filters.page ?? 1, filters.userId ?? null] as const,
   tokensRoot: () => ["admin", "tokens"] as const,
   catalogRoot: () => ["admin", "catalog"] as const,
-  catalog: (filters: { moderation?: boolean } = {}) => ["admin", "catalog", filters.moderation === true ? "moderation" : "published"] as const,
+  catalog: (filters: { moderation?: boolean; page?: number; limit?: number } = {}) => ["admin", "catalog", filters.moderation === true ? "moderation" : "published", filters.page ?? 1, filters.limit ?? 24] as const,
   cartridge: (id: string | null, version?: string) => ["admin", "cartridge", id, version ?? null] as const,
   audit: (limit = 100) => ["admin", "audit", limit] as const,
+  auditEvent: (eventId: string | null) => ["admin", "audit-event", eventId] as const,
 } as const;
 
 export const catalogQueryKeys = {
@@ -65,6 +66,7 @@ export const profileQueryKeys = {
 
 export const statisticsQueryKeys = {
   downloads: (filters: { since?: string; until?: string; granularity?: string; limit?: number } = {}) => ["statistics", "downloads", filters] as const,
+  gameDownloads: (gameId: string, filters: { since?: string; until?: string; granularity?: string; limit?: number } = {}) => ["statistics", "downloads", gameId, filters] as const,
   scores: (limit = 5) => ["statistics", "scores", limit] as const,
   runs: () => ["statistics", "runs"] as const,
 } as const;

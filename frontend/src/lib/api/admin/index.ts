@@ -19,7 +19,7 @@ import {
   listAdminGroups,
   renameAdminGroup,
 } from "./groups";
-import { listAdminAudit } from "./audit";
+import { getAdminAuditEvent, listAdminAudit } from "./audit";
 import {
   getAdminSettings,
   sendAdminSmtpTestMessage,
@@ -80,6 +80,7 @@ export const adminApi = {
   deleteCartridge: deleteAdminCartridge,
   moderateCartridge: moderateAdminCartridge,
   listAudit: listAdminAudit,
+  getAuditEvent: getAdminAuditEvent,
   downloadBackup: downloadAdminBackup,
   restoreBackup: restoreAdminBackup,
 };

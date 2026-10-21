@@ -3,7 +3,7 @@ import type Database from "better-sqlite3";
 import type { BackendConfig } from "../config/env.js";
 import { AdminAuditLog } from "./audit.js";
 import { AdminGroupService } from "./group-service.js";
-import { listAdminAudit, listAdminRoles } from "./read-model.js";
+import { getAdminAudit, listAdminAudit, listAdminRoles } from "./read-model.js";
 import { AdminUserService } from "./user-service.js";
 import type {
   AdminMutationContext,
@@ -182,6 +182,11 @@ export class AdminIdentityService {
     readonly limit: number;
   } {
     return listAdminAudit(this.database, limitValue);
+  }
+
+  /** Reads one administrative audit event by stable identifier. */
+  getAudit(eventId: string): Record<string, unknown> | null {
+    return getAdminAudit(this.database, eventId);
   }
 
   private get database(): Database.Database {

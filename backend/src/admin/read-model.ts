@@ -191,3 +191,52 @@ export function listAdminAudit(
     })),
   };
 }
+
+/** Reads one administrative audit event by its stable identifier. */
+export function getAdminAudit(
+  database: Database.Database,
+  eventId: string,
+): Record<string, unknown> | null {
+  const normalizedId = eventId.trim();
+  if (!normalizedId) return null;
+  const hasTable = Boolean(
+    database
+      .prepare(
+        "SELECT 1 FROM sqlite_master " +
+          "WHERE type = 'table' AND name = 'admin_audit_events'",
+      )
+      .get(),
+  );
+  if (!hasTable) return null;
+
+  const row = database
+    .prepare(
+      "SELECT event_id, timestamp, actor_user_id, target_type, target_id, " +
+        "action, outcome, summary_json, request_id " +
+        "FROM admin_audit_events WHERE event_id = ?",
+    )
+    .get(normalizedId) as {
+    event_id: string;
+    timestamp: string;
+    actor_user_id: number | null;
+    target_type: string;
+    target_id: string;
+    action: string;
+    outcome: string;
+    summary_json: string;
+    request_id: string;
+  } | undefined;
+  if (!row) return null;
+
+  return {
+    event_id: row.event_id,
+    timestamp: row.timestamp,
+    actor_user_id: row.actor_user_id,
+    target_type: row.target_type,
+    target_id: row.target_id,
+    action: row.action,
+    outcome: row.outcome,
+    summary: parseAdminAuditSummary(row.summary_json),
+    request_id: row.request_id,
+  };
+}

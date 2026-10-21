@@ -43,6 +43,10 @@ interface AdminRouteOptions {
   readonly catalog: CatalogAdminService;
 }
 
+interface AuditEventParams {
+  readonly eventId: string;
+}
+
 const SESSION_COOKIE = "prg32_ts_session";
 
 function bearer(request: FastifyRequest): string | undefined {
@@ -270,6 +274,16 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRouteOpt
       assertFields(query, ["limit"]);
       const limit = query.limit === undefined ? 100 : positiveQuery(query.limit, "limit", 100, 200);
       return json(reply, { ok: true, ...options.identity.listAudit(limit) });
+    } catch (error) { return operationFailure(reply, request, error); }
+  });
+
+  app.get<{ Params: AuditEventParams }>("/api/admin/audit/:eventId", async (request, reply) => {
+    const current = requireAdmin(request, reply, options, "settings:read", false);
+    if (!current) return reply;
+    try {
+      const event = options.identity.getAudit(request.params.eventId);
+      if (!event) return json(reply, { ok: false, error: "audit event not found", code: "audit_event_not_found" }, 404);
+      return json(reply, { ok: true, event });
     } catch (error) { return operationFailure(reply, request, error); }
   });
 
