@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useState } from "react";
+import { useState, useSyncExternalStore } from "react";
 
 import { useCurrentUser } from "../../lib/auth/use-current-user";
 
@@ -64,10 +64,15 @@ const dashboardNav: DashboardNavItem[] = [
   { label: "Account", href: "/dashboard/account", icon: UserRound, section: "Account" },
 ];
 
+function useHydrated(): boolean {
+  return useSyncExternalStore(() => () => undefined, () => true, () => false);
+}
+
 export function DashboardNav({ canSubmit }: { canSubmit: boolean }) {
   const pathname = usePathname();
   const current = useCurrentUser();
-  const canViewAudit = current.user?.role === "admin" || Boolean(current.user?.permissions?.includes("settings:read"));
+  const hydrated = useHydrated();
+  const canViewAudit = hydrated && (current.user?.role === "admin" || Boolean(current.user?.permissions?.includes("settings:read")));
   const visibleNav = canViewAudit ? dashboardNav : dashboardNav.filter((item) => item.href !== "/dashboard/audit");
   const showPublishCta = canSubmit && pathname === "/dashboard";
   const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
