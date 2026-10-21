@@ -91,6 +91,10 @@ function settingView(database: Database.Database, key: keyof typeof SETTINGS, va
   };
 }
 
+function settingValuesEqual(left: unknown, right: unknown): boolean {
+  return Object.is(left, right) || JSON.stringify(left) === JSON.stringify(right);
+}
+
 export class SettingsService {
   private readonly databaseSource: DatabaseSource;
   private readonly writable: Database.Database | null;
@@ -340,6 +344,19 @@ export class SettingsService {
       if (error instanceof SettingsValidationError) throw error;
       throw new SettingsError("settings_invalid_value", 400, "settings patch is invalid");
     }
+    const database = this.writable;
+    const changedPatch = Object.fromEntries(
+      Object.entries(patch).filter(([key, candidate]) => !settingValuesEqual(candidate, settingValue(database, key as keyof typeof SETTINGS))),
+    ) as Partial<Record<WritableSettingKey, SettingValue>>;
+    const currentApplication = this.applicationSettings(database);
+    const changedApplicationValues = Object.fromEntries(
+      Object.entries(application.values).filter(([key, candidate]) => {
+        const current = currentApplication[key];
+        return !current || typeof current !== "object" || !("value" in current) || !settingValuesEqual(candidate, current.value);
+      }),
+    ) as Partial<Record<ApplicationSettingKey, unknown>>;
+    patch = changedPatch;
+    application = { values: changedApplicationValues, ...(application.smtpPassword === undefined ? {} : { smtpPassword: application.smtpPassword }) };
     if (Object.keys(patch).length === 0 && Object.keys(application.values).length === 0 && application.smtpPassword === undefined) return this.read();
     const requestedMdns = application.values["discovery.mdns_enabled"];
     if (requestedMdns === true && !this.config.mdnsEnabled) {
@@ -359,7 +376,6 @@ export class SettingsService {
         }
       }
     }
-    const database = this.writable;
     try {
       this.validateRuntimePatch(application.values, application.smtpPassword);
       database.exec("BEGIN IMMEDIATE");

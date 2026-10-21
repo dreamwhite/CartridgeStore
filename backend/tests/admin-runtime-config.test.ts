@@ -99,9 +99,15 @@ describe("canonical administration and runtime configuration", () => {
     expect(valid.json()).toMatchObject({ application_settings: { "registration.enabled": { value: false }, "smtp.host": { value: "mailpit" } } });
     expect(valid.body).not.toContain("must-not-leak");
 
+    const repeated = await test.app.inject({ method: "PATCH", url: "/api/admin/settings", headers: { cookie: admin.cookie, "x-csrftoken": admin.csrf }, payload: {
+      application_settings: { "application.store_description": "Disposable administration fixture", "registration.enabled": false, "smtp.host": "mailpit", "smtp.port": 1025, "smtp.encryption": "none", "publishing.enabled": false }
+    } });
+    expect(repeated.statusCode).toBe(200);
+
     const db = new Database(test.databasePath, { readonly: true });
     expect(db.prepare("SELECT value_json FROM application_settings WHERE setting_key = 'registration.enabled'").get()).toEqual({ value_json: "false" });
-    expect(Number((db.prepare("SELECT COUNT(*) AS count FROM admin_audit_events WHERE action = 'settings.update'").get() as { count: number }).count)).toBeGreaterThan(0);
+    const latestAudit = db.prepare("SELECT summary_json FROM admin_audit_events WHERE action = 'settings.update' ORDER BY timestamp DESC, event_id DESC LIMIT 1").get() as { summary_json: string };
+    expect(JSON.parse(latestAudit.summary_json)).toEqual({ keys: ["publishing.enabled"] });
     db.close();
   });
 

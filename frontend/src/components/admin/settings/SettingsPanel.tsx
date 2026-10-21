@@ -77,13 +77,20 @@ export function SettingsPanel({
     setTypedDraft((current) => ({ ...typedValues, ...current, [key]: value }));
   }
 
+  function changedValues(current: SettingValues, initial: SettingValues): SettingValues {
+    return Object.fromEntries(
+      Object.entries(current).filter(([key, value]) => !Object.is(value, initial[key])),
+    );
+  }
+
   function saveSettings() {
     setSuccess("");
-    const applicationSettings = smtpPassword
-      ? { ...typedValues, "smtp.password": smtpPassword }
-      : typedValues;
+    const applicationSettings = {
+      ...changedValues(typedValues, initialTypedValues),
+      ...(smtpPassword ? { "smtp.password": smtpPassword } : {}),
+    };
     update.mutate(
-      { ...values, application_settings: applicationSettings },
+      { ...changedValues(values, initialValues), application_settings: applicationSettings },
       {
         onSuccess: () => {
           setSmtpPassword("");
