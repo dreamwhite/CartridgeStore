@@ -1,0 +1,28 @@
+@import "tailwindcss";
+@import "fumadocs-ui/css/neutral.css";
+@import "fumadocs-ui/css/preset.css";
+
+/* Keep the documentation-area switcher above search, like the Fumadocs hub pattern. */
+#nd-sidebar > div.flex.flex-col.gap-3.p-4.pb-2 > :nth-child(2),
+#nd-sidebar-mobile > div.flex.flex-col.gap-3.p-4.pb-2 > :nth-child(2) {
+  order: 3;
+}
+
+#nd-sidebar > div.flex.flex-col.gap-3.p-4.pb-2 > :nth-child(3),
+#nd-sidebar-mobile > div.flex.flex-col.gap-3.p-4.pb-2 > :nth-child(3) {
+  order: 2;
+}
+
+:root {
+  color-scheme: light;
+}
+
+html,
+body {
+  min-width: 320px;
+}
+
+body {
+  margin: 0;
+  background: var(--color-fd-background);
+}

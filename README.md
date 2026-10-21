@@ -8,7 +8,8 @@ runtime is a Fastify/TypeScript API paired with a Next.js frontend.
 The local dnsmasq-managed `.dream.test` records expose the standalone Nginx
 edge at:
 
-- <https://store.prg32.dream.test> — Next.js frontend;
+- <https://store.prg32.dream.test> — Next.js storefront and dashboard;
+- <https://store.prg32.dream.test/docs> — dedicated Fumadocs documentation service;
 - <https://api.prg32.dream.test> — Fastify API and WebSocket relay.
 
 The backend attaches to the external `dream_mail` Docker network so it can use

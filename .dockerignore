@@ -16,6 +16,16 @@ frontend/node_modules
 frontend/.next
 frontend/coverage
 frontend/tsconfig.tsbuildinfo
+frontend/*
+!frontend/content/
+!frontend/content/**
+backend/node_modules
+docs-site/node_modules
+docs-site/.next
+cli
+docs
+tests
+deploy
 dist
 build
 .DS_Store

@@ -89,6 +89,33 @@ services:
       retries: 12
       start_period: 15s
 
+  docs:
+    build:
+      context: .
+      dockerfile: docs-site/Dockerfile.dev
+    image: riscv-prg32/cartridge-store-docs:dev
+    command: ["sh", "-c", "pnpm install --frozen-lockfile && exec pnpm exec next dev --hostname 0.0.0.0"]
+    environment:
+      NODE_ENV: development
+      NEXT_TELEMETRY_DISABLED: "1"
+      WATCHPACK_POLLING: "true"
+      WATCHPACK_POLLING_INTERVAL: "1000"
+      NEXT_PUBLIC_PRG32_STORE_ORIGIN: ${PRG32_STORE_ORIGIN:-https://store.prg32.dream.test}
+    volumes:
+      - ./docs-site:/app
+      - ./frontend/content/docs:/app/content/docs
+      - ${PRG32_DOCS_NODE_MODULES_DIR:-./.local/docs/node_modules}:/app/node_modules
+      - ${PRG32_DOCS_SOURCE_DIR:-./.local/docs/source}:/app/.source
+      - ${PRG32_DOCS_NEXT_CACHE_DIR:-./.local/docs/next-cache}:/app/.next
+    networks:
+      - app
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/docs/health').then(response => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 15s
+
   nginx:
     image: nginx:1.27-alpine
     environment:
@@ -99,6 +126,8 @@ services:
       backend:
         condition: service_healthy
       next:
+        condition: service_healthy
+      docs:
         condition: service_healthy
     ports:
       - "${PRG32_HTTP_BIND:-0.0.0.0}:${PRG32_HTTP_PORT:-80}:80"

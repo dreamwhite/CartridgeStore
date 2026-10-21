@@ -79,12 +79,14 @@ docker compose \
   --env-file /path/to/dream-platform/.env \
   -f docker-compose.yml \
   -f docker-compose.dream-platform.yml \
-  up -d --build backend next
+  up -d --build backend next docs
 ```
 
 In this mode:
 
-- `backend` and `next` join `dream_edge` and receive Traefik labels;
+- `backend`, `next` and `docs` join `dream_edge` and receive Traefik labels;
+- `docs` owns the higher-priority `store.prg32.dream.test/docs` route and runs
+  Fumadocs independently from the Store UI;
 - only `backend` also joins `dream_mail`;
 - the local Nginx service is assigned the `standalone` profile and is not started;
 - Traefik continues to own host ports 80 and 443.

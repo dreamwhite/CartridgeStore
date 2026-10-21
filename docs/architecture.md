@@ -3,13 +3,15 @@
 ## Runtime topology
 
 ```text
-                    Local Nginx edge
+                    Local Nginx edge / Dream Traefik
                               │
                  ┌────────────┼────────────┐
                  │                         │
        store.prg32.dream.test      api.prg32.dream.test
                  │                         │
              Next.js :3000             Fastify :5090
+                 │
+          `/docs` → Fumadocs :3000
                  │                         │
                  └────── browser API ────┘
                               │
@@ -24,12 +26,13 @@ authentication, catalog, publication, telemetry, statistics and discovery.
 
 ## Local Compose
 
-The development Compose file has three services:
+The development Compose file has four application services plus the selected edge:
 
 | Service | Responsibility |
 | --- | --- |
 | `backend` | Fastify API, canonical SQLite and filesystem store |
 | `next` | Next.js development server and UI |
+| `docs` | Dedicated Next.js/Fumadocs documentation service |
 | `nginx` | Local TLS termination, host routing and WebSocket forwarding |
 
 The backend also joins the external `dream_mail` network, where Dream Platform
@@ -48,7 +51,8 @@ operator-controlled data root.
 | `/api/multiplayer*` | Fastify WebSocket/HTTP relay |
 | `/auth/*` | Fastify authentication and federation |
 | `/api/admin/*`, `/api/setup/*` | Fastify administration and setup |
-| `/`, `/login`, `/dashboard/*`, `/docs` | Next.js |
+| `/`, `/login`, `/dashboard/*` | Next.js |
+| `/docs*` | Dedicated Fumadocs service |
 
 The public firmware routes, discovery document, binary format, WebSocket
 messages and SQLite schema are compatibility boundaries.
@@ -75,5 +79,5 @@ templates use `/data/canonical` and Docker secrets for sensitive values.
 ## Readiness
 
 Fastify exposes `/health` for liveness and `/ready` for database readiness.
-Next exposes `/health`. The edge should route only after both services are
-healthy.
+Next and the documentation service expose health endpoints. The edge should
+route only after all application services are healthy.

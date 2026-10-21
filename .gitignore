@@ -169,9 +169,14 @@ venv.bak/
 frontend/node_modules/
 frontend/.next/
 frontend/.next-*/
+frontend/.source/
 frontend/out/
 frontend/coverage/
 frontend/test-results/
+docs-site/.next/
+docs-site/.source/
+docs-site/coverage/
+docs-site/.DS_Store
 *.tsbuildinfo
 .dev-data/
 .local/
@@ -179,6 +184,7 @@ frontend/test-results/
 # Local Node and pnpm artifacts
 node_modules/
 pnpm-lock.yaml
+!docs-site/pnpm-lock.yaml
 
 # Spyder project settings
 .spyderproject
