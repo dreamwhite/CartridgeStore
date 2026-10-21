@@ -107,7 +107,10 @@ describe("canonical administration and runtime configuration", () => {
     const db = new Database(test.databasePath, { readonly: true });
     expect(db.prepare("SELECT value_json FROM application_settings WHERE setting_key = 'registration.enabled'").get()).toEqual({ value_json: "false" });
     const latestAudit = db.prepare("SELECT summary_json FROM admin_audit_events WHERE action = 'settings.update' ORDER BY timestamp DESC, event_id DESC LIMIT 1").get() as { summary_json: string };
-    expect(JSON.parse(latestAudit.summary_json)).toEqual({ keys: ["publishing.enabled"] });
+    expect(JSON.parse(latestAudit.summary_json)).toMatchObject({
+      keys: ["publishing.enabled"],
+      changes: [{ key: "publishing.enabled", before: true, after: false }],
+    });
     db.close();
   });
 

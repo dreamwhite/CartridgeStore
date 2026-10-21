@@ -1,9 +1,12 @@
 import type { ChangeEvent } from "react";
 
+import { HelpTooltip } from "./help-tooltip";
+
 type SwitchProps = {
   checked: boolean;
   label: string;
   description?: string;
+  help?: string;
   disabled?: boolean;
   onChange: (checked: boolean) => void;
 };
@@ -13,6 +16,7 @@ export function Switch({
   checked,
   label,
   description,
+  help,
   disabled = false,
   onChange,
 }: SwitchProps) {
@@ -23,7 +27,7 @@ export function Switch({
   return (
     <label className="flex items-center justify-between gap-5 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3">
       <span className="min-w-0">
-        <span className="block text-sm font-semibold">{label}</span>
+        <span className="flex items-center gap-1.5 text-sm font-semibold">{label}{help ? <HelpTooltip label={label} text={help} /> : null}</span>
         {description ? (
           <span className="mt-1 block text-xs leading-5 text-[var(--color-text-muted)]">
             {description}

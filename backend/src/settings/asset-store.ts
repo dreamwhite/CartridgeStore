@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import sharp from "sharp";
 
 import type Database from "better-sqlite3";
 
@@ -17,6 +18,12 @@ interface AssetStoreOptions {
   readonly writableDatabase: Database.Database | null;
   readonly directory: string;
   readonly fault?: (point: "after-asset-publish") => void;
+}
+
+interface NormalizedAsset {
+  readonly data: Buffer;
+  readonly extension: "webp" | "png" | "ico";
+  readonly mimeType: "image/webp" | "image/png" | "image/x-icon";
 }
 
 /** Resolves and publishes managed logo and favicon files. */
@@ -81,15 +88,15 @@ export class SettingsAssetStore {
     return null;
   }
 
-  replace(
+  async replace(
     kind: AssetKind,
     data: Uint8Array,
-  ): {
+  ): Promise<{
     readonly kind: AssetKind;
     readonly url: string;
     readonly mime_type: string;
     readonly size: number;
-  } {
+  }> {
     if (!this.writable) {
       throw new SettingsError(
         "settings_unavailable",
@@ -115,10 +122,11 @@ export class SettingsAssetStore {
         `${kind} must be a valid PNG, JPEG, WebP, or favicon ICO`,
       );
     }
+    const normalized = await normalizeAsset(kind, data, detected.extension);
     this.assertRegularDirectory();
     const key = kind === "logo" ? "theme_logo_url" : "theme_favicon_url";
     const previous = this.rawValue(this.writable, key) ?? "";
-    const filename = `${kind}-${crypto.randomBytes(16).toString("hex")}.${detected.extension}`;
+    const filename = `${kind}-${crypto.randomBytes(16).toString("hex")}.${normalized.extension}`;
     const staging = path.join(this.directory, `.staging-${filename}`);
     const finalPath = path.join(this.directory, filename);
     const url = `/api/assets/${kind}/${filename}`;
@@ -127,7 +135,7 @@ export class SettingsAssetStore {
     try {
       const fd = fs.openSync(staging, "wx", 0o600);
       try {
-        fs.writeFileSync(fd, data);
+        fs.writeFileSync(fd, normalized.data);
         fs.fsyncSync(fd);
       } finally {
         fs.closeSync(fd);
@@ -159,7 +167,7 @@ export class SettingsAssetStore {
           // Orphan cleanup is best effort after the active reference is safe.
         }
       }
-      return { kind, url, mime_type: detected.mimeType, size: data.byteLength };
+      return { kind, url, mime_type: normalized.mimeType, size: normalized.data.byteLength };
     } catch (error) {
       if (this.writable.inTransaction) this.writable.exec("ROLLBACK");
       const current = this.rawValue(this.writable, key);
@@ -187,6 +195,52 @@ export class SettingsAssetStore {
     }
   }
 
+  /** Removes the configured asset and its persisted file, if present. */
+  remove(kind: AssetKind): { readonly kind: AssetKind; readonly deleted: boolean } {
+    if (!this.writable) {
+      throw new SettingsError(
+        "settings_unavailable",
+        503,
+        "settings write isolation is unavailable",
+      );
+    }
+    const key = kind === "logo" ? "theme_logo_url" : "theme_favicon_url";
+    const previous = this.rawValue(this.writable, key) ?? "";
+    const activePath = this.pathFromValue(kind, previous);
+    const hadAsset = Boolean(previous || activePath);
+
+    this.writable.exec("BEGIN IMMEDIATE");
+    try {
+      this.writable.prepare("DELETE FROM store_settings WHERE key = ?").run(key);
+      this.writable.exec("COMMIT");
+    } catch (error) {
+      if (this.writable.inTransaction) this.writable.exec("ROLLBACK");
+      throw new SettingsError(
+        "asset_publication_failed",
+        503,
+        `${kind} asset removal failed`,
+        { cause: error },
+      );
+    }
+
+    if (activePath) {
+      try {
+        const stats = fs.lstatSync(activePath);
+        if (stats.isFile() && !stats.isSymbolicLink()) fs.unlinkSync(activePath);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+          throw new SettingsError(
+            "asset_publication_failed",
+            503,
+            `${kind} asset removal failed`,
+            { cause: error },
+          );
+        }
+      }
+    }
+    return { kind, deleted: hadAsset };
+  }
+
   private rawValue(database: Database.Database, key: string): string | undefined {
     const row = database
       .prepare("SELECT value FROM store_settings WHERE key = ?")
@@ -196,11 +250,20 @@ export class SettingsAssetStore {
 
   private pathFromValue(kind: AssetKind, stored: string): string | null {
     const prefix = `/api/assets/${kind}/`;
-    if (!stored.startsWith(prefix)) return null;
-    const filename = stored.slice(prefix.length);
-    return isSafeAssetFilename(kind, filename)
-      ? path.resolve(this.directory, filename)
-      : null;
+    if (stored.startsWith(prefix)) {
+      const filename = stored.slice(prefix.length);
+      return isSafeAssetFilename(kind, filename)
+        ? path.resolve(this.directory, filename)
+        : null;
+    }
+    const legacyPrefix = "/static/custom/";
+    if (stored.startsWith(legacyPrefix)) {
+      const filename = stored.slice(legacyPrefix.length);
+      return /^[A-Za-z0-9._-]+$/.test(filename)
+        ? path.resolve(this.directory, filename)
+        : null;
+    }
+    return null;
   }
 
   private assertRegularDirectory(): void {
@@ -234,5 +297,32 @@ export class SettingsAssetStore {
         "asset storage is unavailable",
       );
     }
+  }
+}
+
+async function normalizeAsset(
+  kind: AssetKind,
+  data: Uint8Array,
+  extension: "png" | "jpg" | "webp" | "ico",
+): Promise<NormalizedAsset> {
+  // ICO is already the browser-native favicon format. Sharp does not decode
+  // every ICO variant reliably, so preserve it rather than rejecting a valid
+  // favicon upload.
+  if (kind === "favicon" && extension === "ico") {
+    return { data: Buffer.from(data), extension: "ico", mimeType: "image/x-icon" };
+  }
+  try {
+    const image = sharp(data, { failOn: "error", limitInputPixels: 40_000_000 });
+    const pipeline = kind === "favicon"
+      ? image.resize({ width: 512, height: 512, fit: "contain", withoutEnlargement: true, background: { r: 0, g: 0, b: 0, alpha: 0 } })
+      : image.resize({ width: 1600, height: 1600, fit: "inside", withoutEnlargement: true });
+    if (kind === "favicon") {
+      const normalized = await pipeline.png({ compressionLevel: 9 }).toBuffer();
+      return { data: normalized, extension: "png", mimeType: "image/png" };
+    }
+    const normalized = await pipeline.webp({ quality: 84, effort: 4 }).toBuffer();
+    return { data: normalized, extension: "webp", mimeType: "image/webp" };
+  } catch (error) {
+    throw new SettingsError("asset_invalid_type", 400, `${kind} could not be decoded as an image`, { cause: error });
   }
 }

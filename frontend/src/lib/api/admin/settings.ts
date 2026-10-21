@@ -72,4 +72,16 @@ export function uploadAdminAsset(
   });
 }
 
+/** Removes a managed application asset and restores the bundled fallback. */
+export function deleteAdminAsset(
+  kind: "logo" | "favicon",
+): Promise<AdminResponse<{ asset: { kind: string; deleted: boolean } }>> {
+  return jsonMutation().then((headers) =>
+    adminRequest(`/api/admin/settings/assets/${kind}`, {
+      method: "DELETE",
+      headers,
+    }),
+  );
+}
+
 export { csrfResponseSchema };

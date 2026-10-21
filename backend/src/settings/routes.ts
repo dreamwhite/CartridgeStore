@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import fs from "node:fs";
 import path from "node:path";
+import sharp from "sharp";
 
 import type { FastifyInstance, FastifyReply, FastifyRequest } from "fastify";
 
@@ -165,7 +166,7 @@ async function readAssetUpload(request: FastifyRequest, kind: AssetKind): Promis
   return { data: Buffer.concat(chunks, total), csrfToken: formCsrfToken };
 }
 
-function serveAsset(reply: FastifyReply, settings: SettingsService, kind: AssetKind, filename?: string): FastifyReply {
+async function serveAsset(reply: FastifyReply, settings: SettingsService, kind: AssetKind, filename?: string): Promise<FastifyReply> {
   const asset = settings.assetPath(kind);
   if (!asset || (filename !== undefined && path.basename(asset.path) !== filename)) {
     return json(reply, { ok: false, error: "asset not found", code: "asset_not_found" }, 404);
@@ -174,6 +175,16 @@ function serveAsset(reply: FastifyReply, settings: SettingsService, kind: AssetK
     const stats = fs.lstatSync(asset.path);
     if (!stats.isFile() || stats.isSymbolicLink()) {
       return json(reply, { ok: false, error: "asset not found", code: "asset_not_found" }, 404);
+    }
+    if (kind === "favicon" && asset.mimeType === "image/webp") {
+      // Browsers are inconsistent about accepting WebP through a /favicon.ico
+      // redirect. Keep old uploads working by converting them at the edge.
+      const png = await sharp(asset.path).png({ compressionLevel: 9 }).toBuffer();
+      return reply
+        .header("content-type", "image/png")
+        .header("cache-control", "public, max-age=300")
+        .header("x-content-type-options", "nosniff")
+        .send(png);
     }
     return reply
       .header("content-type", asset.mimeType)
@@ -238,7 +249,16 @@ export function registerSettingsRoutes(app: FastifyInstance, options: SettingsRo
       try {
         const upload = await readAssetUpload(request, kind);
         if (!requireAdmin(request, reply, options, true, upload.csrfToken, "settings:assets:write")) return reply;
-        return json(reply, { ok: true, asset: options.settings.replaceAsset(kind, upload.data) });
+        return json(reply, { ok: true, asset: await options.settings.replaceAsset(kind, upload.data) });
+      } catch (error) {
+        return operationFailure(reply, request, error);
+      }
+    });
+    app.delete(`/api/admin/settings/assets/${kind}`, async (request, reply) => {
+      if (!options.auth.isWriteEnabled()) return json(reply, { ok: false, error: "settings write isolation is unavailable", code: "settings_unavailable" }, 503);
+      try {
+        if (!requireAdmin(request, reply, options, true, "", "settings:assets:write")) return reply;
+        return json(reply, { ok: true, asset: options.settings.removeAsset(kind) });
       } catch (error) {
         return operationFailure(reply, request, error);
       }
@@ -247,10 +267,10 @@ export function registerSettingsRoutes(app: FastifyInstance, options: SettingsRo
 
   app.get<{ Params: { asset: string; filename: string } }>("/api/assets/:asset/:filename", async (request, reply) => {
     if (!validKind(request.params.asset)) return json(reply, { ok: false, error: "asset not found", code: "asset_not_found" }, 404);
-    return serveAsset(reply, options.settings, request.params.asset, request.params.filename);
+    return await serveAsset(reply, options.settings, request.params.asset, request.params.filename);
   });
   app.get<{ Params: { asset: string } }>("/api/assets/:asset", async (request, reply) => {
     if (!validKind(request.params.asset)) return json(reply, { ok: false, error: "asset not found", code: "asset_not_found" }, 404);
-    return serveAsset(reply, options.settings, request.params.asset);
+    return await serveAsset(reply, options.settings, request.params.asset);
   });
 }

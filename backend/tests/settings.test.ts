@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import Database from "better-sqlite3";
+import sharp from "sharp";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { buildApp } from "../src/app.js";
@@ -14,7 +15,6 @@ const roots: string[] = [];
 const apps: Array<ReturnType<typeof buildApp>> = [];
 const BOOTSTRAP = "settings-bootstrap-token-1234567890";
 const PNG = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
-const WEBP = Buffer.from([0x52, 0x49, 0x46, 0x46, 0x00, 0x00, 0x00, 0x00, 0x57, 0x45, 0x42, 0x50]);
 
 function createDatabase(): { readonly root: string; readonly databasePath: string; readonly storeRoot: string } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "prg32-m63d2b-"));
@@ -247,8 +247,8 @@ describe("settings API", () => {
     const firstUrl = assetUrl(first);
     const served = await test.app.inject({ method: "GET", url: firstUrl });
     expect(served.statusCode).toBe(200);
-    expect(header(served, "content-type")).toContain("image/png");
-    expect(served.rawPayload).toEqual(PNG);
+    expect(header(served, "content-type")).toContain("image/webp");
+    expect(served.rawPayload).not.toEqual(PNG);
 
     const svg = multipart(Buffer.from("<svg xmlns=\"http://www.w3.org/2000/svg\"></svg>"), admin.csrf);
     const rejected = await test.app.inject({ method: "POST", url: "/api/admin/settings/assets/logo", headers: { cookie: admin.cookie, "x-csrftoken": admin.csrf, "content-type": svg.contentType }, payload: svg.body });
@@ -280,10 +280,12 @@ describe("settings API", () => {
     expect(faviconResponse.statusCode).toBe(200);
     expect(header(faviconResponse, "content-type")).toContain("image/x-icon");
 
-    const webpUpload = multipart(WEBP, admin.csrf);
+    const webpInput = await sharp(PNG).webp().toBuffer();
+    const webpUpload = multipart(webpInput, admin.csrf);
     const webp = await test.app.inject({ method: "POST", url: "/api/admin/settings/assets/logo", headers: { cookie: admin.cookie, "x-csrftoken": admin.csrf, "content-type": webpUpload.contentType }, payload: webpUpload.body });
     expect(webp.statusCode).toBe(200);
-    expect(jsonObject(webp).asset).toMatchObject({ kind: "logo", mime_type: "image/webp", size: WEBP.byteLength });
+    expect(jsonObject(webp).asset).toMatchObject({ kind: "logo", mime_type: "image/webp" });
+    expect(Number(record(jsonObject(webp).asset).size)).toBeGreaterThan(0);
     const webpResponse = await test.app.inject({ method: "GET", url: assetUrl(webp) });
     expect(webpResponse.statusCode).toBe(200);
     expect(header(webpResponse, "content-type")).toContain("image/webp");
@@ -298,7 +300,7 @@ describe("settings API", () => {
       assetDirectory: faultRoot,
       fault: (point) => { if (point === "after-asset-publish") throw new Error("synthetic fault"); }
     });
-    expect(() => service.replaceAsset("logo", PNG)).toThrowError(SettingsError);
+    await expect(service.replaceAsset("logo", PNG)).rejects.toThrowError(SettingsError);
     expect((db.prepare("SELECT value FROM store_settings WHERE key = 'theme_logo_url'").get() as { value: string }).value).toBe(previousRef);
     expect(fs.readdirSync(faultRoot).filter((name) => name.startsWith(".staging-") || name.startsWith("logo-")).length).toBe(0);
     db.close();

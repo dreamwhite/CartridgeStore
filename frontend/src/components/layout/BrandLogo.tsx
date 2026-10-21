@@ -17,16 +17,27 @@ export function BrandLogo() {
   const [logoSrc, setLogoSrc] = useState(FALLBACK_LOGO);
 
   useEffect(() => {
-    const loadManagedLogo = () => setLogoSrc(managedAssetUrl("logo"));
+    let disposed = false;
+    const loadManagedLogo = async () => {
+      const url = managedAssetUrl("logo");
+      try {
+        const response = await fetch(url, { cache: "no-store", credentials: "include" });
+        if (!disposed && response.ok) setLogoSrc(url);
+      } catch {
+        // Keep the bundled logo when the API is unavailable or no custom logo exists.
+      }
+    };
     const onAssetUpdated = (event: Event) => {
       const { kind } = (event as ManagedAssetEvent).detail;
-      if (kind === "logo") loadManagedLogo();
+      if (kind === "logo") void loadManagedLogo();
     };
 
-    loadManagedLogo();
+    void loadManagedLogo();
     window.addEventListener(MANAGED_ASSET_UPDATED_EVENT, onAssetUpdated);
-    return () =>
+    return () => {
+      disposed = true;
       window.removeEventListener(MANAGED_ASSET_UPDATED_EVENT, onAssetUpdated);
+    };
   }, []);
 
   return (
@@ -45,7 +56,7 @@ export function BrandLogo() {
       </span>
       <span
         className={[
-          "relative z-10 min-w-0 whitespace-nowrap bg-[var(--color-surface)]",
+          "relative z-10 min-w-0 whitespace-nowrap",
           "pl-1 text-[1.55rem] leading-none tracking-[-0.04em]",
         ].join(" ")}
       >

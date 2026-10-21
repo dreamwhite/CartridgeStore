@@ -81,6 +81,12 @@ export type AdminAuditEvent = {
   request_id: string;
 };
 
+export type AdminAuditChange = {
+  key: string;
+  before: unknown;
+  after: unknown;
+};
+
 export type AdminCartridgeVariant = {
   architecture: string;
   size: number;

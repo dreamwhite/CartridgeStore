@@ -5,6 +5,7 @@ import { Check, ChevronDown, ChevronUp } from "lucide-react";
 import type { ComponentPropsWithoutRef, ReactNode } from "react";
 
 import { cn } from "../../lib/cn";
+import { HelpTooltip } from "./help-tooltip";
 
 export const Select = SelectPrimitive.Root;
 export const SelectGroup = SelectPrimitive.Group;
@@ -26,7 +27,7 @@ export function SelectSeparator({ className, ...props }: ComponentPropsWithoutRe
   return <SelectPrimitive.Separator className={cn("my-1 h-px bg-[var(--color-border)]", className)} {...props} />;
 }
 
-export function SelectField({ label, value, onValueChange, children, placeholder, name, description, disabled, icon, compact = false }: { label: string; value: string; onValueChange: (value: string) => void; children: ReactNode; placeholder?: string; name?: string; description?: string; disabled?: boolean; icon?: ReactNode; compact?: boolean }) {
+export function SelectField({ label, value, onValueChange, children, placeholder, name, description, help, disabled, icon, compact = false }: { label: string; value: string; onValueChange: (value: string) => void; children: ReactNode; placeholder?: string; name?: string; description?: string; help?: string; disabled?: boolean; icon?: ReactNode; compact?: boolean }) {
   const id = name ? `select-${name}` : undefined;
-  return <div className={compact ? "grid" : "grid gap-2"}>{!compact && <label htmlFor={id} className="flex items-center gap-2 text-sm font-semibold">{icon}{label}</label>}<Select name={name} value={value} onValueChange={onValueChange} disabled={disabled}><SelectTrigger id={id} aria-label={label} className={compact ? "min-h-9 min-w-0 px-2.5 py-1.5 text-xs" : undefined}><SelectValue placeholder={placeholder} /></SelectTrigger><SelectContent>{children}</SelectContent></Select>{description && <p className="text-xs text-[var(--color-text-muted)]">{description}</p>}</div>;
+  return <div className={compact ? "grid" : "grid gap-2"}>{!compact && <label htmlFor={id} className="flex items-center gap-2 text-sm font-semibold">{icon}{label}{help ? <HelpTooltip label={label} text={help} /> : null}</label>}<Select name={name} value={value} onValueChange={onValueChange} disabled={disabled}><SelectTrigger id={id} aria-label={label} className={compact ? "min-h-9 min-w-0 px-2.5 py-1.5 text-xs" : undefined}><SelectValue placeholder={placeholder} /></SelectTrigger><SelectContent>{children}</SelectContent></Select>{description && <p className="text-xs text-[var(--color-text-muted)]">{description}</p>}</div>;
 }

@@ -1,10 +1,11 @@
 "use client";
 
-import { CheckCircle2, CloudUpload, FileImage, type LucideIcon } from "lucide-react";
+import { CheckCircle2, CloudUpload, FileImage, Trash2, type LucideIcon } from "lucide-react";
 import Image from "next/image";
 import { useEffect, useId, useState, type DragEvent, type ReactNode } from "react";
 
 import { Button } from "../../ui/button";
+import { HelpTooltip } from "../../ui/help-tooltip";
 import { Field } from "../admin-ui";
 import {
   MANAGED_ASSET_UPDATED_EVENT,
@@ -64,10 +65,12 @@ export function AssetUpload({
   kind,
   currentUrl,
   onUpload,
+  onDelete,
 }: {
   kind: ManagedAssetKind;
   currentUrl: string;
-  onUpload: (kind: ManagedAssetKind, file: File) => Promise<void>;
+  onUpload: (kind: ManagedAssetKind, file: File) => Promise<string>;
+  onDelete: (kind: ManagedAssetKind) => Promise<void>;
 }) {
   const inputId = useId();
   const [file, setFile] = useState<File | null>(null);
@@ -75,8 +78,10 @@ export function AssetUpload({
   const [isDragging, setIsDragging] = useState(false);
   const [isPreparing, setIsPreparing] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const [status, setStatus] = useState("");
   const [error, setError] = useState("");
+  const uploadTooltipId = useId();
 
   useEffect(() => {
     return () => {
@@ -115,9 +120,10 @@ export function AssetUpload({
     setError("");
     setIsUploading(true);
     try {
-      await onUpload(kind, file);
+      const assetUrl = await onUpload(kind, file);
       setStatus(`Uploaded · ${formatBytes(file.size)}`);
       setFile(null);
+      setPreviewUrl(assetUrl);
     } catch {
       setError("Upload failed. Check the file and try again.");
     } finally {
@@ -125,8 +131,35 @@ export function AssetUpload({
     }
   }
 
+  async function remove() {
+    if (!currentUrl || isDeleting) return;
+    if (!window.confirm(`Remove the current ${kind} asset?`)) return;
+    setError("");
+    setIsDeleting(true);
+    try {
+      await onDelete(kind);
+      setFile(null);
+      setPreviewUrl("");
+      setStatus("Removed · bundled fallback restored");
+    } catch {
+      setError("Removal failed. Try again.");
+    } finally {
+      setIsDeleting(false);
+    }
+  }
+
   const preview = previewUrl || currentUrl;
   const label = kind === "logo" ? "Logo asset" : "Favicon asset";
+  const uploadDisabled = !file || isPreparing || isUploading || isDeleting;
+  const uploadHelp = isPreparing
+    ? "The image is still being prepared."
+    : isUploading
+      ? "The image is being uploaded."
+      : isDeleting
+        ? "Remove the current asset before uploading another one."
+        : !file
+          ? "Choose or drop an image before uploading."
+          : "Upload the selected image.";
 
   return (
     <div className="space-y-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4">
@@ -136,10 +169,24 @@ export function AssetUpload({
           <h3 className="mt-1 text-sm font-bold">{label}</h3>
         </div>
         {currentUrl && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-semibold text-emerald-800">
-            <CheckCircle2 aria-hidden="true" className="size-3.5" />
-            Active
-          </span>
+          <div className="flex items-center gap-2">
+            <span className="inline-flex items-center gap-1.5 text-xs font-semibold text-[var(--color-text-muted)]">
+              <CheckCircle2 aria-hidden="true" className="size-3.5 text-emerald-600" />
+              Configured
+            </span>
+            <Button
+              type="button"
+              variant="ghost"
+              aria-label={`Remove ${kind} asset`}
+              title={`Remove ${kind} asset`}
+              loading={isDeleting}
+              disabled={isDeleting || isUploading || isPreparing}
+              onClick={() => void remove()}
+              className="size-8 rounded-md p-0 text-[var(--color-text-muted)] hover:text-[var(--color-danger)]"
+            >
+              <Trash2 aria-hidden="true" className="size-4" />
+            </Button>
+          </div>
         )}
       </div>
       <label
@@ -203,22 +250,36 @@ export function AssetUpload({
         <span className="text-xs text-[var(--color-text-muted)]" aria-live="polite">
           {isPreparing ? "Preparing image…" : status || "No file selected"}
         </span>
-        <Button
-          type="button"
-          variant="secondary"
-          loading={isPreparing || isUploading}
-          disabled={!file || isPreparing || isUploading}
-          onClick={() => void upload()}
+        <span
+          className={`group relative inline-flex${uploadDisabled ? " cursor-not-allowed" : ""}`}
+          aria-describedby={uploadDisabled ? uploadTooltipId : undefined}
         >
-          {isUploading ? (
-            "Uploading…"
-          ) : (
-            <>
-              <CloudUpload aria-hidden="true" className="size-4" />
-              Upload asset
-            </>
-          )}
-        </Button>
+          <Button
+            type="button"
+            variant="secondary"
+            loading={isPreparing || isUploading}
+            disabled={uploadDisabled}
+            onClick={() => void upload()}
+          >
+            {isUploading ? (
+              "Uploading…"
+            ) : (
+              <>
+                <CloudUpload aria-hidden="true" className="size-4" />
+                Upload asset
+              </>
+            )}
+          </Button>
+          {uploadDisabled ? (
+            <span
+              id={uploadTooltipId}
+              role="tooltip"
+              className="pointer-events-none invisible absolute bottom-full right-0 z-50 mb-2 w-60 rounded-md border border-[var(--color-border)] bg-[var(--color-text)] px-3 py-2 text-left text-xs font-normal leading-5 text-white opacity-0 shadow-lg transition-opacity group-hover:visible group-hover:opacity-100 group-focus-within:visible group-focus-within:opacity-100"
+            >
+              {uploadHelp}
+            </span>
+          ) : null}
+        </span>
       </div>
       {error && <p className="text-xs font-semibold text-[var(--color-danger)]">{error}</p>}
     </div>
@@ -227,11 +288,13 @@ export function AssetUpload({
 
 export function ColorField({
   label,
+  help,
   value,
   fallback,
   onChange,
 }: {
   label: string;
+  help?: string;
   value: string;
   fallback: string;
   onChange: (value: string) => void;
@@ -240,7 +303,10 @@ export function ColorField({
 
   return (
     <div className="grid gap-1 text-sm font-medium">
-      <span>{label}</span>
+      <span className="flex items-center gap-1.5">
+        {label}
+        {help ? <HelpTooltip label={label} text={help} /> : null}
+      </span>
       <div className="flex gap-2">
         <input
           aria-label={`${label} color picker`}

@@ -11,10 +11,7 @@ export const metadata: Metadata = {
   description: "Discover and download published PRG32 cartridges for hardware and QEMU.",
   manifest: "/manifest.webmanifest",
   icons: {
-    icon: [
-      { url: "/static/icon-192.svg", type: "image/svg+xml", sizes: "192x192" },
-      { url: "/static/icon-512.svg", type: "image/svg+xml", sizes: "512x512" },
-    ],
+    icon: { url: "/favicon.ico" },
   },
 };
 

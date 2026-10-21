@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 
 import { Button } from "../../ui/button";
 import { Notice } from "../admin-ui";
+import { publicApiPath } from "../../../lib/api/origin";
 import type { ManagedAssetKind } from "../../../lib/runtime-assets";
 import type { SettingsSectionId } from "./settings-sections";
 import {
@@ -24,7 +25,7 @@ export function SettingsPanel({
   section?: SettingsSectionId;
 }) {
   const activeSection = section ?? "general";
-  const { query, update, testConnection, sendTestMessage, uploadAsset } =
+  const { query, update, testConnection, sendTestMessage, uploadAsset, deleteAsset } =
     useAdminSettings();
   const [draft, setDraft] = useState<SettingValues>({});
   const [typedDraft, setTypedDraft] = useState<SettingValues>({});
@@ -60,13 +61,18 @@ export function SettingsPanel({
   const mdnsInfo = query.data?.read_only?.mdns;
   const discoveryInfo = query.data?.read_only?.discovery;
   const emailTemplates = query.data?.read_only?.email_templates;
-  const logoUrl = String(query.data?.settings.theme_logo_url?.value ?? "");
-  const faviconUrl = String(query.data?.settings.theme_favicon_url?.value ?? "");
+  const resolveAssetSetting = (value: unknown) => {
+    const url = String(value ?? "");
+    return url.startsWith("/api/assets/") ? publicApiPath(url) : url;
+  };
+  const logoUrl = resolveAssetSetting(query.data?.settings.theme_logo_url?.value);
+  const faviconUrl = resolveAssetSetting(query.data?.settings.theme_favicon_url?.value);
   const mdnsRuntimeEnabled = readOnlyValue(mdnsInfo, "enabled", "false") === "true";
   const error =
     query.error ??
     update.error ??
-    uploadAsset.error;
+    uploadAsset.error ??
+    deleteAsset.error;
   const disabled = query.isLoading || update.isPending;
 
   function setLegacyValue(key: string, value: unknown) {
@@ -143,7 +149,14 @@ export function SettingsPanel({
 
   async function uploadManagedAsset(kind: ManagedAssetKind, file: File) {
     const response = await uploadAsset.mutateAsync({ kind, file });
-    dispatchManagedAssetUpdated(kind, response.asset.url);
+    const assetUrl = publicApiPath(response.asset.url);
+    dispatchManagedAssetUpdated(kind, assetUrl);
+    return assetUrl;
+  }
+
+  async function deleteManagedAsset(kind: ManagedAssetKind) {
+    await deleteAsset.mutateAsync(kind);
+    dispatchManagedAssetUpdated(kind, "");
   }
 
   return (
@@ -167,6 +180,7 @@ export function SettingsPanel({
             setLegacyValue={setLegacyValue}
             setApplicationValue={setApplicationValue}
             onUpload={uploadManagedAsset}
+            onDelete={deleteManagedAsset}
             smtpRecipient={smtpRecipient}
             setSmtpRecipient={setSmtpRecipient}
             smtpPassword={smtpPassword}
@@ -180,7 +194,7 @@ export function SettingsPanel({
           <div className="flex justify-end pt-2">
             <Button disabled={update.isPending} onClick={saveSettings}>
               <Save aria-hidden="true" className="size-4" />
-              {update.isPending ? "Saving…" : "Save settings"}
+              {update.isPending ? "Saving…" : activeSection === "email-templates" ? "Save template" : "Save settings"}
             </Button>
           </div>
         </div>

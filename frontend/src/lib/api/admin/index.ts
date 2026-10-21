@@ -22,6 +22,7 @@ import {
 import { getAdminAuditEvent, listAdminAudit } from "./audit";
 import {
   getAdminSettings,
+  deleteAdminAsset,
   sendAdminSmtpTestMessage,
   testAdminSmtpConnection,
   updateAdminSettings,
@@ -57,6 +58,7 @@ export const adminApi = {
   testSmtpConnection: testAdminSmtpConnection,
   sendSmtpTestMessage: sendAdminSmtpTestMessage,
   uploadAsset: uploadAdminAsset,
+  deleteAsset: deleteAdminAsset,
   listUsers: listAdminUsers,
   getUser: getAdminUser,
   createUser: createAdminUser,

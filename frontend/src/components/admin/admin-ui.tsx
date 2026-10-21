@@ -2,6 +2,8 @@ import type { InputHTMLAttributes, ReactNode } from "react";
 
 import { AdminIntegrationUnavailableError } from "../../lib/api/admin";
 import { ApiRequestError } from "../../lib/api/client";
+import { cn } from "../../lib/cn";
+import { HelpTooltip } from "../ui/help-tooltip";
 import { StatusMessage } from "../ui/status";
 
 export function errorMessage(error: unknown): string {
@@ -21,8 +23,23 @@ export function Panel({ title, children }: { title: string; children: ReactNode 
   return <section className="w-full max-w-full min-w-0 space-y-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] p-5 shadow-sm"><div><h2 className="text-xl font-semibold">{title}</h2></div>{children}</section>;
 }
 
-export function Field({ label, ...props }: InputHTMLAttributes<HTMLInputElement> & { label: string }) {
-  return <label className="grid gap-1 text-sm font-medium"><span>{label}</span><input {...props} className="min-h-10 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 font-normal text-[var(--color-text)]" /></label>;
+export function Field({ label, help, id, className, ...props }: InputHTMLAttributes<HTMLInputElement> & { label: string; help?: string }) {
+  return (
+    <label className="grid gap-1 text-sm font-medium" htmlFor={id}>
+      <span className="flex items-center gap-1.5">
+        {label}
+        {help ? <HelpTooltip label={label} text={help} /> : null}
+      </span>
+      <input
+        {...props}
+        id={id}
+        className={cn(
+          "min-h-10 rounded-md border border-[var(--color-border)] bg-[var(--color-surface)] px-3 py-2 font-normal text-[var(--color-text)] placeholder:text-[var(--color-text-muted)]",
+          className,
+        )}
+      />
+    </label>
+  );
 }
 
 export function Table({ children }: { children: ReactNode }) {

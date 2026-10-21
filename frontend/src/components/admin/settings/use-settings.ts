@@ -10,5 +10,6 @@ export function useAdminSettings() {
   const testConnection = useMutation({ mutationFn: adminApi.testSmtpConnection });
   const sendTestMessage = useMutation({ mutationFn: (recipient: string) => adminApi.sendSmtpTestMessage(recipient) });
   const uploadAsset = useMutation({ mutationFn: ({ kind, file }: { kind: "logo" | "favicon"; file: File }) => adminApi.uploadAsset(kind, file), onSuccess: () => void queryClient.invalidateQueries({ queryKey: adminQueryKeys.settings() }) });
-  return { query, update, testConnection, sendTestMessage, uploadAsset };
+  const deleteAsset = useMutation({ mutationFn: (kind: "logo" | "favicon") => adminApi.deleteAsset(kind), onSuccess: () => void queryClient.invalidateQueries({ queryKey: adminQueryKeys.settings() }) });
+  return { query, update, testConnection, sendTestMessage, uploadAsset, deleteAsset };
 }

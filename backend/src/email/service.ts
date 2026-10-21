@@ -2,7 +2,7 @@ import net from "node:net";
 import tls from "node:tls";
 
 import type { BackendConfig } from "../config/env.js";
-import { renderCartridgeApprovedEmail, renderSmtpTestEmail, type CartridgeApprovedEmailData } from "./templates.js";
+import { DEFAULT_EMAIL_TEMPLATE_SETTINGS, renderCartridgeApprovedEmail, renderSmtpTestEmail, type CartridgeApprovedEmailData, type EmailTemplateSettings } from "./templates.js";
 
 export interface EmailMessage {
   readonly to: string;
@@ -103,12 +103,15 @@ export class SmtpEmailTransport implements EmailTransport {
 }
 
 export class EmailService {
+  private templates: EmailTemplateSettings = DEFAULT_EMAIL_TEMPLATE_SETTINGS;
+
   constructor(private transport: EmailTransport, private from: string, private publicOrigin: string | undefined) {}
 
-  configure(options: { readonly transport: "disabled" | "memory" | "smtp"; readonly from: string; readonly publicOrigin?: string; readonly smtp?: SmtpRuntimeConfig }): void {
+  configure(options: { readonly transport: "disabled" | "memory" | "smtp"; readonly from: string; readonly publicOrigin?: string; readonly smtp?: SmtpRuntimeConfig; readonly templates?: EmailTemplateSettings }): void {
     this.transport.close?.();
     this.from = options.from;
     this.publicOrigin = options.publicOrigin;
+    this.templates = options.templates ?? DEFAULT_EMAIL_TEMPLATE_SETTINGS;
     this.transport = options.transport === "memory"
       ? new MemoryEmailTransport()
       : options.transport === "smtp" && options.smtp
@@ -122,7 +125,7 @@ export class EmailService {
   }
 
   async sendTest(to: string, lookup?: net.LookupFunction, storeName = "PRG32 Cartridge Store"): Promise<void> {
-    const template = renderSmtpTestEmail(storeName);
+    const template = renderSmtpTestEmail(storeName, this.managedLogoUrl(), this.templates);
     await this.transport.send({ to, from: this.from, subject: template.subject, text: template.text, html: template.html, createdAt: new Date().toISOString() }, lookup === undefined ? undefined : { lookup });
   }
 
@@ -140,7 +143,10 @@ export class EmailService {
   }
 
   async sendCartridgeApproved(email: string, data: CartridgeApprovedEmailData): Promise<void> {
-    const template = renderCartridgeApprovedEmail(data);
+    const logoUrl = data.logoUrl ?? this.managedLogoUrl();
+    const template = logoUrl === undefined
+      ? renderCartridgeApprovedEmail(data, this.templates)
+      : renderCartridgeApprovedEmail({ ...data, logoUrl }, this.templates);
     await this.transport.send({
       to: email,
       from: this.from,
@@ -153,6 +159,15 @@ export class EmailService {
 
   testMessages(): readonly EmailMessage[] { return this.transport instanceof MemoryEmailTransport ? this.transport.messages : []; }
   close(): void { this.transport.close?.(); }
+
+  private managedLogoUrl(): string | undefined {
+    if (this.publicOrigin === undefined) return undefined;
+    try {
+      return new URL("/api/assets/logo", this.publicOrigin).toString();
+    } catch {
+      return undefined;
+    }
+  }
 
   private async sendLink(email: string, subject: string, pathname: string, token: string, action: string): Promise<void> {
     if (!this.publicOrigin) throw new EmailDeliveryError("email public origin is not configured");

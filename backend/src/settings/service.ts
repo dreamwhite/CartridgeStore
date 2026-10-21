@@ -11,7 +11,7 @@ import type { AdminAuditLog } from "../admin/audit.js";
 import { EmailDeliveryError, type EmailService, type SmtpRuntimeConfig } from "../email/service.js";
 import { OutboundValidationError, resolveOutboundHost } from "../setup/outbound.js";
 import type { DiscoveryService } from "../discovery/service.js";
-import { emailTemplatePreviews } from "../email/templates.js";
+import { DEFAULT_EMAIL_TEMPLATE_SETTINGS, emailTemplatePreviews, type EmailTemplateSettings } from "../email/templates.js";
 import type { AssetKind } from "./assets.js";
 import { SettingsAssetStore } from "./asset-store.js";
 import { SettingsError } from "./errors.js";
@@ -67,7 +67,11 @@ const APPLICATION_SETTING_DEFINITIONS = {
   "smtp.from_email": { type: "string", category: "smtp", sensitivity: "admin", default: "" },
   "smtp.reply_to": { type: "string", category: "smtp", sensitivity: "admin", default: "" },
   "smtp.connection_timeout_ms": { type: "number", category: "smtp", sensitivity: "admin", default: 10000 },
-  "smtp.delivery_timeout_ms": { type: "number", category: "smtp", sensitivity: "admin", default: 10000 }
+  "smtp.delivery_timeout_ms": { type: "number", category: "smtp", sensitivity: "admin", default: 10000 },
+  "email.approval_subject": { type: "string", category: "email", sensitivity: "admin", default: DEFAULT_EMAIL_TEMPLATE_SETTINGS.approvalSubject },
+  "email.approval_body": { type: "string", category: "email", sensitivity: "admin", default: DEFAULT_EMAIL_TEMPLATE_SETTINGS.approvalBody },
+  "email.smtp_test_subject": { type: "string", category: "email", sensitivity: "admin", default: DEFAULT_EMAIL_TEMPLATE_SETTINGS.smtpTestSubject },
+  "email.smtp_test_body": { type: "string", category: "email", sensitivity: "admin", default: DEFAULT_EMAIL_TEMPLATE_SETTINGS.smtpTestBody }
 } as const;
 type ApplicationSettingKey = keyof typeof APPLICATION_SETTING_DEFINITIONS;
 
@@ -93,6 +97,33 @@ function settingView(database: Database.Database, key: keyof typeof SETTINGS, va
 
 function settingValuesEqual(left: unknown, right: unknown): boolean {
   return Object.is(left, right) || JSON.stringify(left) === JSON.stringify(right);
+}
+
+const AUDIT_VALUE_MAX_LENGTH = 120;
+
+function auditValue(key: string, value: unknown): unknown {
+  if (/password|secret|token|credential/i.test(key)) {
+    return {
+      redacted: true,
+      configured: typeof value === "string" ? value.length > 0 : Boolean(value),
+    };
+  }
+  if (typeof value === "string" && value.length > AUDIT_VALUE_MAX_LENGTH) {
+    return `${value.slice(0, AUDIT_VALUE_MAX_LENGTH - 1)}…`;
+  }
+  if (Array.isArray(value)) return value.map((item) => auditValue(key, item));
+  return value;
+}
+
+function auditChange(key: string, before: unknown, after: unknown): Record<string, unknown> {
+  return { key, before: auditValue(key, before), after: auditValue(key, after) };
+}
+
+function applicationSettingValue(settings: Record<string, unknown>, key: string): unknown {
+  const setting = settings[key];
+  return setting && typeof setting === "object" && !Array.isArray(setting) && "value" in setting
+    ? (setting as { value?: unknown }).value
+    : undefined;
 }
 
 export class SettingsService {
@@ -167,7 +198,7 @@ export class SettingsService {
           version: this.config.storeVersion
         },
         smtp,
-        email_templates: emailTemplatePreviews()
+        email_templates: emailTemplatePreviews(this.emailTemplateSettings(applicationSettings))
       }
     };
   }
@@ -187,6 +218,21 @@ export class SettingsService {
       writable: true,
       version: this.settingVersion(database, key)
     }]));
+  }
+
+  private emailTemplateSettings(settings: Record<string, unknown>): EmailTemplateSettings {
+    const value = (key: string, fallback: string): string => {
+      const candidate = settings[key];
+      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate) || !("value" in candidate)) return fallback;
+      const resolved = (candidate as { value?: unknown }).value;
+      return typeof resolved === "string" && resolved.trim() ? resolved : fallback;
+    };
+    return {
+      approvalSubject: value("email.approval_subject", DEFAULT_EMAIL_TEMPLATE_SETTINGS.approvalSubject),
+      approvalBody: value("email.approval_body", DEFAULT_EMAIL_TEMPLATE_SETTINGS.approvalBody),
+      smtpTestSubject: value("email.smtp_test_subject", DEFAULT_EMAIL_TEMPLATE_SETTINGS.smtpTestSubject),
+      smtpTestBody: value("email.smtp_test_body", DEFAULT_EMAIL_TEMPLATE_SETTINGS.smtpTestBody),
+    };
   }
 
   private settingVersion(database: Database.Database, key: string): number {
@@ -217,13 +263,14 @@ export class SettingsService {
   private applyEmailRuntime(database: Database.Database): void {
     if (!this.email) return;
     const settings = this.applicationSettings(database);
+    const emailTemplates = this.emailTemplateSettings(settings);
     const get = (key: string, fallback: unknown): unknown => {
       const item = settings[key];
       return item && typeof item === "object" && !Array.isArray(item) && "value" in item ? item.value : fallback;
     };
     const enabled = get("smtp.enabled", false) === true;
     if (!enabled) {
-      this.email.configure({ transport: this.config.emailTransport === "memory" ? "memory" : "disabled", from: this.config.emailFrom, ...(this.config.emailPublicOrigin === undefined ? {} : { publicOrigin: this.config.emailPublicOrigin }) });
+      this.email.configure({ transport: this.config.emailTransport === "memory" ? "memory" : "disabled", from: this.config.emailFrom, templates: emailTemplates, ...(this.config.emailPublicOrigin === undefined ? {} : { publicOrigin: this.config.emailPublicOrigin }) });
       return;
     }
     const host = String(get("smtp.host", ""));
@@ -246,7 +293,7 @@ export class SettingsService {
       if (!password) throw new SettingsError("smtp_invalid_configuration", 400, "SMTP password is not configured");
       (smtp as { password?: string }).password = password;
     }
-    this.email.configure({ transport: "smtp", from: String(get("smtp.from_email", this.config.emailFrom)), ...(this.config.emailPublicOrigin === undefined ? {} : { publicOrigin: this.config.emailPublicOrigin }), smtp });
+    this.email.configure({ transport: "smtp", from: String(get("smtp.from_email", this.config.emailFrom)), templates: emailTemplates, ...(this.config.emailPublicOrigin === undefined ? {} : { publicOrigin: this.config.emailPublicOrigin }), smtp });
   }
 
   private hasTable(database: Database.Database, table: string): boolean {
@@ -284,7 +331,9 @@ export class SettingsService {
       const definition = APPLICATION_SETTING_DEFINITIONS[key as ApplicationSettingKey];
       if (definition.type === "boolean" && typeof candidate !== "boolean") throw new SettingsError("settings_invalid_value", 400, "setting value is invalid");
       if (definition.type === "number" && (!Number.isSafeInteger(candidate) || Number(candidate) < 0 || Number(candidate) > 2_000_000_000)) throw new SettingsError("settings_invalid_value", 400, "setting value is invalid");
-      if ((definition.type === "string" || definition.type === "enum") && (typeof candidate !== "string" || candidate.length > 512)) throw new SettingsError("settings_invalid_value", 400, "setting value is invalid");
+      const maxLength = key.endsWith("_body") ? 4000 : 512;
+      if ((definition.type === "string" || definition.type === "enum") && (typeof candidate !== "string" || candidate.length > maxLength)) throw new SettingsError("settings_invalid_value", 400, "setting value is invalid");
+      if (key.startsWith("email.") && typeof candidate === "string") validateEmailTemplateValue(key, candidate);
       if (key === "smtp.encryption" && !["none", "starttls", "implicit_tls"].includes(String(candidate))) throw new SettingsError("settings_invalid_value", 400, "SMTP encryption is invalid");
       values[key as ApplicationSettingKey] = candidate;
     }
@@ -348,7 +397,11 @@ export class SettingsService {
     const changedPatch = Object.fromEntries(
       Object.entries(patch).filter(([key, candidate]) => !settingValuesEqual(candidate, settingValue(database, key as keyof typeof SETTINGS))),
     ) as Partial<Record<WritableSettingKey, SettingValue>>;
+    const previousPatchValues = Object.fromEntries(
+      Object.keys(changedPatch).map((key) => [key, settingValue(database, key as keyof typeof SETTINGS)]),
+    ) as Partial<Record<WritableSettingKey, SettingValue>>;
     const currentApplication = this.applicationSettings(database);
+    const previousSmtpPassword = rawValue(database, "smtp_password");
     const changedApplicationValues = Object.fromEntries(
       Object.entries(application.values).filter(([key, candidate]) => {
         const current = currentApplication[key];
@@ -415,7 +468,13 @@ export class SettingsService {
     }
     this.applyEmailRuntime(database);
     if (this.audit && context) {
-      this.audit.append({ actor_user_id: context.actorUserId, target_type: "settings", target_id: "application", action: "settings.update", outcome: "committed", request_id: context.requestId, summary: { keys: [...Object.keys(patch), ...Object.keys(application.values), ...(application.smtpPassword === undefined ? [] : ["smtp.password"])].sort() } });
+      const changes = [
+        ...Object.entries(patch).map(([key, after]) => auditChange(key, previousPatchValues[key as WritableSettingKey], after)),
+        ...Object.entries(application.values).map(([key, after]) => auditChange(key, applicationSettingValue(currentApplication, key), after)),
+        ...(application.smtpPassword === undefined ? [] : [auditChange("smtp.password", previousSmtpPassword, application.smtpPassword)]),
+      ];
+      const keys = changes.map((change) => String(change.key)).sort();
+      this.audit.append({ actor_user_id: context.actorUserId, target_type: "settings", target_id: "application", action: "settings.update", outcome: "committed", request_id: context.requestId, summary: { keys, changes } });
     }
     return this.read();
   }
@@ -476,7 +535,21 @@ export class SettingsService {
     return this.assetStore.path(kind);
   }
 
-  replaceAsset(kind: AssetKind, data: Uint8Array): { readonly kind: AssetKind; readonly url: string; readonly mime_type: string; readonly size: number } {
+  replaceAsset(kind: AssetKind, data: Uint8Array): Promise<{ readonly kind: AssetKind; readonly url: string; readonly mime_type: string; readonly size: number }> {
     return this.assetStore.replace(kind, data);
+  }
+
+  removeAsset(kind: AssetKind): { readonly kind: AssetKind; readonly deleted: boolean } {
+    return this.assetStore.remove(kind);
+  }
+}
+
+function validateEmailTemplateValue(key: string, value: string): void {
+  const allowed = key.startsWith("email.smtp_test_")
+    ? new Set(["storeName"])
+    : new Set(["recipientName", "gameTitle", "gameId", "version", "reviewerName", "storeName", "publicOrigin", "publicUrl"]);
+  for (const match of value.matchAll(/\{\{([A-Za-z][A-Za-z0-9_]*)\}\}/g)) {
+    const variable = match[1];
+    if (variable !== undefined && !allowed.has(variable)) throw new SettingsError("settings_invalid_value", 400, "unsupported email template variable: " + variable);
   }
 }
