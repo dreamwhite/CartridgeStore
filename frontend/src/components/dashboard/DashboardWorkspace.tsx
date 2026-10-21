@@ -17,8 +17,10 @@ import {
   Rocket,
   Store,
   UploadCloud,
+  X,
 } from "lucide-react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useState, useSyncExternalStore, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
@@ -68,18 +70,19 @@ function catalogBadge(action: AdminCartridge["moderation_action"]): { label: str
   return { label: "Live in store", variant: "published" };
 }
 
-function MetricStat({ label, value, detail, icon: Icon, tone = "neutral" }: { label: string; value: number; detail: string; icon: LucideIcon; tone?: "neutral" | "primary" | "success" | "warning" }) {
-  const toneClass = tone === "primary" ? "border-[var(--color-primary)]/30 bg-[var(--color-primary-soft)] text-[var(--color-primary-strong)]" : tone === "success" ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/25 dark:text-emerald-300" : tone === "warning" ? "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/25 dark:text-amber-300" : "border-[var(--color-border)] bg-[var(--color-surface)] text-[var(--color-text-muted)]";
+function MetricStat({ label, value, detail, icon: Icon, tone = "neutral", href }: { label: string; value: number; detail: string; icon: LucideIcon; tone?: "neutral" | "primary" | "success" | "warning"; href?: string }) {
+  const toneClass = tone === "primary" ? "text-[var(--color-primary-strong)]" : tone === "success" ? "text-emerald-700 dark:text-emerald-300" : tone === "warning" ? "text-amber-700 dark:text-amber-300" : "text-[var(--color-text-muted)]";
   return (
-    <div className={`flex min-w-0 items-start gap-3 rounded-xl border p-4 shadow-[var(--shadow-card)] sm:p-5 ${toneClass}`}>
-      <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-white/70 shadow-sm dark:bg-black/10">
+    <div className={`relative flex min-w-0 items-start gap-3 rounded-xl border border-[var(--color-border)] bg-[var(--color-surface)] p-4 text-[var(--color-text)] shadow-[var(--shadow-card)] sm:p-5 ${href ? "group cursor-pointer transition-colors hover:border-[var(--color-primary)]" : ""}`}>
+      <span className={`grid size-9 shrink-0 place-items-center rounded-lg bg-[var(--color-surface-muted)] shadow-sm ${toneClass}`}>
         <Icon aria-hidden="true" className="size-4" />
       </span>
       <div className="min-w-0">
-        <dt className="text-xs font-semibold uppercase tracking-[0.12em] opacity-75">{label}</dt>
+        <dt className={`text-xs font-semibold uppercase tracking-[0.12em] ${toneClass}`}>{label}</dt>
         <dd className="mt-1 text-3xl font-bold tracking-tight text-[var(--color-text)]">{value}</dd>
         <p className="mt-1 truncate text-xs text-[var(--color-text-muted)]">{detail}</p>
       </div>
+      {href && <Link href={href} aria-label={`View ${label.toLowerCase()}`} className="absolute inset-0 rounded-xl focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ring)]"><span className="sr-only">View {label.toLowerCase()}</span></Link>}
     </div>
   );
 }
@@ -107,6 +110,49 @@ function useHydrated(): boolean {
   );
 }
 
+const DASHBOARD_HERO_DISMISSED_KEY = "prg32-dashboard-overview-hero-dismissed";
+const DASHBOARD_HERO_CHANGE_EVENT = "prg32-dashboard-overview-hero-change";
+
+function readDashboardHeroDismissed(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(DASHBOARD_HERO_DISMISSED_KEY) === "true";
+  } catch {
+    return false;
+  }
+}
+
+function useDashboardHeroDismissed(): readonly [boolean, () => void] {
+  const dismissed = useSyncExternalStore(
+    (onChange) => {
+      if (typeof window === "undefined") return () => undefined;
+      const handleStorage = (event: StorageEvent) => {
+        if (event.key === DASHBOARD_HERO_DISMISSED_KEY || event.key === null) onChange();
+      };
+      window.addEventListener("storage", handleStorage);
+      window.addEventListener(DASHBOARD_HERO_CHANGE_EVENT, onChange);
+      return () => {
+        window.removeEventListener("storage", handleStorage);
+        window.removeEventListener(DASHBOARD_HERO_CHANGE_EVENT, onChange);
+      };
+    },
+    readDashboardHeroDismissed,
+    () => false,
+  );
+
+  const dismiss = () => {
+    if (typeof window === "undefined") return;
+    try {
+      window.localStorage.setItem(DASHBOARD_HERO_DISMISSED_KEY, "true");
+    } catch {
+      // The banner still closes for this render when storage is unavailable.
+    }
+    window.dispatchEvent(new Event(DASHBOARD_HERO_CHANGE_EVENT));
+  };
+
+  return [dismissed, dismiss];
+}
+
 function SubmissionRow({ submission }: { submission: OwnedSubmissionSummary }) {
   const badge = submissionBadge(submission.status);
   return <li className="border-b border-[var(--color-border)] last:border-0"><Link href={`/dashboard/submissions/${submission.id}`} className="group flex w-full flex-col gap-2 px-5 py-4 transition-colors hover:bg-[var(--color-surface-muted)] sm:flex-row sm:items-center sm:justify-between sm:px-6"><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="truncate font-semibold group-hover:text-[var(--color-primary-strong)]">{submission.title}</h3><Badge variant={badge.variant}>{badge.label}</Badge></div><p className="mt-1 truncate text-sm text-[var(--color-text-muted)]">{submission.game_id} · v{submission.version}</p></div><div className="flex items-center gap-3 text-xs text-[var(--color-text-muted)]"><span>{formatDate(submission.reviewed_at ?? submission.created_at)}</span><ChevronRight aria-hidden="true" className="size-4 transition-transform group-hover:translate-x-0.5" /></div></Link></li>;
@@ -128,6 +174,7 @@ function CatalogTableRow({ cartridge, onModerate, pending }: { cartridge: AdminC
 
 export function DashboardWorkspace() {
   const hydrated = useHydrated();
+  const [heroDismissed, dismissHero] = useDashboardHeroDismissed();
   const current = useCurrentUser();
   const user = current.user;
   const canSubmit = Boolean(user?.permissions?.includes("catalog:submit"));
@@ -153,7 +200,7 @@ export function DashboardWorkspace() {
   const catalogError = catalog.error;
 
   return <DashboardFrame canSubmit={canSubmit}><div className="space-y-10">
-    <section className="relative overflow-hidden rounded-2xl bg-[#2a2041] p-6 text-white shadow-[0_18px_40px_rgb(46_32_86_/_0.16)] sm:p-8 lg:p-10"><div className="pointer-events-none absolute inset-y-0 right-0 hidden w-1/2 opacity-50 lg:block" style={{ backgroundImage: "linear-gradient(rgb(255 255 255 / .08) 1px, transparent 1px), linear-gradient(90deg, rgb(255 255 255 / .08) 1px, transparent 1px)", backgroundSize: "2rem 2rem", maskImage: "linear-gradient(90deg, transparent, black)" }} /><div className="relative flex flex-col justify-between gap-8 lg:flex-row lg:items-center"><div className="max-w-2xl"><p className="technical-label text-violet-200">Developer console</p><h1 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">Build, publish, repeat.</h1><p className="mt-4 max-w-xl text-sm leading-7 text-violet-100 sm:text-base">Manage your PRG32 cartridges from one place: keep drafts private, send releases to review, and control what stays visible in the public store.</p><div className="mt-7 flex flex-wrap gap-3"><Button asChild size="lg" className="bg-white text-[#2a2041] shadow-none hover:bg-violet-100"><Link href="/dashboard/publish"><CirclePlus aria-hidden="true" className="size-4" />Create a cartridge</Link></Button><Button asChild size="lg" variant="outline" className="border-white/40 text-white hover:border-white/70 hover:bg-white/10 hover:text-white"><Link href="/explore"><Store aria-hidden="true" className="size-4" />Open store</Link></Button></div></div><div className="relative hidden w-64 shrink-0 rounded-xl border border-white/15 bg-black/20 p-4 lg:block"><div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-[0.18em] text-violet-200"><span>Pipeline</span><span className="inline-flex items-center gap-1.5"><span className="size-1.5 rounded-full bg-emerald-300" />Live</span></div><div className="mt-5 space-y-3"><div className="flex items-center gap-3"><span className="grid size-7 place-items-center rounded-md bg-white/10"><FileCode2 className="size-3.5" /></span><div className="h-1.5 flex-1 rounded-full bg-white/15"><div className="h-full w-1/3 rounded-full bg-violet-300" /></div></div><div className="flex items-center gap-3"><span className="grid size-7 place-items-center rounded-md bg-white/10"><UploadCloud className="size-3.5" /></span><div className="h-1.5 flex-1 rounded-full bg-white/15"><div className="h-full w-2/3 rounded-full bg-violet-300" /></div></div><div className="flex items-center gap-3"><span className="grid size-7 place-items-center rounded-md bg-white/10"><PackageCheck className="size-3.5" /></span><div className="h-1.5 flex-1 rounded-full bg-white/15"><div className="h-full w-full rounded-full bg-emerald-300" /></div></div></div><p className="mt-5 text-xs text-violet-200">Draft → review → store</p></div></div></section>
+    {!heroDismissed && <section className="relative overflow-hidden rounded-2xl bg-[#2a2041] p-6 text-white shadow-[0_18px_40px_rgb(46_32_86_/_0.16)] sm:p-8 lg:p-10"><div className="pointer-events-none absolute inset-y-0 right-0 hidden w-1/2 opacity-50 lg:block" style={{ backgroundImage: "linear-gradient(rgb(255 255 255 / .08) 1px, transparent 1px), linear-gradient(90deg, rgb(255 255 255 / .08) 1px, transparent 1px)", backgroundSize: "2rem 2rem", maskImage: "linear-gradient(90deg, transparent, black)" }} /><button type="button" onClick={dismissHero} aria-label="Dismiss dashboard banner" title="Dismiss dashboard banner" className="absolute right-4 top-4 z-10 grid size-8 place-items-center rounded-full text-violet-200 transition-colors hover:bg-white/10 hover:text-white focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white/80 focus-visible:ring-offset-2 focus-visible:ring-offset-[#2a2041]"><X aria-hidden="true" className="size-4" /></button><div className="relative flex flex-col justify-between gap-8 lg:flex-row lg:items-center"><div className="max-w-2xl"><p className="technical-label text-violet-200">Developer console</p><h1 className="mt-3 text-3xl font-bold tracking-tight sm:text-4xl">Build, publish, repeat.</h1><p className="mt-4 max-w-xl text-sm leading-7 text-violet-100 sm:text-base">Manage your PRG32 cartridges from one place: keep drafts private, send releases to review, and control what stays visible in the public store.</p><div className="mt-7 flex flex-wrap gap-3"><Button asChild size="lg" className="bg-white text-[#2a2041] shadow-none hover:bg-violet-100"><Link href="/dashboard/publish"><CirclePlus aria-hidden="true" className="size-4" />Create a cartridge</Link></Button><Button asChild size="lg" variant="outline" className="border-white/40 text-white hover:border-white/70 hover:bg-white/10 hover:text-white"><Link href="/explore"><Store aria-hidden="true" className="size-4" />Open store</Link></Button></div></div><div className="relative hidden w-64 shrink-0 rounded-xl border border-white/15 bg-black/20 p-4 lg:block"><div className="flex items-center justify-between text-[10px] font-semibold uppercase tracking-[0.18em] text-violet-200"><span>Pipeline</span><span className="inline-flex items-center gap-1.5"><span className="size-1.5 rounded-full bg-emerald-300" />Live</span></div><div className="mt-5 space-y-3"><div className="flex items-center gap-3"><span className="grid size-7 place-items-center rounded-md bg-white/10"><FileCode2 className="size-3.5" /></span><div className="h-1.5 flex-1 rounded-full bg-white/15"><div className="h-full w-1/3 rounded-full bg-violet-300" /></div></div><div className="flex items-center gap-3"><span className="grid size-7 place-items-center rounded-md bg-white/10"><UploadCloud className="size-3.5" /></span><div className="h-1.5 flex-1 rounded-full bg-white/15"><div className="h-full w-2/3 rounded-full bg-violet-300" /></div></div><div className="flex items-center gap-3"><span className="grid size-7 place-items-center rounded-md bg-white/10"><PackageCheck className="size-3.5" /></span><div className="h-1.5 flex-1 rounded-full bg-white/15"><div className="h-full w-full rounded-full bg-emerald-300" /></div></div></div><p className="mt-5 text-xs text-violet-200">Draft → review → store</p></div></div></section>}
 
     <section aria-labelledby="dashboard-summary-heading">
       <div className="mb-4 flex items-end justify-between gap-4">
@@ -161,10 +208,10 @@ export function DashboardWorkspace() {
         <p className="hidden text-sm text-[var(--color-text-muted)] sm:block">A live view of your Store activity.</p>
       </div>
       <dl className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricStat label="Published" value={metrics.published} detail="Visible in the store" icon={PackageCheck} tone="success" />
-        <MetricStat label="In review" value={metrics.inReview} detail="Waiting for an editor" icon={UploadCloud} tone="warning" />
-        <MetricStat label="Drafts" value={metrics.drafts} detail="Private work in progress" icon={FileCode2} tone="primary" />
-        <MetricStat label="Withdrawn" value={metrics.withdrawn} detail="Removed from public view" icon={Archive} />
+        <MetricStat label="Published" value={metrics.published} detail="Visible in the store" icon={PackageCheck} tone="success" href="/dashboard/cartridges?status=published" />
+        <MetricStat label="In review" value={metrics.inReview} detail="Waiting for an editor" icon={UploadCloud} tone="warning" href="/workspace?status=pending" />
+        <MetricStat label="Drafts" value={metrics.drafts} detail="Private work in progress" icon={FileCode2} tone="primary" href="/dashboard/drafts" />
+        <MetricStat label="Withdrawn" value={metrics.withdrawn} detail="Removed from public view" icon={Archive} href="/dashboard/cartridges?status=withdrawn" />
       </dl>
     </section>
 
@@ -239,14 +286,17 @@ export function DashboardDraftsWorkspace() {
 
 export function DashboardCartridgesWorkspace() {
   const hydrated = useHydrated();
+  const searchParams = useSearchParams();
   const current = useCurrentUser();
   const queryClient = useQueryClient();
   const [page, setPage] = useState(1);
   const limit = 10;
+  const status = searchParams.get("status");
+  const catalogStatus = status === "published" || status === "withdrawn" || status === "hidden" ? status : undefined;
   const user = current.user;
   const canSubmit = Boolean(user?.permissions?.includes("catalog:submit"));
   const canManageCatalog = Boolean(user?.permissions?.includes("catalog:metadata:write"));
-  const catalog = useQuery({ queryKey: adminQueryKeys.catalog({ moderation: true, page, limit }), queryFn: () => adminApi.listModerationInventory({ page, limit }), enabled: canManageCatalog, retry: false, placeholderData: (previous) => previous });
+  const catalog = useQuery({ queryKey: adminQueryKeys.catalog({ moderation: true, page, limit, status: catalogStatus }), queryFn: () => adminApi.listModerationInventory({ page, limit, ...(catalogStatus === undefined ? {} : { status: catalogStatus }) }), enabled: canManageCatalog, retry: false, placeholderData: (previous) => previous });
   const moderation = useMutation({ mutationFn: ({ cartridge, action }: { cartridge: AdminCartridge; action: "unpublished" | "restored" }) => adminApi.moderateCartridge(cartridge.id, cartridge.selected_version, action, action === "unpublished" ? "Withdrawn from the developer dashboard" : "Restored from the developer dashboard"), onSuccess: () => void queryClient.invalidateQueries({ queryKey: adminQueryKeys.catalogRoot() }) });
   function moderate(cartridge: AdminCartridge) {
     const withdrawn = cartridge.moderation_action === "unpublished";

@@ -12,6 +12,7 @@ export type AdminCatalogListParams = {
   q?: string;
   version?: string;
   architecture?: string;
+  status?: "published" | "withdrawn" | "hidden";
 };
 
 /** Lists published catalog entries for administration. */

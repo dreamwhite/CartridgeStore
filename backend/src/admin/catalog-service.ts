@@ -19,6 +19,7 @@ export interface CatalogListOptions {
   readonly query?: string;
   readonly version?: string;
   readonly architecture?: string;
+  readonly moderationAction?: "visible" | "hidden" | "unpublished";
 }
 
 export interface CatalogMutationOptions {
@@ -261,6 +262,8 @@ export class CatalogAdminService {
       if (query && !values.includes(query)) return false;
       if (options.version !== undefined && !(Array.isArray(game.versions) && game.versions.includes(adminVersion(options.version)))) return false;
       if (options.architecture !== undefined && !(Array.isArray(game.architectures) && game.architectures.includes(adminArchitecture(options.architecture)))) return false;
+      const moderationAction = game.moderation_action === "hidden" || game.moderation_action === "unpublished" ? game.moderation_action : "visible";
+      if (options.moderationAction !== undefined && moderationAction !== options.moderationAction) return false;
       return true;
     }).sort((left, right) => `${String(left.title).toLowerCase()}\u0000${String(left.id)}`.localeCompare(`${String(right.title).toLowerCase()}\u0000${String(right.id)}`));
     const total = all.length;

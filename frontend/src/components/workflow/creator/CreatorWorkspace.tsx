@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useState } from "react";
 
 import { workflowErrorMessage } from "../../../lib/api/workflow";
@@ -11,8 +12,10 @@ import { CreatorSubmissionList } from "./SubmissionList";
 
 export function CreatorWorkspace() {
   const current = useWorkflowPrincipal();
+  const searchParams = useSearchParams();
   const user = current.data?.user;
   const [page, setPage] = useState(1);
+  const submissionStatus = searchParams?.get("status") === "pending" ? "pending" : undefined;
 
   if (current.isPending) {
     return <WorkflowMessage>Loading your workspace…</WorkflowMessage>;
@@ -88,6 +91,7 @@ export function CreatorWorkspace() {
       <CreatorSubmissionList
         page={page}
         enabled={Boolean(user.authenticated)}
+        status={submissionStatus}
         onPageChange={setPage}
       />
 

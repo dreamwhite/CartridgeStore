@@ -125,8 +125,8 @@ export function SubmissionList({ data, page, onPageChange, resubmit }: Submissio
   );
 }
 
-export function CreatorSubmissionList({ page, enabled, onPageChange }: { page: number; enabled: boolean; onPageChange: (page: number) => void }) {
-  const { submissions, resubmit } = useCreatorSubmissions(page, enabled);
+export function CreatorSubmissionList({ page, enabled, status, onPageChange }: { page: number; enabled: boolean; status?: string; onPageChange: (page: number) => void }) {
+  const { submissions, resubmit } = useCreatorSubmissions(page, enabled, status);
   if (submissions.isPending) {
     return <WorkflowMessage>Loading your submissions…</WorkflowMessage>;
   }

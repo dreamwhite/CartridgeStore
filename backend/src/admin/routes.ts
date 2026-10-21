@@ -155,13 +155,16 @@ export function registerAdminRoutes(app: FastifyInstance, options: AdminRouteOpt
     if (!current) return reply;
     try {
       const query = queryObject(request);
-      assertFields(query, ["page", "limit", "q", "version", "architecture"]);
+      assertFields(query, ["page", "limit", "q", "version", "architecture", "status"]);
       const page = positiveQuery(query.page, "page", 1, 100000);
       const limit = positiveQuery(query.limit, "limit", 50, 100);
       const search = optionalString(query, "q", 80);
       const version = optionalString(query, "version", 80);
       const architecture = optionalString(query, "architecture", 32);
-      return json(reply, { ok: true, ...options.catalog.moderationList({ page, limit, ...(search === undefined ? {} : { query: search }), ...(version === undefined ? {} : { version }), ...(architecture === undefined ? {} : { architecture }) }) });
+      const status = optionalString(query, "status", 16);
+      if (status !== undefined && status !== "published" && status !== "withdrawn" && status !== "hidden") throw new AdminError("invalid_filter", 400, "status is invalid");
+      const moderationAction = status === "published" ? "visible" : status === "withdrawn" ? "unpublished" : status === "hidden" ? "hidden" : undefined;
+      return json(reply, { ok: true, ...options.catalog.moderationList({ page, limit, ...(search === undefined ? {} : { query: search }), ...(version === undefined ? {} : { version }), ...(architecture === undefined ? {} : { architecture }), ...(moderationAction === undefined ? {} : { moderationAction }) }) });
     } catch (error) { return operationFailure(reply, request, error); }
   });
 

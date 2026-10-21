@@ -41,7 +41,7 @@ export const adminQueryKeys = {
   tokens: (filters: { page?: number; userId?: number } = {}) => ["admin", "tokens", filters.page ?? 1, filters.userId ?? null] as const,
   tokensRoot: () => ["admin", "tokens"] as const,
   catalogRoot: () => ["admin", "catalog"] as const,
-  catalog: (filters: { moderation?: boolean; page?: number; limit?: number } = {}) => ["admin", "catalog", filters.moderation === true ? "moderation" : "published", filters.page ?? 1, filters.limit ?? 24] as const,
+  catalog: (filters: { moderation?: boolean; page?: number; limit?: number; status?: string } = {}) => ["admin", "catalog", filters.moderation === true ? "moderation" : "published", filters.status ?? "all", filters.page ?? 1, filters.limit ?? 24] as const,
   cartridge: (id: string | null, version?: string) => ["admin", "cartridge", id, version ?? null] as const,
   audit: (limit = 100) => ["admin", "audit", limit] as const,
   auditEvent: (eventId: string | null) => ["admin", "audit-event", eventId] as const,
