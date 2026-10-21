@@ -5,13 +5,16 @@ import type { ReactNode } from "react";
 import { useState } from "react";
 
 import { ThemeProvider } from "../providers/ThemeProvider";
+import { LocaleProvider } from "../providers/LocaleProvider";
 
 export function Providers({ children }: Readonly<{ children: ReactNode }>) {
   const [queryClient] = useState(() => new QueryClient());
 
   return (
     <QueryClientProvider client={queryClient}>
-      <ThemeProvider>{children}</ThemeProvider>
+      <LocaleProvider>
+        <ThemeProvider>{children}</ThemeProvider>
+      </LocaleProvider>
     </QueryClientProvider>
   );
 }

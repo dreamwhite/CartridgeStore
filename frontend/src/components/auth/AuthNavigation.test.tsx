@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import { AuthNavigation } from "./AuthNavigation";
+import { LocaleProvider } from "../../providers/LocaleProvider";
 
 const authState = vi.hoisted(() => ({ value: { isPending: false, error: null as Error | null, user: null as null | { name?: string; username: string; permissions: string[] } } }));
 const routerState = vi.hoisted(() => ({ replace: vi.fn() }));
@@ -29,6 +30,8 @@ describe("AuthNavigation", () => {
     authState.value = { isPending: false, error: new TypeError("auth down"), user: null };
     routerState.replace.mockReset();
     logoutState.logout.mockReset();
+    window.localStorage.clear();
+    document.documentElement.lang = "en";
   });
 
   test("keeps an authentication outage compact while exposing an accessible retry", () => {
@@ -71,5 +74,19 @@ describe("AuthNavigation", () => {
 
     await user.click(screen.getByRole("menuitem", { name: "Sign out" }));
     expect(logoutState.logout).toHaveBeenCalledOnce();
+  });
+
+  test("changes and persists the language from the account menu", async () => {
+    const user = userEvent.setup();
+    authState.value = { isPending: false, error: null, user: { name: "Ada", username: "ada", permissions: [] } };
+    render(<LocaleProvider><QueryClientProvider client={new QueryClient()}><AuthNavigation /></QueryClientProvider></LocaleProvider>);
+
+    await user.click(screen.getByRole("button", { name: "Open account menu for Ada" }));
+    await user.click(screen.getByRole("menuitemradio", { name: "Italiano" }));
+
+    expect(window.localStorage.getItem("prg32-locale")).toBe("it");
+    expect(document.documentElement.lang).toBe("it");
+    await user.click(screen.getByRole("button", { name: "Apri il menu account per Ada" }));
+    expect(screen.getByRole("menuitem", { name: "Il tuo account" })).toBeInTheDocument();
   });
 });

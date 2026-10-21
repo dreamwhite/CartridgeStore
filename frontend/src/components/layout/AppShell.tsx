@@ -12,9 +12,18 @@ import { BootSplash } from "./BootSplash";
 import { RuntimeFavicon } from "./RuntimeFavicon";
 import { navigationIsActive, PUBLIC_NAVIGATION } from "./navigation";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogTrigger } from "../ui/dialog";
+import { useLocale } from "../../providers/LocaleProvider";
+
+function publicNavigationLabel(href: string, t: ReturnType<typeof useLocale>["t"]) {
+  if (href === "/explore") return t("explore");
+  if (href === "/scores") return t("leaderboards");
+  if (href === "/stats") return t("statistics");
+  return t("documentation");
+}
 
 export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
   const pathname = usePathname();
+  const { t } = useLocale();
   const [mobileOpen, setMobileOpen] = useState(false);
 
   return (
@@ -35,7 +44,7 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
             <nav aria-label="Primary navigation" className="hidden items-center gap-1 md:flex">
               {PUBLIC_NAVIGATION.map((item) => {
                 const active = navigationIsActive(pathname, item.href);
-                return <Link key={item.href} aria-current={active ? "page" : undefined} className={`rounded-md px-3 py-2 text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ring)] ${active ? "bg-[var(--color-primary-soft)] text-[var(--color-primary-strong)]" : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-text)]"}`} href={item.href}>{item.label}</Link>;
+                return <Link key={item.href} aria-current={active ? "page" : undefined} className={`rounded-md px-3 py-2 text-sm font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ring)] ${active ? "bg-[var(--color-primary-soft)] text-[var(--color-primary-strong)]" : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-text)]"}`} href={item.href}>{publicNavigationLabel(item.href, t)}</Link>;
               })}
             </nav>
             <ThemeToggle />
@@ -54,7 +63,7 @@ export function AppShell({ children }: Readonly<{ children: ReactNode }>) {
                 <nav aria-label="Mobile primary navigation" className="page-gutter grid gap-1 py-3">
                   {PUBLIC_NAVIGATION.map((item) => {
                     const active = navigationIsActive(pathname, item.href);
-                    return <Link key={item.href} aria-current={active ? "page" : undefined} className={`rounded-md px-3 py-3 text-sm font-semibold ${active ? "bg-[var(--color-primary-soft)] text-[var(--color-primary-strong)]" : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-text)]"}`} href={item.href} onClick={() => setMobileOpen(false)}>{item.label}</Link>;
+                    return <Link key={item.href} aria-current={active ? "page" : undefined} className={`rounded-md px-3 py-3 text-sm font-semibold ${active ? "bg-[var(--color-primary-soft)] text-[var(--color-primary-strong)]" : "text-[var(--color-text-muted)] hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-text)]"}`} href={item.href} onClick={() => setMobileOpen(false)}>{publicNavigationLabel(item.href, t)}</Link>;
                   })}
                 </nav>
               </DialogContent>

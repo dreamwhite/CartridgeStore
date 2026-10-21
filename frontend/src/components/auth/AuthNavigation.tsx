@@ -8,6 +8,7 @@ import {
   CircleUserRound,
   ChevronDown,
   ExternalLink,
+  Languages,
   LayoutDashboard,
   LogOut,
   Network,
@@ -26,6 +27,7 @@ import { removeSensitiveQueryData } from "../../lib/auth/query-cache";
 import { authErrorMessage } from "../../lib/api/auth";
 import { authIntegrationEnabled } from "../../lib/auth/config";
 import { useCurrentUser } from "../../lib/auth/use-current-user";
+import { useLocale } from "../../providers/LocaleProvider";
 import { accountNavigation } from "../layout/navigation";
 import { Button } from "../ui/button";
 import { StatusMessage } from "../ui/status";
@@ -34,14 +36,24 @@ import {
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuLabel,
+  DropdownMenuRadioGroup,
+  DropdownMenuRadioItem,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
+
+function contextualLabel(href: string, t: ReturnType<typeof useLocale>["t"], fallback: string) {
+  if (href === "/workspace") return t("creatorStudio");
+  if (href === "/review") return t("reviewQueue");
+  if (href === "/admin") return t("administration");
+  return fallback;
+}
 
 export function AuthNavigation() {
   const router = useRouter();
   const queryClient = useQueryClient();
   const current = useCurrentUser();
+  const { locale, setLocale, t } = useLocale();
   const logout = useMutation({
     mutationFn: logoutLocal,
     onSuccess: () => {
@@ -70,15 +82,15 @@ export function AuthNavigation() {
           aria-hidden="true"
           className="size-8 animate-pulse rounded-full bg-[var(--color-surface-muted)]"
         />
-        <span className="sr-only">Loading account…</span>
+        <span className="sr-only">{t("loadingAccount")}…</span>
       </span>
     );
   }
   if (current.error) {
     const message = authErrorMessage(current.error, "session");
-    return <span className="inline-flex min-w-0 items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300" role="alert" title={message}><AlertTriangle aria-hidden="true" className="size-3.5 shrink-0" /><span aria-hidden="true" className="hidden sm:inline">Auth unavailable</span><span className="sr-only">{message}. </span><Link aria-label="Retry authentication" className="shrink-0 font-semibold underline underline-offset-2" href="/login">Retry</Link></span>;
+    return <span className="inline-flex min-w-0 items-center gap-1.5 text-xs text-amber-700 dark:text-amber-300" role="alert" title={message}><AlertTriangle aria-hidden="true" className="size-3.5 shrink-0" /><span aria-hidden="true" className="hidden sm:inline">{t("authUnavailable")}</span><span className="sr-only">{message}. </span><Link aria-label={t("retryAuthentication")} className="shrink-0 font-semibold underline underline-offset-2" href="/login">{t("retry")}</Link></span>;
   }
-  if (!current.user) return <Button asChild size="sm" className="px-3"><Link href="/login">Sign in</Link></Button>;
+  if (!current.user) return <Button asChild size="sm" className="px-3"><Link href="/login">{t("signIn")}</Link></Button>;
 
   const displayName = current.user.name?.trim() || current.user.username;
   const contextualLinks = accountNavigation(current.user.permissions).filter((item) => item.href !== "/dashboard/account");
@@ -93,7 +105,7 @@ export function AuthNavigation() {
     <div className="flex items-center gap-2 text-sm">
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
-          <Button type="button" variant="ghost" size="sm" className="max-w-48 gap-2 px-1.5 sm:px-2" aria-label={`Open account menu for ${displayName}`}>
+          <Button type="button" variant="ghost" size="sm" className="max-w-48 gap-2 px-1.5 sm:px-2" aria-label={`${t("openAccountMenu")} ${displayName}`}>
             <span className="grid size-7 shrink-0 place-items-center rounded-full bg-[var(--color-primary-soft)] text-[var(--color-primary-strong)]">
               <UserRound aria-hidden="true" className="size-4" />
             </span>
@@ -117,22 +129,22 @@ export function AuthNavigation() {
           </div>
 
           <DropdownMenuLabel className="px-3 pb-1 pt-3 text-[10px] uppercase tracking-[0.16em]">
-            Account
+            {t("account")}
           </DropdownMenuLabel>
           <DropdownMenuItem asChild className="gap-3 px-3 py-2.5">
             <Link href="/dashboard/account">
               <CircleUserRound aria-hidden="true" className="size-4 text-[var(--color-primary)]" />
-              <span>Your account</span>
+              <span>{t("yourAccount")}</span>
             </Link>
           </DropdownMenuItem>
 
           <DropdownMenuLabel className="px-3 pb-1 pt-3 text-[10px] uppercase tracking-[0.16em]">
-            Workspace
+            {t("workspace")}
           </DropdownMenuLabel>
           <DropdownMenuItem asChild className="gap-3 px-3 py-2.5">
             <Link href="/dashboard">
               <LayoutDashboard aria-hidden="true" className="size-4 text-[var(--color-primary)]" />
-              <span>Developer dashboard</span>
+              <span>{t("developerDashboard")}</span>
             </Link>
           </DropdownMenuItem>
           {contextualLinks.map((item) => {
@@ -141,7 +153,7 @@ export function AuthNavigation() {
               <DropdownMenuItem key={item.href} asChild className="gap-3 px-3 py-2.5">
                 <Link href={item.href}>
                   <Icon aria-hidden="true" className="size-4 text-[var(--color-primary)]" />
-                  <span>{item.label}</span>
+                  <span>{contextualLabel(item.href, t, item.label)}</span>
                 </Link>
               </DropdownMenuItem>
             );
@@ -150,15 +162,31 @@ export function AuthNavigation() {
             <DropdownMenuItem asChild className="gap-3 px-3 py-2.5">
               <Link href="/admin/federation">
                 <Network aria-hidden="true" className="size-4 text-[var(--color-primary)]" />
-                <span>Federation</span>
+                <span>{t("federation")}</span>
               </Link>
             </DropdownMenuItem>
           )}
           <DropdownMenuSeparator />
+          <DropdownMenuLabel className="px-3 pb-1 pt-3 text-[10px] uppercase tracking-[0.16em]">
+            {t("language")}
+          </DropdownMenuLabel>
+          <DropdownMenuRadioGroup value={locale} onValueChange={(value) => {
+            if (value === "en" || value === "it") setLocale(value);
+          }}>
+            <DropdownMenuRadioItem value="en" className="gap-3 py-2.5 pr-3 pl-9">
+              <Languages aria-hidden="true" className="size-4 text-[var(--color-primary)]" />
+              <span>{t("english")}</span>
+            </DropdownMenuRadioItem>
+            <DropdownMenuRadioItem value="it" className="gap-3 py-2.5 pr-3 pl-9">
+              <Languages aria-hidden="true" className="size-4 text-[var(--color-primary)]" />
+              <span>{t("italian")}</span>
+            </DropdownMenuRadioItem>
+          </DropdownMenuRadioGroup>
+          <DropdownMenuSeparator />
           <DropdownMenuItem asChild className="gap-3 px-3 py-2.5">
             <Link href={`/users/${encodeURIComponent(current.user.username)}`}>
               <ExternalLink aria-hidden="true" className="size-4 text-[var(--color-text-muted)]" />
-              <span>Public profile</span>
+              <span>{t("publicProfile")}</span>
             </Link>
           </DropdownMenuItem>
           <DropdownMenuItem
@@ -166,11 +194,11 @@ export function AuthNavigation() {
             className="gap-3 px-3 py-2.5 text-rose-700 data-[highlighted]:bg-rose-50 data-[highlighted]:text-rose-800 dark:text-rose-300 dark:data-[highlighted]:bg-rose-950/40 dark:data-[highlighted]:text-rose-200"
           >
             <LogOut aria-hidden="true" className="size-4" />
-            <span>Sign out</span>
+            <span>{t("signOut")}</span>
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
-      {logout.isPending && <span className="sr-only" role="status">Signing out…</span>}
+      {logout.isPending && <span className="sr-only" role="status">{t("signingOut")}</span>}
       {logout.error && <StatusMessage tone="danger" className="px-2 py-1">{authErrorMessage(logout.error, "logout")}</StatusMessage>}
     </div>
   );
