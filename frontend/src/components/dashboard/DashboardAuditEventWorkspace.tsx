@@ -1,12 +1,12 @@
 "use client";
 
-import { ArrowLeft, CheckCircle2, Clipboard, ClipboardCheck, Clock3, FileSearch, XCircle } from "lucide-react";
+import { ArrowLeft, ArrowRight, CheckCircle2, Clipboard, ClipboardCheck, Clock3, FileSearch, XCircle } from "lucide-react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useQuery } from "@tanstack/react-query";
 import { useState, useSyncExternalStore } from "react";
 
-import { adminApi, AdminIntegrationUnavailableError, type AdminAuditEvent } from "../../lib/api/admin";
+import { adminApi, AdminIntegrationUnavailableError, type AdminAuditChange, type AdminAuditEvent } from "../../lib/api/admin";
 import { ApiRequestError } from "../../lib/api/client";
 import { adminQueryKeys } from "../../lib/api/query-keys";
 import { useCurrentUser } from "../../lib/auth/use-current-user";
@@ -61,12 +61,44 @@ function CopyRequestId({ requestId }: { requestId: string }) {
   return <button type="button" className="inline-flex items-center gap-2 rounded-md border border-[var(--color-border)] px-2.5 py-1.5 text-xs font-semibold text-[var(--color-text-muted)] hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-text)]" onClick={() => { void navigator.clipboard?.writeText(requestId).then(() => setCopied(true)); }}><span className="sr-only">Copy request ID</span>{copied ? <ClipboardCheck aria-hidden="true" className="size-3.5" /> : <Clipboard aria-hidden="true" className="size-3.5" />}{copied ? "Copied" : "Copy ID"}</button>;
 }
 
+function isAuditChange(value: unknown): value is AdminAuditChange {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const change = value as Record<string, unknown>;
+  return typeof change.key === "string" && "before" in change && "after" in change;
+}
+
+function formatAuditValue(value: unknown): string {
+  if (value === null || value === undefined) return "Not set";
+  if (typeof value === "boolean") return value ? "Enabled" : "Disabled";
+  if (typeof value === "string") return value || "Empty";
+  if (typeof value === "number") return new Intl.NumberFormat("en-US").format(value);
+  if (Array.isArray(value)) return value.length > 0 ? value.map((item) => formatAuditValue(item)).join(", ") : "None";
+  if (typeof value === "object") {
+    const redacted = value as { redacted?: unknown; configured?: unknown };
+    if (redacted.redacted === true) return redacted.configured === true ? "Configured" : "Not configured";
+    return JSON.stringify(value);
+  }
+  return String(value);
+}
+
+function SettingsChangeList({ changes }: { changes: AdminAuditChange[] }) {
+  return <ul className="mt-4 space-y-2" aria-label="Changed settings">{changes.map((change) => <li key={change.key} className="rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)]/40 p-3"><p className="text-sm font-semibold">{change.key}</p><div className="mt-2 grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] sm:items-center"><div className="rounded-md border border-[var(--color-danger)]/30 bg-[var(--color-danger-soft)] px-3 py-2"><p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--color-danger-foreground)]">Previous</p><p className="mt-1 break-words text-sm text-[var(--color-danger-foreground)]">{formatAuditValue(change.before)}</p></div><ArrowRight aria-hidden="true" className="hidden size-4 text-[var(--color-text-muted)] sm:block" /><div className="rounded-md border border-[var(--color-success)]/30 bg-[var(--color-success-soft)] px-3 py-2"><p className="text-[10px] font-bold uppercase tracking-[0.12em] text-[var(--color-success-foreground)]">New value</p><p className="mt-1 break-words text-sm font-semibold text-[var(--color-success-foreground)]">{formatAuditValue(change.after)}</p></div></div></li>)}</ul>;
+}
+
+function LegacySettingsSummary({ keys }: { keys: string[] }) {
+  return <section><h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Historical settings update</h3><div className="mt-3 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface-muted)]/50 p-4"><p className="text-sm font-semibold">Before/after values are not available</p><p className="mt-1 text-sm leading-6 text-[var(--color-text-muted)]">This event was recorded before value-level change tracking was enabled. The audit record contains the fields submitted by the form, but not the values that were actually different.</p><div className="mt-4 flex items-center justify-between gap-4 border-t border-[var(--color-border)] pt-3 text-sm"><span className="text-[var(--color-text-muted)]">Recorded fields</span><span className="font-semibold">{keys.length}</span></div></div><details className="mt-4 rounded-lg border border-[var(--color-border)] bg-[var(--color-surface)] px-4 py-3"><summary className="cursor-pointer text-sm font-semibold">Show recorded field names</summary><ul className="mt-3 flex flex-wrap gap-2">{keys.map((key) => <li key={key} className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-2.5 py-1.5 font-mono text-xs text-[var(--color-text-muted)]">{key}</li>)}</ul></details></section>;
+}
+
 function EventSummary({ event }: { event: AdminAuditEvent }) {
   const entries = event.summary ? Object.entries(event.summary) : [];
   if (entries.length === 0) return <p className="text-sm text-[var(--color-text-muted)]">This event has no additional summary data.</p>;
+  if (event.action === "settings.update" && Array.isArray(event.summary?.changes)) {
+    const changes = event.summary.changes.filter(isAuditChange);
+    if (changes.length > 0) return <section><h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Changed settings</h3><p className="mt-2 text-sm text-[var(--color-text-muted)]">Each row shows the effective value before and after this operation.</p><SettingsChangeList changes={changes} /></section>;
+  }
   if (event.action === "settings.update" && Array.isArray(event.summary?.keys)) {
     const keys = event.summary.keys.filter((key): key is string => typeof key === "string");
-    return <section><h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">Changed settings</h3><p className="mt-2 text-sm text-[var(--color-text-muted)]">Only the settings included in this operation are listed.</p>{keys.length > 0 ? <ul className="mt-4 grid gap-2 sm:grid-cols-2">{keys.map((key) => <li key={key} className="rounded-md border border-[var(--color-border)] bg-[var(--color-surface-muted)] px-3 py-2 text-sm font-medium">{key}</li>)}</ul> : <p className="mt-4 text-sm text-[var(--color-text-muted)]">No effective setting changes were recorded.</p>}</section>;
+    return <LegacySettingsSummary keys={keys} />;
   }
   return <div className="space-y-5">{entries.map(([key, value]) => <section key={key} className="border-b border-[var(--color-border)] pb-5 last:border-0 last:pb-0"><h3 className="text-xs font-semibold uppercase tracking-[0.12em] text-[var(--color-text-muted)]">{readable(key)}</h3><div className="mt-3 text-sm leading-6"><SummaryValue value={value} /></div></section>)}</div>;
 }
