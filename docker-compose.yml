@@ -26,12 +26,11 @@ services:
       PRG32_BACKEND_BOOTSTRAP_TOKEN: ${PRG32_BACKEND_BOOTSTRAP_TOKEN:-local-disposable-bootstrap-token-change-me-123456}
       PRG32_BACKEND_SESSION_SECURE: "true"
       PRG32_BACKEND_SESSION_SAMESITE: none
-      PRG32_BACKEND_FRONTEND_PUBLIC_ORIGIN: https://store.prg32.dream.test/
-      PRG32_BACKEND_OIDC_PUBLIC_ORIGIN: https://api.prg32.dream.test/
-      PRG32_BACKEND_FEDERATION_PUBLIC_ORIGIN: https://api.prg32.dream.test/
-      PRG32_BACKEND_CORS_ORIGINS: https://store.prg32.dream.test
-      # Mailpit remains an external Dream service; allow only this exact
-      # container through outbound checks.
+      PRG32_BACKEND_FRONTEND_PUBLIC_ORIGIN: ${PRG32_STORE_ORIGIN:-https://store.prg32.test}
+      PRG32_BACKEND_OIDC_PUBLIC_ORIGIN: ${PRG32_API_ORIGIN:-https://api.prg32.test}
+      PRG32_BACKEND_FEDERATION_PUBLIC_ORIGIN: ${PRG32_API_ORIGIN:-https://api.prg32.test}
+      PRG32_BACKEND_CORS_ORIGINS: ${PRG32_STORE_ORIGIN:-https://store.prg32.test}
+      PRG32_BACKEND_SESSION_COOKIE_DOMAIN: ${PRG32_SESSION_COOKIE_DOMAIN:-.prg32.test}
       PRG32_BACKEND_SETUP_NETWORK_TEST_ALLOWLIST: ${PRG32_BACKEND_SETUP_NETWORK_TEST_ALLOWLIST:-mailpit}
       PRG32_BACKEND_BACKUP_ENABLED: "false"
       # The deployment permits mDNS in local development; the persisted
@@ -47,7 +46,6 @@ services:
       - ${PRG32_CANONICAL_DATA_DIR:-./.local/candidate/canonical}:/canonical
     networks:
       - app
-      - mail
     healthcheck:
       test:
         - CMD
@@ -75,7 +73,8 @@ services:
       NEXT_TELEMETRY_DISABLED: "1"
       WATCHPACK_POLLING: "true"
       WATCHPACK_POLLING_INTERVAL: "1000"
-      NEXT_PUBLIC_PRG32_API_ORIGIN: ${PRG32_API_ORIGIN:-https://api.prg32.dream.test}
+      NEXT_PUBLIC_PRG32_API_ORIGIN: ${PRG32_API_ORIGIN:-https://api.prg32.test}
+      NEXT_PUBLIC_PRG32_STORE_ORIGIN: ${PRG32_STORE_ORIGIN:-https://store.prg32.test}
     volumes:
       - ./frontend:/app
       - ${PRG32_FRONTEND_NODE_MODULES_DIR:-./.local/frontend/node_modules}:/app/node_modules
@@ -100,7 +99,7 @@ services:
       NEXT_TELEMETRY_DISABLED: "1"
       WATCHPACK_POLLING: "true"
       WATCHPACK_POLLING_INTERVAL: "1000"
-      NEXT_PUBLIC_PRG32_STORE_ORIGIN: ${PRG32_STORE_ORIGIN:-https://store.prg32.dream.test}
+      NEXT_PUBLIC_PRG32_STORE_ORIGIN: ${PRG32_STORE_ORIGIN:-https://store.prg32.test}
     volumes:
       - ./docs-site:/app
       - ./frontend/content/docs:/app/content/docs
@@ -119,8 +118,8 @@ services:
   nginx:
     image: nginx:1.27-alpine
     environment:
-      PRG32_STORE_DOMAIN: ${PRG32_STORE_DOMAIN:-store.prg32.dream.test}
-      PRG32_API_DOMAIN: ${PRG32_API_DOMAIN:-api.prg32.dream.test}
+      PRG32_STORE_DOMAIN: ${PRG32_STORE_DOMAIN:-store.prg32.test}
+      PRG32_API_DOMAIN: ${PRG32_API_DOMAIN:-api.prg32.test}
       NGINX_ENVSUBST_FILTER: "^(PRG32_STORE_DOMAIN|PRG32_API_DOMAIN)$"
     depends_on:
       backend:
@@ -142,6 +141,3 @@ services:
 networks:
   app:
     name: prg32_store_dev
-  mail:
-    name: ${DREAM_MAIL_NETWORK:-dream_mail}
-    external: true

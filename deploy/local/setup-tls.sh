@@ -3,8 +3,8 @@ set -eu
 
 repository_root=$(CDPATH= cd -- "$(dirname -- "$0")/../.." && pwd)
 tls_directory=${PRG32_TLS_DIR:-"$repository_root/.local/tls"}
-store_domain=${PRG32_STORE_DOMAIN:-store.prg32.dream.test}
-api_domain=${PRG32_API_DOMAIN:-api.prg32.dream.test}
+store_domain=${PRG32_STORE_DOMAIN:-store.prg32.test}
+api_domain=${PRG32_API_DOMAIN:-api.prg32.test}
 
 if ! command -v mkcert >/dev/null 2>&1; then
   printf '%s\n' "mkcert is required to create trusted local certificates." >&2

@@ -38,10 +38,10 @@ services:
       PRG32_BACKEND_WEBAUTHN_RP_ID: ${PRG32_M534_WEBAUTHN_RP_ID:-store.m52g14.test}
       PRG32_BACKEND_WEBAUTHN_RP_NAME: PRG32 Disposable Store
       PRG32_BACKEND_WEBAUTHN_ORIGINS: ${PRG32_M534_WEBAUTHN_ORIGINS:-https://store.m52g14.test}
-      PRG32_BACKEND_FRONTEND_PUBLIC_ORIGIN: ${PRG32_M534_STORE_ORIGIN:-https://store.prg32.dream.test}
-      PRG32_BACKEND_FEDERATION_PUBLIC_ORIGIN: ${PRG32_M534_API_ORIGIN:-https://api.prg32.dream.test}
-      PRG32_BACKEND_OIDC_PUBLIC_ORIGIN: ${PRG32_M534_API_ORIGIN:-https://api.prg32.dream.test}
-      PRG32_BACKEND_CORS_ORIGINS: ${PRG32_M534_CORS_ORIGIN:-https://store.prg32.dream.test}
+      PRG32_BACKEND_FRONTEND_PUBLIC_ORIGIN: ${PRG32_M534_STORE_ORIGIN:-https://store.prg32.test}
+      PRG32_BACKEND_FEDERATION_PUBLIC_ORIGIN: ${PRG32_M534_API_ORIGIN:-https://api.prg32.test}
+      PRG32_BACKEND_OIDC_PUBLIC_ORIGIN: ${PRG32_M534_API_ORIGIN:-https://api.prg32.test}
+      PRG32_BACKEND_CORS_ORIGINS: ${PRG32_M534_CORS_ORIGIN:-https://store.prg32.test}
       PRG32_BACKEND_EMAIL_TRANSPORT: smtp
       PRG32_BACKEND_EMAIL_SMTP_HOST: ${PRG32_M534_SMTP_HOST:-mailpit}
       PRG32_BACKEND_EMAIL_SMTP_PORT: "${PRG32_M534_SMTP_PORT:-1025}"
@@ -85,13 +85,13 @@ services:
       context: ../../frontend
       dockerfile: Dockerfile.operational
       args:
-        NEXT_PUBLIC_PRG32_API_ORIGIN: ${PRG32_M534_API_ORIGIN:-https://api.prg32.dream.test}
+        NEXT_PUBLIC_PRG32_API_ORIGIN: ${PRG32_M534_API_ORIGIN:-https://api.prg32.test}
     image: prg32-cartridge-store-next:m534-operational-test
     environment:
       NODE_ENV: production
       HOSTNAME: 0.0.0.0
       NEXT_TELEMETRY_DISABLED: "1"
-      NEXT_PUBLIC_PRG32_API_ORIGIN: ${PRG32_M534_API_ORIGIN:-https://api.prg32.dream.test}
+      NEXT_PUBLIC_PRG32_API_ORIGIN: ${PRG32_M534_API_ORIGIN:-https://api.prg32.test}
       NEXT_PUBLIC_PRG32_WS_URL: ws://127.0.0.1:${PRG32_M534_FASTIFY_PORT:-15080}/api/multiplayer
     depends_on:
       fastify:
