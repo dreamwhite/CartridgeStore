@@ -5,8 +5,8 @@
 ```bash
 docker compose --profile dev ps
 docker compose --profile dev logs --tail=200 backend
-curl -fsS https://api.prg32.dream.test/health
-curl -fsS https://api.prg32.dream.test/ready
+curl -fsS https://api.prg32.test/health
+curl -fsS https://api.prg32.test/ready
 ```
 
 ## Backups

@@ -3,11 +3,11 @@
 ## Runtime topology
 
 ```text
-                    Local Nginx edge / Dream Traefik
+                    Local Nginx edge / Traefik
                               │
                  ┌────────────┼────────────┐
                  │                         │
-       store.prg32.dream.test      api.prg32.dream.test
+       store.prg32.test      api.prg32.test
                  │                         │
              Next.js :3000             Fastify :5090
                  │
@@ -15,10 +15,10 @@
                  │                         │
                  └────── browser API ────┘
                               │
-              external Dream Platform mail network
+                 optional configured SMTP service
 ```
 
-The diagram shows the local dnsmasq-backed `.dream.test` environment only.
+The diagram shows the local dnsmasq-backed `.prg32.test` environment only.
 Production uses the same service topology with operator-provided domains and
 origins. Nginx owns local TLS and host routing. The browser calls the API origin directly;
 Next does not proxy application routes. Fastify owns HTTP, WebSocket,
@@ -33,11 +33,14 @@ The development Compose file has four application services plus the selected edg
 | `backend` | Fastify API, canonical SQLite and filesystem store |
 | `next` | Next.js development server and UI |
 | `docs` | Dedicated Next.js/Fumadocs documentation service |
-| `nginx` | Local TLS termination, host routing and WebSocket forwarding |
+| `nginx` | Optional local TLS termination, host routing and WebSocket forwarding |
 
-The backend also joins the external `dream_mail` network, where Dream Platform
-provides Mailpit. The application services otherwise join the private
-`prg32_store_dev` network. The default data directory is
+The generic Traefik overlay is the recommended local edge. It owns the same
+routes as Nginx, loads the mkcert certificate and uses the configurable edge
+network. Dream Platform is an optional integration, not a runtime dependency.
+
+The application services join the private `prg32_store_dev` network and the
+selected edge network. The default data directory is
 `.local/candidate/canonical`, which is disposable and never replaces an
 operator-controlled data root.
 

@@ -12,56 +12,81 @@ pnpm --version
 The repository uses pnpm and Node 24. Install dependencies once with
 `pnpm install` at the root and in each workspace when needed.
 
-## Local standalone development stack
+## Local development with dnsmasq, mkcert and Traefik
 
-dnsmasq resolves the `.dream.test` hosts. These are local development names
-only, not production domains. Nginx terminates local TLS and routes the Store
-and API hosts to the application containers, so Dream/Traefik is not required
-for the application edge.
+Dream Platform is not required. The repository includes a generic Traefik
+edge overlay and uses `store.prg32.test` plus `api.prg32.test` by default.
+These are local-only names; choose another suffix by changing the variables in
+`.env`.
 
-The backend joins Dream Platform's external `dream_mail` network to reuse its
-Mailpit service. This Compose project does not create or proxy Mailpit.
+### 1. Configure local DNS
 
-Create a trusted local certificate once:
+Install dnsmasq using the package manager for the host, then add a file such as
+`/etc/dnsmasq.d/prg32.conf`:
+
+```ini
+address=/.prg32.test/127.0.0.1
+```
+
+Restart dnsmasq and verify that both names resolve to the machine running
+Docker:
 
 ```bash
+dig +short store.prg32.test
+dig +short api.prg32.test
+```
+
+If Docker is running on another machine, replace `127.0.0.1` with that
+machine's LAN address. The DNS suffix, Compose variables and certificate names
+must all match.
+
+### 2. Create trusted local TLS with mkcert
+
+Install [mkcert](https://github.com/FiloSottile/mkcert), then run:
+
+```bash
+cp .env.example .env
 ./deploy/local/setup-tls.sh
 ```
 
-Then start the complete stack from the repository root:
+The script runs `mkcert -install`, creates the local CA when needed, and writes
+`.local/tls/prg32-local.pem` plus `.local/tls/prg32-local-key.pem` for both
+configured hostnames. The files are ignored by Git. If you choose custom
+domains, set `PRG32_STORE_DOMAIN` and `PRG32_API_DOMAIN` before running the
+script so the certificate contains those exact names.
 
-```bash
-docker compose up -d --build
-```
-
-That command starts the repository-owned standalone Nginx edge. To run the
-application through the shared Dream Platform Traefik edge instead, keep
-Dream Platform's Traefik and Mailpit services running and use the override:
+### 3. Start the stack with the repository-owned Traefik edge
 
 ```bash
 docker compose \
-  --env-file /path/to/dream-platform/.env \
   -f docker-compose.yml \
-  -f docker-compose.dream-platform.yml \
-  up -d --build backend next
+  -f docker-compose.traefik.yml \
+  up -d --build
 ```
 
-In Dream Platform mode, visit `https://store.prg32.dream.test`. Traefik owns
-ports 80 and 443, `backend` and `next` join `dream_edge`, and the backend also
-uses the external `dream_mail` network. Nginx is not started.
+The overlay starts Traefik, publishes ports 80 and 443, redirects HTTP to
+HTTPS, loads the mkcert certificate, routes `/api` and WebSocket traffic to
+Fastify, `/` to Next.js and `/docs` to the separate Fumadocs service. It uses a
+normal Docker network named by `PRG32_TRAEFIK_NETWORK`; no `dream_edge`,
+Dream-specific middleware or Dream Platform installation is needed.
 
 Open:
 
-- `https://store.prg32.dream.test` — Next storefront;
-- `https://api.prg32.dream.test/health` — Fastify liveness;
-- `https://api.prg32.dream.test/ready` — Fastify readiness.
+- `https://store.prg32.test` — Next storefront;
+- `https://store.prg32.test/docs` — Fumadocs documentation;
+- `https://api.prg32.test/health` — Fastify liveness;
+- `https://api.prg32.test/ready` — Fastify readiness.
 
-When Dream Platform is running, its Mailpit inbox is available at
-`https://mailpit.dream.test`.
+The base Compose file still supports the standalone Nginx edge through its
+default `nginx` service. Use that mode only when you specifically want Nginx;
+do not start it together with the Traefik overlay because both need ports 80
+and 443.
 
-The stack contains Fastify, Next.js and Nginx. Mailpit is an external Dream
-Platform dependency on the `dream_mail` network. The canonical local data root
-defaults to `.local/candidate/canonical`; set
+Dream Platform remains an optional integration. Use
+`docker-compose.dream-platform.yml` only when an existing Dream Traefik edge
+and its external networks are intentionally available.
+
+The canonical local data root defaults to `.local/candidate/canonical`; set
 `PRG32_CANONICAL_DATA_DIR` to an explicit disposable directory when required.
 Never point this development stack at operational data.
 

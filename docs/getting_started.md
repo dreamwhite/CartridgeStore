@@ -10,8 +10,8 @@ nvm use 24
 docker compose --profile dev up -d --build
 ```
 
-Open `https://store.prg32.dream.test` and use
-`https://api.prg32.dream.test/ready` to confirm the API.
+Open `https://store.prg32.test` and use
+`https://api.prg32.test/ready` to confirm the API.
 
 ## Direct path
 

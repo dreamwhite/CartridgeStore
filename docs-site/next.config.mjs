@@ -6,7 +6,7 @@ const nextConfig = {
   output: "standalone",
   reactStrictMode: true,
   allowedDevOrigins: [
-    process.env.PRG32_STORE_DOMAIN?.trim() || "store.prg32.dream.test",
+    process.env.PRG32_STORE_DOMAIN?.trim() || "store.prg32.test",
   ],
   async redirects() {
     return [

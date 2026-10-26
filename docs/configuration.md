@@ -36,7 +36,7 @@ The frontend has no API rewrite target or second backend origin.
 
 ## Production host variables
 
-The `dream.test` values in the root development Compose file are local-only
+The `prg32.test` values in the root development Compose file are local-only
 dnsmasq names. A production server must provide its own registered domains and
 HTTPS endpoints to the operational template:
 
@@ -50,7 +50,7 @@ HTTPS endpoints to the operational template:
 | `PRG32_COOKIE_DOMAIN` | Production session-cookie domain |
 
 The operational template intentionally fails Compose interpolation when these
-values are missing; it must never silently deploy the local `.dream.test`
+values are missing; it must never silently deploy the local `.prg32.test`
 names.
 
 ## Compatibility fallbacks

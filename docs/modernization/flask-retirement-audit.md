@@ -17,8 +17,8 @@ No operational or demonstration data was migrated, deleted, or rewritten.
 ## Final topology
 
 ```text
-local store.prg32.dream.test  -> Next.js
-local api.prg32.dream.test    -> Fastify
+local store.prg32.test  -> Next.js
+local api.prg32.test    -> Fastify
 production configured store host -> Next.js
 production configured api host   -> Fastify
 ```

@@ -18,8 +18,8 @@ The integrated Dream workflow is:
 docker compose --profile dev up -d --build
 ```
 
-Then open `https://store.prg32.dream.test`. The API and WebSocket endpoint are
-published at `https://api.prg32.dream.test`.
+Then open `https://store.prg32.test`. The API and WebSocket endpoint are
+published at `https://api.prg32.test`.
 
 ## Checks
 

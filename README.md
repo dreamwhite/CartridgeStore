@@ -5,17 +5,17 @@ runtime is a Fastify/TypeScript API paired with a Next.js frontend.
 
 ## Development
 
-The local dnsmasq-managed `.dream.test` records expose the standalone Nginx
-edge at:
+The local development stack can use any private DNS suffix. The documented
+default is `prg32.test`, resolved by dnsmasq and terminated by the repository's
+generic Traefik overlay:
 
-- <https://store.prg32.dream.test> — Next.js storefront and dashboard;
-- <https://store.prg32.dream.test/docs> — dedicated Fumadocs documentation service;
-- <https://api.prg32.dream.test> — Fastify API and WebSocket relay.
+- <https://store.prg32.test> — Next.js storefront and dashboard;
+- <https://store.prg32.test/docs> — dedicated Fumadocs documentation service;
+- <https://api.prg32.test> — Fastify API and WebSocket relay.
 
-The backend attaches to the external `dream_mail` Docker network so it can use
-the Mailpit instance owned by Dream Platform. Mailpit is intentionally not part
-of this repository's Compose project; its inbox remains available at
-<https://mailpit.dream.test> when Dream Platform is running.
+Dream Platform is not required. Email is kept in memory in the disposable
+development profile; configure SMTP from the Store settings when a real mail
+service is needed.
 
 These are local-only development hosts. Production runs on another server and
 must configure its own registered storefront/API domains, HTTPS origins,
@@ -27,8 +27,10 @@ Start the development topology with Node.js 24 and Docker Desktop:
 ```bash
 source "$HOME/.nvm/nvm.sh"
 nvm use 24
+cp .env.example .env
+# Add the two hosts to dnsmasq; see docs/development.md.
 ./deploy/local/setup-tls.sh
-docker compose up -d --build
+docker compose -f docker-compose.yml -f docker-compose.traefik.yml up -d --build
 ```
 
 Persistent canonical development data is kept in `.local/candidate/canonical`;
@@ -46,8 +48,9 @@ Firmware-facing constants remain unchanged, including `esp32c6`, `qemu`,
 The public API is documented in [docs/api.md](docs/api.md). The current
 topology and operational boundaries are described in
 [docs/architecture.md](docs/architecture.md).
-The shared local infrastructure contract is documented in
-[docs/dream-platform.md](docs/dream-platform.md).
+The generic local DNS, TLS and Traefik contract is documented in
+[docs/development.md](docs/development.md). Dream Platform remains an optional
+integration documented in [docs/dream-platform.md](docs/dream-platform.md).
 
 ## Validation
 

@@ -13,8 +13,8 @@ Dream/Traefik is not required for the application edge:
 
 | Local host | Service |
 | --- | --- |
-| `store.prg32.dream.test` | Next.js storefront |
-| `api.prg32.dream.test` | Fastify API and WebSocket relay |
+| `store.prg32.test` | Next.js storefront |
+| `api.prg32.test` | Fastify API and WebSocket relay |
 
 Do not publish those names as production URLs. Production runs on a different
 server and must set its own registered hostnames and HTTPS origins before

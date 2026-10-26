@@ -3,7 +3,7 @@ import type { BaseLayoutProps } from "fumadocs-ui/layouts/shared";
 export function baseOptions(): BaseLayoutProps {
   const storeOrigin =
     process.env.NEXT_PUBLIC_PRG32_STORE_ORIGIN?.trim() ||
-    "https://store.prg32.dream.test";
+    "https://store.prg32.test";
 
   return {
     nav: {
