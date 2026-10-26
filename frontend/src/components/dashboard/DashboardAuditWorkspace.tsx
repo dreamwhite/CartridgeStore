@@ -13,7 +13,7 @@ import { Button } from "../ui/button";
 import { SearchInput } from "../ui/search-input";
 import { SelectField, SelectItem } from "../ui/select";
 import { StatusMessage } from "../ui/status";
-import { DashboardFrame, DashboardLoading } from "./DashboardWorkspace";
+import { DashboardFrame, DashboardLoading } from "./DashboardFrame";
 
 const PAGE_SIZE_OPTIONS = [15, 25, 50];
 

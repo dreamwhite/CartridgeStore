@@ -2,7 +2,7 @@
 
 import { useCurrentUser } from "../../lib/auth/use-current-user";
 import { AccountWorkspace } from "../account/AccountWorkspace";
-import { DashboardFrame } from "./DashboardWorkspace";
+import { DashboardFrame } from "./DashboardFrame";
 
 /** Renders account management inside the dashboard shell. */
 export function DashboardAccountWorkspace() {

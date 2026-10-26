@@ -16,7 +16,7 @@ import { CartridgeArtwork } from "../storefront/CartridgeArtwork";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
 import { StatusMessage } from "../ui/status";
-import { DashboardFrame, DashboardLoading } from "./DashboardWorkspace";
+import { DashboardFrame, DashboardLoading } from "./DashboardFrame";
 
 function useHydrated(): boolean {
   return useSyncExternalStore(() => () => undefined, () => true, () => false);

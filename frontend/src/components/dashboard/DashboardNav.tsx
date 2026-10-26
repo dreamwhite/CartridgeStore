@@ -100,7 +100,7 @@ export function DashboardNav({ canSubmit }: { canSubmit: boolean }) {
               <Link
                 href={item.href}
                 aria-current={active ? "page" : undefined}
-                className={`group flex items-center gap-3 rounded-lg border px-3 py-2 text-sm font-semibold transition-colors ${item.children ? "pr-10" : ""} ${active ? "border-[var(--color-primary)] bg-[var(--color-primary-soft)] text-[var(--color-primary-strong)]" : "border-transparent text-[var(--color-text-muted)] hover:border-[var(--color-border)] hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-text)]"}`}
+                className={`group flex items-center gap-3 rounded-lg border px-3 py-2 text-sm font-semibold transition-colors ${item.children ? "pr-10" : ""} ${active ? "border-[var(--color-primary)] bg-[var(--color-primary-soft)] text-[var(--color-primary-strong)]" : "border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-primary-strong)]"}`}
               >
                 <Icon aria-hidden="true" className="size-4 shrink-0" />
                 <span>{item.label}</span>
@@ -112,7 +112,7 @@ export function DashboardNav({ canSubmit }: { canSubmit: boolean }) {
                   aria-controls={`dashboard-submenu-${item.href.replaceAll("/", "-")}`}
                   aria-expanded={groupExpanded}
                   aria-label={`${groupExpanded ? "Collapse" : "Expand"} ${item.label}`}
-                  className="absolute right-1 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-current transition-colors hover:bg-black/5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ring)]"
+                  className="absolute right-1 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-current transition-colors hover:text-[var(--color-primary-strong)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ring)]"
                   onClick={() => setExpandedGroups((current) => ({ ...current, [item.href]: !groupExpanded }))}
                 >
                   <ChevronDown aria-hidden="true" className={`size-4 transition-transform duration-200 ${groupExpanded ? "rotate-180" : ""}`} />
@@ -141,7 +141,7 @@ export function DashboardNav({ canSubmit }: { canSubmit: boolean }) {
                             "text-xs font-semibold transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--color-ring)]",
                             childSelected
                               ? "border-[var(--color-primary)] bg-[var(--color-primary-soft)] text-[var(--color-primary-strong)]"
-                              : "border-transparent text-[var(--color-text-muted)] hover:border-[var(--color-border)] hover:bg-[var(--color-surface-muted)] hover:text-[var(--color-primary-strong)]",
+                              : "border-transparent text-[var(--color-text-muted)] hover:text-[var(--color-primary-strong)]",
                           ].join(" ")}
                         >
                           <ChildIcon aria-hidden="true" className="size-3.5 shrink-0" />

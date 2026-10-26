@@ -14,7 +14,7 @@ import { useCurrentUser } from "../../lib/auth/use-current-user";
 import { Badge } from "../ui/badge";
 import { StatusMessage } from "../ui/status";
 import { DownloadTrend, type DownloadRange } from "../storefront/statistics-presentation";
-import { DashboardFrame, DashboardLoading } from "./DashboardWorkspace";
+import { DashboardFrame, DashboardLoading } from "./DashboardFrame";
 
 function useHydrated(): boolean {
   return useSyncExternalStore(() => () => undefined, () => true, () => false);
