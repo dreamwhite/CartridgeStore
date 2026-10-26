@@ -23,8 +23,8 @@ function fixture() {
       NODE_ENV: "test",
       PRG32_BACKEND_DB: databasePath,
       PRG32_BACKEND_STORE_DATA: root,
-      PRG32_BACKEND_CORS_ORIGINS: "https://store.prg32.dream.test",
-      PRG32_BACKEND_FRONTEND_PUBLIC_ORIGIN: "https://store.prg32.dream.test"
+      PRG32_BACKEND_CORS_ORIGINS: "https://store.prg32.test",
+      PRG32_BACKEND_FRONTEND_PUBLIC_ORIGIN: "https://store.prg32.test"
     }),
     logger: false
   });
@@ -38,13 +38,13 @@ describe("dual-origin CORS boundary", () => {
       method: "OPTIONS",
       url: "/auth/csrf",
       headers: {
-        origin: "https://store.prg32.dream.test",
+        origin: "https://store.prg32.test",
         "access-control-request-method": "GET",
         "access-control-request-headers": "x-csrftoken"
       }
     });
     expect(allowed.statusCode).toBe(204);
-    expect(allowed.headers["access-control-allow-origin"]).toBe("https://store.prg32.dream.test");
+    expect(allowed.headers["access-control-allow-origin"]).toBe("https://store.prg32.test");
     expect(allowed.headers["access-control-allow-credentials"]).toBe("true");
     expect(allowed.headers["vary"]).toBe("Origin");
 
@@ -64,9 +64,9 @@ describe("dual-origin CORS boundary", () => {
 
   it("adds CORS response headers to allowed non-preflight requests", async () => {
     const app = fixture();
-    const response = await app.inject({ method: "GET", url: "/health", headers: { origin: "https://store.prg32.dream.test" } });
+    const response = await app.inject({ method: "GET", url: "/health", headers: { origin: "https://store.prg32.test" } });
     expect(response.statusCode).toBe(200);
-    expect(response.headers["access-control-allow-origin"]).toBe("https://store.prg32.dream.test");
+    expect(response.headers["access-control-allow-origin"]).toBe("https://store.prg32.test");
     expect(response.headers["access-control-allow-credentials"]).toBe("true");
     await app.close();
   });
@@ -81,19 +81,19 @@ describe("dual-origin CORS boundary", () => {
         NODE_ENV: "test",
         PRG32_BACKEND_DB: databasePath,
         PRG32_BACKEND_STORE_DATA: root,
-        PRG32_BACKEND_FRONTEND_PUBLIC_ORIGIN: "https://store.prg32.dream.test",
-        PRG32_BACKEND_FEDERATION_PUBLIC_ORIGIN: "https://api.prg32.dream.test",
-        PRG32_BACKEND_OIDC_PUBLIC_ORIGIN: "https://api.prg32.dream.test"
+        PRG32_BACKEND_FRONTEND_PUBLIC_ORIGIN: "https://store.prg32.test",
+        PRG32_BACKEND_FEDERATION_PUBLIC_ORIGIN: "https://api.prg32.test",
+        PRG32_BACKEND_OIDC_PUBLIC_ORIGIN: "https://api.prg32.test"
       }),
       logger: false
     });
     const response = await app.inject({ method: "GET", url: "/.well-known/prg32-store.json", headers: { host: "attacker.example.test", "x-forwarded-host": "attacker.example.test" } });
     expect(response.statusCode).toBe(200);
     const discovery = response.json<{ api: string; web: string; services: { cartridges: string; multiplayer: string } }>();
-    expect(discovery.api).toBe("https://api.prg32.dream.test/api");
-    expect(discovery.web).toBe("https://store.prg32.dream.test/");
-    expect(discovery.services.cartridges).toBe("https://api.prg32.dream.test/api/games");
-    expect(discovery.services.multiplayer).toBe("wss://api.prg32.dream.test/api/multiplayer");
+    expect(discovery.api).toBe("https://api.prg32.test/api");
+    expect(discovery.web).toBe("https://store.prg32.test/");
+    expect(discovery.services.cartridges).toBe("https://api.prg32.test/api/games");
+    expect(discovery.services.multiplayer).toBe("wss://api.prg32.test/api/multiplayer");
     expect(response.body).not.toContain("attacker.example.test");
     await app.close();
   });

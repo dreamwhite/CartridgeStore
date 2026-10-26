@@ -59,7 +59,7 @@ const SAMPLE_APPROVAL: CartridgeApprovedEmailData = {
   version: "1.0.0",
   reviewerName: "Store administrator",
   storeName: "PRG32 Cartridge Store",
-  publicOrigin: "https://store.prg32.dream.test",
+  publicOrigin: "https://store.prg32.test",
 };
 
 export function renderCartridgeApprovedEmail(data: CartridgeApprovedEmailData, settings: EmailTemplateSettings = DEFAULT_EMAIL_TEMPLATE_SETTINGS): RenderedEmailTemplate {

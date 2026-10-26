@@ -1,6 +1,7 @@
 import { createMDX } from "fumadocs-mdx/next";
 
 const configuredApiOrigin = process.env.NEXT_PUBLIC_PRG32_API_ORIGIN?.trim();
+const configuredStoreOrigin = process.env.NEXT_PUBLIC_PRG32_STORE_ORIGIN?.trim();
 const configuredDistDir = process.env.PRG32_NEXT_DIST_DIR?.trim();
 const isProductionBuild = process.env.NODE_ENV === "production";
 
@@ -39,7 +40,7 @@ if (
 const nextConfig = {
   reactStrictMode: true,
   allowedDevOrigins: [
-    process.env.PRG32_STORE_DOMAIN?.trim() || "store.prg32.dream.test",
+    process.env.PRG32_STORE_DOMAIN?.trim() || "store.prg32.test",
   ],
   env: {
     NEXT_PUBLIC_AUTH_INTEGRATION_ENABLED: "true",
@@ -47,6 +48,9 @@ const nextConfig = {
       process.env.PRG32_UI93_AUTHENTICATED === "1" ? "true" : "false",
     ...(configuredApiOrigin
       ? { NEXT_PUBLIC_PRG32_API_ORIGIN: configuredApiOrigin }
+      : {}),
+    ...(configuredStoreOrigin
+      ? { NEXT_PUBLIC_PRG32_STORE_ORIGIN: configuredStoreOrigin }
       : {}),
   },
   output: "standalone",

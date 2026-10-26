@@ -17,9 +17,9 @@ function candidateEnvironment(overrides: NodeJS.ProcessEnv = {}): NodeJS.Process
     PRG32_BACKEND_AUTH_WRITE_MODE: "test",
     PRG32_BACKEND_AUTH_WRITE_DB: "/disposable/canonical/store.sqlite",
     PRG32_BACKEND_AUTH_DISPOSABLE_ROOT: "/disposable/canonical",
-    PRG32_BACKEND_FRONTEND_PUBLIC_ORIGIN: "https://store.prg32.dream.test",
-    PRG32_BACKEND_FEDERATION_PUBLIC_ORIGIN: "https://api.prg32.dream.test",
-    PRG32_BACKEND_OIDC_PUBLIC_ORIGIN: "https://api.prg32.dream.test",
+    PRG32_BACKEND_FRONTEND_PUBLIC_ORIGIN: "https://store.prg32.test",
+    PRG32_BACKEND_FEDERATION_PUBLIC_ORIGIN: "https://api.prg32.test",
+    PRG32_BACKEND_OIDC_PUBLIC_ORIGIN: "https://api.prg32.test",
     PRG32_BACKEND_MDNS_ENABLED: "false",
     PRG32_BACKEND_BACKUP_ENABLED: "false",
     PRG32_BACKEND_SESSION_SECRET: "candidate-session-secret-that-is-longer-than-32-bytes",
@@ -39,7 +39,7 @@ describe("configuration preflight", () => {
     const result = validatePreflightConfiguration(candidateEnvironment({
       PRG32_STORE_DB: "/legacy/store.sqlite",
       PRG32_BACKEND_STORE_DATA: "/disposable/other",
-      PRG32_BACKEND_FRONTEND_PUBLIC_ORIGIN: "http://store.prg32.dream.test/login"
+      PRG32_BACKEND_FRONTEND_PUBLIC_ORIGIN: "http://store.prg32.test/login"
     }), "candidate");
     expect(result.ok).toBe(false);
     expect(result.checks.filter((check) => check.status === "FAIL").map((check) => check.id)).toEqual(expect.arrayContaining([
@@ -124,12 +124,12 @@ describe("federation configuration preflight", () => {
       jwksUri: "https://idp.example.test/jwks",
       clientId: "prg32-store",
       clientAuthMethod: "none",
-      redirectUri: "https://api.prg32.dream.test/api/auth/oidc/generic/callback",
+      redirectUri: "https://api.prg32.test/api/auth/oidc/generic/callback",
       scopes: ["openid", "profile", "email"],
       pkce: true,
       state: true,
       nonce: true
-    }, "https://api.prg32.dream.test");
+    }, "https://api.prg32.test");
     expect(checks.every((check) => check.status === "PASS")).toBe(true);
   });
 
@@ -141,47 +141,47 @@ describe("federation configuration preflight", () => {
       jwksUri: "https://idp.example.test/jwks",
       clientId: "prg32-store",
       clientAuthMethod: "client_secret_basic",
-      redirectUri: "https://store.prg32.dream.test/api/auth/oidc/generic/callback",
+      redirectUri: "https://store.prg32.test/api/auth/oidc/generic/callback",
       scopes: ["openid"],
       pkce: true,
       state: true,
       nonce: true
-    }, "https://api.prg32.dream.test");
+    }, "https://api.prg32.test");
     expect(checks.find((check) => check.id === "oidc_callback_bound")?.status).toBe("FAIL");
   });
 
   it("requires signed SAML responses, assertions and replay protection", () => {
     const checks = validateSamlContract({
       providerId: "generic",
-      spEntityId: "https://api.prg32.dream.test/saml/sp",
-      acsUrl: "https://api.prg32.dream.test/api/auth/saml/generic/acs",
+      spEntityId: "https://api.prg32.test/saml/sp",
+      acsUrl: "https://api.prg32.test/api/auth/saml/generic/acs",
       idpEntityId: "https://idp.example.test/saml",
       idpSsoUrl: "https://idp.example.test/saml/sso",
       idpSigningCertificateReference: "secret-ref:saml-idp-cert",
       wantAssertionsSigned: true,
       wantAuthnResponseSigned: true,
       allowedBinding: "HTTP-POST",
-      audience: "https://api.prg32.dream.test/saml/sp",
-      destination: "https://api.prg32.dream.test/api/auth/saml/generic/acs",
-      recipient: "https://api.prg32.dream.test/api/auth/saml/generic/acs",
+      audience: "https://api.prg32.test/saml/sp",
+      destination: "https://api.prg32.test/api/auth/saml/generic/acs",
+      recipient: "https://api.prg32.test/api/auth/saml/generic/acs",
       replayProtection: true
-    }, "https://api.prg32.dream.test");
+    }, "https://api.prg32.test");
     expect(checks.every((check) => check.status === "PASS")).toBe(true);
     const rejected = validateSamlContract({
       providerId: "generic",
-      spEntityId: "https://api.prg32.dream.test/saml/sp",
-      acsUrl: "https://api.prg32.dream.test/api/auth/saml/generic/acs",
+      spEntityId: "https://api.prg32.test/saml/sp",
+      acsUrl: "https://api.prg32.test/api/auth/saml/generic/acs",
       idpEntityId: "https://idp.example.test/saml",
       idpSsoUrl: "https://idp.example.test/saml/sso",
       idpSigningCertificateReference: "secret-ref:saml-idp-cert",
       wantAssertionsSigned: false,
       wantAuthnResponseSigned: true,
       allowedBinding: "HTTP-POST",
-      audience: "https://api.prg32.dream.test/saml/sp",
-      destination: "https://api.prg32.dream.test/api/auth/saml/generic/acs",
-      recipient: "https://api.prg32.dream.test/api/auth/saml/generic/acs",
+      audience: "https://api.prg32.test/saml/sp",
+      destination: "https://api.prg32.test/api/auth/saml/generic/acs",
+      recipient: "https://api.prg32.test/api/auth/saml/generic/acs",
       replayProtection: false
-    }, "https://api.prg32.dream.test");
+    }, "https://api.prg32.test");
     expect(rejected.find((check) => check.id === "saml_signature_policy")?.status).toBe("FAIL");
     expect(rejected.find((check) => check.id === "saml_replay_protection")?.status).toBe("FAIL");
   });

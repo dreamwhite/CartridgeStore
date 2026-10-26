@@ -49,7 +49,7 @@ function fixture(): { readonly root: string; readonly databasePath: string; read
     PRG32_BACKEND_BOOTSTRAP_TOKEN: BOOTSTRAP,
     PRG32_BACKEND_SESSION_SECURE: "false"
     ,PRG32_BACKEND_EMAIL_TRANSPORT: "memory"
-    ,PRG32_BACKEND_EMAIL_PUBLIC_ORIGIN: "https://store.prg32.dream.test"
+    ,PRG32_BACKEND_EMAIL_PUBLIC_ORIGIN: "https://store.prg32.test"
     ,PRG32_BACKEND_SETUP_NETWORK_TEST_ALLOWLIST: "127.0.0.1"
   });
   const app = buildApp({ config, logger: false });
